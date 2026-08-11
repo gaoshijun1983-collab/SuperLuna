@@ -214,6 +214,20 @@
               "overall_completion_evidence": {"not": {"enum": ["", "none"]}}
             }
           }
+        },
+        {
+          "if": {
+            "required": ["status"],
+            "properties": {
+              "status": {"const": "review_submit_pending"}
+            }
+          },
+          "then": {
+            "properties": {
+              "response_complete": {"const": false},
+              "response_valid_for_apply": {"const": false}
+            }
+          }
         }
       ]
     },

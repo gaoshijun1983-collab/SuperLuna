@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import re
 import tomllib
@@ -9,6 +10,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL_ROOT = ROOT / "skills" / "luna-chatgpt-review-loop"
+LCRL_SCRIPT = SKILL_ROOT / "scripts" / "lcrl.py"
+LCRL_SPEC = importlib.util.spec_from_file_location("lcrl_package_test", LCRL_SCRIPT)
+lcrl = importlib.util.module_from_spec(LCRL_SPEC)
+assert LCRL_SPEC and LCRL_SPEC.loader
+LCRL_SPEC.loader.exec_module(lcrl)
 
 
 class PackageTests(unittest.TestCase):
@@ -149,6 +155,39 @@ class PackageTests(unittest.TestCase):
             ),
             {"", "none"},
         )
+
+    def test_published_review_submit_pending_schema_rejects_actionable_response(self):
+        state = lcrl.new_state("a1", "implementation", ".", "review-chat")
+        state["review"].update({
+            "status": "review_submit_pending",
+            "current_stage": "A1",
+            "cycle_id": "cycle-1",
+            "submission_fingerprint": "fingerprint-1",
+            "response_complete": True,
+            "response_valid_for_apply": True,
+        })
+        with self.assertRaisesRegex(
+            lcrl.LCRLError,
+            "review_submit_pending cannot contain an actionable response",
+        ):
+            lcrl.validate_state(state)
+
+        schema = json.loads(
+            (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        review = schema["properties"]["review"]
+        pending_rules = [
+            rule
+            for rule in review["allOf"]
+            if rule.get("if", {}).get("properties", {}).get("status", {}).get("const")
+            == "review_submit_pending"
+        ]
+        self.assertEqual(len(pending_rules), 1)
+        pending_response = pending_rules[0]["then"]["properties"]
+        self.assertFalse(pending_response["response_complete"]["const"])
+        self.assertFalse(pending_response["response_valid_for_apply"]["const"])
 
     def test_published_state_schema_accepts_runtime_naming_versions(self):
         schema = json.loads(
