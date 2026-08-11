@@ -13,8 +13,13 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.40`; the latest archive remains
-Alpha 27. Controller 48 / Skill revision `2026-08-12.2` removes a local-summary
+The current source candidate is `0.2.0-alpha.41`; the latest archive remains
+Alpha 27. Controller 49 / Skill revision `2026-08-12.3` fixes the observed
+submission-reopen navigation-timeout stall: an uncertain first navigation is
+reconciled only on the same opened tab, and the reopen lease no longer grants
+send permission. A fresh pre-send controller gate now requires the same active
+lease, fingerprint, browser, conversation, clean request identity, and at least
+60 seconds for confirmation. Controller 48 removes a local-summary
 overclaim: `closure-check` now reports that it executes only the 15 built-in
 controller selftests, explicitly marks the repository suite as not run, and no
 longer labels repository-only scenarios as verified by that command. Repository

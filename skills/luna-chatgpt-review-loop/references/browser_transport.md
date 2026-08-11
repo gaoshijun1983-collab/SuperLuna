@@ -99,6 +99,23 @@ remain fail-closed. An ordinary provider tab may use the same lease only after
 both current listings have lost its exact URL; this never authorizes a new Chat,
 different conversation, duplicate send, or skipped page verification.
 
+If the first `goto` or navigation call for that authorized open times out, the
+**navigation result is uncertain**; the timeout is not proof that loading has
+stopped. Keep and **inspect the same opened tab** after one bounded settle wait
+within the existing ten-minute lease. Re-read its current URL, title, page body,
+authentication state, Extreme label, and composer. This reconciliation **must
+not open, navigate, or reload again**, and it grants no second reopen
+authorization. After the same tab passes every page and identity check, call
+`authorize-browser-submission-send` with the current fingerprint, browser id,
+and reopen lease. Only `browser_submission_send_authorized` permits the one
+visible send. Return its `revision` through
+`confirm-review-submission --browser-send-authorization-revision`; the reopen
+authorization itself never authorizes sending. The caller **must not close the tab merely because the navigation
+call timed out**. If that same tab then passes every identity check, use the
+original lease for the single send and confirmation. Otherwise release the
+lease and stop in `review_submit_pending`; do not send, reopen, or create a
+replacement Chat.
+
 Complete page/login/Extreme/composer checks before requesting this lease whenever
 the exact tab is already visible. After authorization, perform only the final
 identity check, one send, and immediate submission confirmation. Never resend if

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Fixed the real Windows submission-reopen stall in controller 49 / Skill
+  revision `2026-08-12.3`. A first canonical-URL navigation call that times out
+  is now treated as uncertain and reconciled only on the same opened tab,
+  without a second open, navigation, reload, or Chat. The reopen authorization
+  no longer grants send permission. After the page is verified, a new
+  `authorize-browser-submission-send` gate rechecks the active lease,
+  fingerprint, browser, bound conversation, empty request identity, and at
+  least 60 seconds of remaining lease time. Submission confirmation requires
+  that fresh state revision. This adds no real-device or Public Beta credit
+  until retested on the frozen candidate.
 - Fixed a second published-schema false green in the Alpha 40 candidate. The
   schema previously accepted `review.status="review_submit_pending"` while
   `response_complete` or `response_valid_for_apply` was true, although runtime

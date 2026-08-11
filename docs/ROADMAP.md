@@ -37,6 +37,10 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
   extend this path to ordinary user tabs or promoted provider identities.
   Complete visual page checks before requesting the lease, then send and confirm
   immediately; a visible but unconfirmed request is never resent.
+  Treat a first canonical-URL navigation timeout as uncertain: reconcile only
+  the same opened tab without another open/navigation/reload, then require a
+  fresh controller pre-send gate with the same lease, fingerprint, browser, and
+  at least sixty seconds remaining for confirmation.
 - After submission, never preview or capture the full viewport. Capture only the
   new user-message region directly, or omit the screenshot and use its confirmed
   request identity, so a fast reply cannot leak into the submitting occurrence.

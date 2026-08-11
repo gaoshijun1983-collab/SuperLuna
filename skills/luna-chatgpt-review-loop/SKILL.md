@@ -212,6 +212,19 @@ python -B <skill-root>/scripts/lcrl.py confirm-review-mode \
 provider 标签只有在两个当前列表都不存在其精确 URL 时，才能使用同一受权重开路径；它不会
 因此获得换 Chat、新建 Chat、重复发送或跳过页面核验的权限。
 
+提交重开的第一次 `goto`/导航调用若超时，**navigation result is uncertain**；工具超时本身
+不证明页面已经停止加载。必须保留并 **inspect the same opened tab**：在现有十分钟 lease
+内做一次有界的同标签稳定等待，然后重新读取该标签的当前 URL、标题、页面主体、登录状态、
+“极高”和 composer。此协调过程 **must not open, navigate, or reload again**，也不得申请第二份
+重开授权。若原页面随后满足全部核验条件，必须在发送前立即调用
+`authorize-browser-submission-send --state <state-file> --fingerprint <本轮正文身份> --browser-id <当前browser.browserId> --lease-id <重开lease>`；
+只有返回 `browser_submission_send_authorized` 才允许沿用原 lease 发送一次，并把返回的
+`revision` 作为 `confirm-review-submission --browser-send-authorization-revision` 交回控制器。
+实现任务
+**must not close the tab merely because the navigation call timed out**。只有同一标签在有界协调后
+仍无法证明是精确固定 Chat，或明确显示网络/登录错误时，才释放 lease、关闭该未核验标签并
+保持 `review_submit_pending`；绝不发送、重开第二次或创建替代 Chat。
+
 发送后只接受基线以后新出现、正文一致且身份唯一的用户消息作为回执。网络结果不确定时
 不得重发；只在同一标签协调可见回执。旧轮次同文消息、多个候选、换 Chat、换正文或
 丢失上下文都必须失败关闭。

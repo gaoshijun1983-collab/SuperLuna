@@ -54,6 +54,16 @@
    提交受权 browser 换绑并清除 lease。普通用户标签、已提升 provider identity、旧 fingerprint、换成第三个 browser 或缺少 lease 证明
    均失败关闭。
 
+   第一次 `goto`/导航调用超时时，**navigation result is uncertain**，不能把工具超时直接当成
+   页面确定失败。保留并 **inspect the same opened tab**，在原十分钟 lease 内只做一次有界稳定
+   等待，再核验当前 URL、标题、页面主体、登录状态、“极高”和 composer；这一协调过程
+   **must not open, navigate, or reload again**，也不产生第二份提交授权。实现任务
+   **must not close the tab merely because the navigation call timed out**。同一标签随后通过全部核验
+   时，必须调用 `authorize-browser-submission-send` 并交回当前 fingerprint、browser id 与原
+   reopen lease；只有 `browser_submission_send_authorized` 才允许单次发送，确认时还必须传回
+   `--browser-send-authorization-revision`。仍不可核验时释放 lease 并保持 `review_submit_pending`，不得发送、
+   第二次重开或创建替代 Chat。
+
 普通用户选择并已绑定的固定 Chat 若在后续回合也同时消失于两个当前标签列表，遵循通用
 `canonical_url_reopen_allowed` 合同：只能在受权 occurrence 内打开原 URL 一次并重新核验，
 不能创建替代 Chat、改变 conversation 或在仍有精确 URL 对象时重复开标签。

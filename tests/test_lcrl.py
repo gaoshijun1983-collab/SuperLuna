@@ -2986,6 +2986,10 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(
                 reopened["browser_binding"]["provider_tab_id"], "provider-tab-1"
             )
+            send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="bound-existing-chat-B2",
+                browser_id="iab-restarted-instance", lease_id=reopened["lease_id"],
+            ))
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="bound-existing-chat",
@@ -2994,6 +2998,7 @@ class ControllerTests(unittest.TestCase):
                 submitted_at=lcrl.utc_now(),
                 browser_reopen_lease_id=reopened["lease_id"],
                 browser_id="iab-restarted-instance",
+                browser_send_authorization_revision=send_authorized["revision"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)
@@ -3117,6 +3122,7 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertEqual(authorized["action"], "browser_submission_reopen_authorized")
             self.assertTrue(authorized["open_canonical_url_once"])
+            self.assertFalse(authorized["send_allowed_after_verification"])
             self.assertEqual(
                 authorized["browser_binding"]["conversation_url"],
                 "https://chatgpt.com/c/provisioned-resubmit",
@@ -3134,6 +3140,25 @@ class ControllerTests(unittest.TestCase):
                     native_app_instance_id=None, attachment_name=None,
                     submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
                 ))
+            with self.assertRaisesRegex(lcrl.LCRLError, "fresh browser submission send"):
+                lcrl.confirm_review_submission_command(Namespace(
+                    state=str(state_path), reviewer_thread_id="provisioned-resubmit",
+                    request_turn_id="turn-B2", request_message_id="message-B2",
+                    native_app_instance_id=None, attachment_name=None,
+                    submitted_at=lcrl.utc_now(),
+                    browser_reopen_lease_id=authorized["lease_id"],
+                    browser_id="iab-provisioned-resubmit",
+                ))
+
+            send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="provisioned-resubmit-B2",
+                browser_id="iab-provisioned-resubmit",
+                lease_id=authorized["lease_id"],
+            ))
+            self.assertEqual(
+                send_authorized["action"], "browser_submission_send_authorized"
+            )
+            self.assertTrue(send_authorized["send_allowed"])
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="provisioned-resubmit",
@@ -3142,6 +3167,7 @@ class ControllerTests(unittest.TestCase):
                 submitted_at=lcrl.utc_now(),
                 browser_reopen_lease_id=authorized["lease_id"],
                 browser_id="iab-provisioned-resubmit",
+                browser_send_authorization_revision=send_authorized["revision"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)
@@ -3174,6 +3200,18 @@ class ControllerTests(unittest.TestCase):
                 "browser_submission_reopen_authorized",
             )
             self.assertTrue(recovered_existing["open_canonical_url_once"])
+            expired = lcrl.load_state(ordinary_path)
+            expired_revision = expired["revision"]
+            expired["runtime"]["action_lease_expires_at"] = "2000-01-01T00:00:00Z"
+            lcrl.save_state(ordinary_path, expired, expected_revision=expired_revision)
+            send_forbidden = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(ordinary_path), fingerprint="ordinary-B2",
+                browser_id="iab-ordinary", lease_id=recovered_existing["lease_id"],
+            ))
+            self.assertEqual(
+                send_forbidden["action"], "browser_submission_send_forbidden"
+            )
+            self.assertFalse(send_forbidden["send_allowed"])
 
     def test_new_implementation_task_can_authorize_and_confirm_provisioned_chat_startup_rebind(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3288,6 +3326,10 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertEqual(reopened["action"], "browser_submission_reopen_authorized")
             self.assertTrue(reopened["open_canonical_url_once"])
+            send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="existing-chat-B1",
+                browser_id="implementation-browser", lease_id=reopened["lease_id"],
+            ))
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="existing-chat",
@@ -3296,6 +3338,7 @@ class ControllerTests(unittest.TestCase):
                 submitted_at=lcrl.utc_now(),
                 browser_reopen_lease_id=reopened["lease_id"],
                 browser_id="implementation-browser",
+                browser_send_authorization_revision=send_authorized["revision"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)
@@ -3390,6 +3433,11 @@ class ControllerTests(unittest.TestCase):
                     browser_id="iab-different-instance",
                 ))
 
+            send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="restarted-browser-B3",
+                browser_id="iab-new-instance", lease_id=authorized["lease_id"],
+            ))
+
             confirmed = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="restarted-browser-chat",
                 request_turn_id="turn-B3", request_message_id="message-B3",
@@ -3397,6 +3445,7 @@ class ControllerTests(unittest.TestCase):
                 submitted_at=lcrl.utc_now(),
                 browser_reopen_lease_id=authorized["lease_id"],
                 browser_id="iab-new-instance",
+                browser_send_authorization_revision=send_authorized["revision"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)

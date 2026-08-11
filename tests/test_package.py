@@ -745,6 +745,30 @@ class PackageTests(unittest.TestCase):
         self.assertIn("any fixed Chat already bound", transport)
         self.assertIn("never authorizes a new Chat", transport)
 
+    def test_submission_reopen_navigation_timeout_is_reconciled_on_same_tab(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        provisioning = (
+            SKILL_ROOT / "references" / "browser_chat_provisioning.md"
+        ).read_text(encoding="utf-8")
+        for text in (skill, transport, provisioning):
+            normalized = " ".join(text.split())
+            self.assertIn("navigation result is uncertain", normalized)
+            self.assertIn("inspect the same opened tab", normalized)
+            self.assertIn("must not open, navigate, or reload again", normalized)
+            self.assertIn(
+                "must not close the tab merely because the navigation call timed out",
+                normalized,
+            )
+            self.assertIn("authorize-browser-submission-send", normalized)
+            self.assertIn("browser_submission_send_authorized", normalized)
+            self.assertIn("--browser-send-authorization-revision", normalized)
+        normalized_transport = " ".join(transport.split())
+        self.assertIn("within the existing ten-minute lease", normalized_transport)
+        self.assertIn("no second reopen authorization", normalized_transport)
+
     def test_explicit_existing_chat_without_provider_identity_uses_url_only_binding(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(

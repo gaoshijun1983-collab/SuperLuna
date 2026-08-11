@@ -3,14 +3,26 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.40`（Python 元数据：`0.2.0a40`）
-- 当前源码控制器：48（Alpha 27 归档仍为旧源码）
+- 版本：`0.2.0-alpha.41`（Python 元数据：`0.2.0a41`）
+- 当前源码控制器：49（Alpha 27 归档仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-12.2`
+- 当前源码 Skill 修订：`2026-08-12.3`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 本阶段主要更新
+
+### 0R. 提交重开导航超时不再直接结束闭环
+
+- 真实 UNSEEN Memory 测试中，第 13 轮已经进入 `review_submit_pending`，但固定 Chat 的首次
+  canonical URL 导航调用在十秒工具窗口超时。旧 Skill 直接关闭标签、释放 lease 并结束，
+  没有先确认同一标签是否仍在继续加载。
+- 控制器 49 将重开授权与发送授权拆开：首次导航结果不确定时只能在同一已打开标签协调，
+  不得再次打开、导航、刷新或创建 Chat。页面通过核验后必须调用
+  `authorize-browser-submission-send`；只有活动 lease、fingerprint、browser、固定 conversation、
+  空请求身份全部匹配且剩余确认时间不少于 60 秒时才允许发送。
+- `confirm-review-submission` 还必须收到该发送前授权的 state revision。该本地修复尚未在真实
+  Windows Chat 上复测，因此连续真实闭环仍为 0/10，Public Beta 仍为 false。
 
 ### 0Q. 待提交状态不再携带可应用响应
 
@@ -589,7 +601,7 @@
 
 ## 截至 2026-08-12 的实际验证
 
-- repository unittest：186/186 通过。
+- repository unittest：187/187 通过。
 - App Chat identity 专项：23/23 通过。
 - 控制器 selftest：15/15 通过。
 - closure-check：`ok=true` 仅表示 15 项内置 selftest 通过；`repository_tests_run=false`、
