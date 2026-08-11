@@ -19,7 +19,9 @@ Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 当前源码候选是 `0.2.0-alpha.40`，最新归档仍为 Alpha 27。控制器 48 / Skill revision
 `2026-08-12.2` 消除一项本地摘要过度声明：`closure-check` 现在明确只执行 15 项内置
 controller selftest，并把仓库测试标为未运行，不再把只有仓库回归覆盖的情形写成已由本命令
-验证。仓库测试、真实设备证据与 Public Beta 发布门继续独立判定。控制器 47 / Skill revision
+验证。仓库测试、真实设备证据与 Public Beta 发布门继续独立判定。同一 Alpha 40 候选还让
+`review_submit_pending` 的发布合同与运行时一致：请求尚未提交时，响应不得标记为完整或可应用。
+控制器 47 / Skill revision
 `2026-08-12.1` 修复发布 schema 的一项假绿：只有在 `waiting_only` 模式下处于
 `review_receipt_pending` / `review_waiting` 时，等待检查才允许激活；离开该边界后 token、
 automation ID 与 claim ID 必须全部清空。JSON Schema 无法表达的跨字段身份相等关系仍由

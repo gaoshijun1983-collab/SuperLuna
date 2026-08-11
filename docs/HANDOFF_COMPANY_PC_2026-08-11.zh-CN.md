@@ -50,7 +50,7 @@ Windows UNSEEN Memory 真实零干预复测结果为 **1/3**，不是通过：
 
 当前已经通过：
 
-- repository unittest：185/185
+- repository unittest：186/186
 - controller selftest：15/15
 - Skill quick validator：PASS
 - plugin validator：PASS

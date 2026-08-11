@@ -12,6 +12,14 @@
 
 ## 本阶段主要更新
 
+### 0Q. 待提交状态不再携带可应用响应
+
+- 运行时会拒绝 `review_submit_pending` 同时带有完整或可应用响应，但旧发布 schema 仍会接受，
+  因而下游只按发布合同校验时可能把尚未提交的轮次误认为已有可应用回执。
+- 先加入发布 schema 与运行时校验器的失败反例，再用最小条件规则要求该状态下
+  `response_complete=false` 且 `response_valid_for_apply=false`。
+- 本修复只同步本地发布合同，不增加真实设备闭环或 Public Beta 证据。
+
 ### 0P. closure-check 不再把未执行的仓库测试写成已验证
 
 - `closure-check` 实际只运行 15 项内置 controller selftest，但旧摘要把五个仓库级场景统一
@@ -581,7 +589,7 @@
 
 ## 截至 2026-08-12 的实际验证
 
-- repository unittest：185/185 通过。
+- repository unittest：186/186 通过。
 - App Chat identity 专项：23/23 通过。
 - 控制器 selftest：15/15 通过。
 - closure-check：`ok=true` 仅表示 15 项内置 selftest 通过；`repository_tests_run=false`、

@@ -18,7 +18,10 @@ Alpha 27. Controller 48 / Skill revision `2026-08-12.2` removes a local-summary
 overclaim: `closure-check` now reports that it executes only the 15 built-in
 controller selftests, explicitly marks the repository suite as not run, and no
 longer labels repository-only scenarios as verified by that command. Repository
-tests, real-device evidence, and Public Beta gates remain separate. Controller
+tests, real-device evidence, and Public Beta gates remain separate. The same
+Alpha 40 candidate also aligns the published `review_submit_pending` contract
+with runtime validation: a response cannot be complete or actionable before
+the review request is submitted. Controller
 47 / Skill revision `2026-08-12.1` closes a published-
 schema false green: a waiting check may now be active only when the runtime is
 in `review_receipt_pending` or `review_waiting` under `waiting_only` mode, and

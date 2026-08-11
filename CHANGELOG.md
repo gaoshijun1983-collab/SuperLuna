@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed a second published-schema false green in the Alpha 40 candidate. The
+  schema previously accepted `review.status="review_submit_pending"` while
+  `response_complete` or `response_valid_for_apply` was true, although runtime
+  validation rejects actionable response evidence before a review request is
+  submitted. A package regression now compares the published contract with the
+  runtime validator, and the schema forces both response flags false at that
+  boundary. This local contract correction adds no real-device or Beta credit.
 - Fixed a deterministic `closure-check` evidence overclaim in controller 48 /
   Skill revision `2026-08-12.2`. The command executes only the 15 built-in
   controller selftests, but its five repository-level scenarios were all

@@ -61,6 +61,9 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 - Keep waiting-check activity, token presence, and stale-identity cleanup tied
   to the exact runtime waiting-only status boundary in the published schema;
   leave claim/automation id equality explicitly controller-enforced.
+- Keep `review_submit_pending` response-completion and apply-validity flags false
+  in both runtime validation and the published schema until a review request has
+  actually been submitted.
 - Keep the runtime policy locks in the published schema as required constants,
   including the review-transport/control-source relationship.
 - Require the runtime's durable confirmation evidence and confirmed-mode trust
