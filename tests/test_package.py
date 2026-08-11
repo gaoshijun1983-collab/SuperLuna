@@ -776,6 +776,9 @@ class PackageTests(unittest.TestCase):
         closure = report["automated_evidence"]["controller_closure_check"]
         self.assertTrue(closure["passed"])
         self.assertEqual(closure["scope"], "local_controller_only")
+        self.assertEqual(closure["executed_checks"], ["controller_selftest"])
+        self.assertFalse(closure["repository_tests_run"])
+        self.assertIsNone(closure["repository_tests_passed"])
         self.assertFalse(closure["real_device_gate_passed"])
         self.assertFalse(closure["public_beta_gate_passed"])
         self.assertEqual(report["real_device_evidence"]["consecutive_real_project_cycles"], 0)

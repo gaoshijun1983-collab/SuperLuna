@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fixed a deterministic `closure-check` evidence overclaim in controller 48 /
+  Skill revision `2026-08-12.2`. The command executes only the 15 built-in
+  controller selftests, but its five repository-level scenarios were all
+  labelled "covered by local tests", which could be read as a fresh repository
+  test result even when that suite had not run or was failing. The result now
+  publishes `executed_checks=["controller_selftest"]`, explicitly reports the
+  repository suite as not run with an unknown pass result, and marks those five
+  scenarios `not_run_by_closure_check`. Real-device and Public Beta gates remain
+  false; no real-platform credit changed.
 - Updated the validation workflow to `actions/checkout@v7` and
   `actions/setup-python@v7`. Both official action releases use the Node 24
   runtime, removing the GitHub-hosted runner warning that the older Node 20

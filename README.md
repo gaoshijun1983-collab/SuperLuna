@@ -13,8 +13,13 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.39`; the latest archive remains
-Alpha 27. Controller 47 / Skill revision `2026-08-12.1` closes a published-
+The current source candidate is `0.2.0-alpha.40`; the latest archive remains
+Alpha 27. Controller 48 / Skill revision `2026-08-12.2` removes a local-summary
+overclaim: `closure-check` now reports that it executes only the 15 built-in
+controller selftests, explicitly marks the repository suite as not run, and no
+longer labels repository-only scenarios as verified by that command. Repository
+tests, real-device evidence, and Public Beta gates remain separate. Controller
+47 / Skill revision `2026-08-12.1` closes a published-
 schema false green: a waiting check may now be active only when the runtime is
 in `review_receipt_pending` or `review_waiting` under `waiting_only` mode, and
 all waiting identities must be cleared outside that boundary. Cross-field

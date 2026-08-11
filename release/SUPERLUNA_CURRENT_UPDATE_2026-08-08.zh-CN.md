@@ -3,14 +3,24 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.39`（Python 元数据：`0.2.0a39`）
-- 当前源码控制器：47（Alpha 27 归档仍为旧源码）
+- 版本：`0.2.0-alpha.40`（Python 元数据：`0.2.0a40`）
+- 当前源码控制器：48（Alpha 27 归档仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-12.1`
+- 当前源码 Skill 修订：`2026-08-12.2`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 本阶段主要更新
+
+### 0P. closure-check 不再把未执行的仓库测试写成已验证
+
+- `closure-check` 实际只运行 15 项内置 controller selftest，但旧摘要把五个仓库级场景统一
+  标为“本地测试覆盖”。即使仓库回归未运行或失败，该命令仍会输出同样的绿摘要。
+- 控制器 48 让输出明确发布 `executed_checks=["controller_selftest"]`、
+  `repository_tests_run=false` 与 `repository_tests_passed=null`，五个仓库级场景统一标为
+  `not_run_by_closure_check`。
+- `ok=true` 现在只表示内置 selftest 通过；仓库测试必须另行执行。真实设备与 Public Beta
+  门继续为 false，本修复不增加任何真机或发布证据。
 
 ### 0O. 等待检查的发布 schema 不再假绿
 
@@ -574,7 +584,8 @@
 - repository unittest：185/185 通过。
 - App Chat identity 专项：23/23 通过。
 - 控制器 selftest：15/15 通过。
-- closure-check：`ok=true`，且 `scope=local_controller_only`、真实设备门与 Public Beta 门均为 false。
+- closure-check：`ok=true` 仅表示 15 项内置 selftest 通过；`repository_tests_run=false`、
+  `repository_tests_passed=null`，真实设备门与 Public Beta 门均为 false。
 - 当前 skill-creator quick validator：PASS。
 - 当前 plugin-creator validator：PASS。
 - Windows 内置浏览器只读抽查：`https://chatgpt.com/` 页面可读，未显示限流或网络错误；

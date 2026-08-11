@@ -531,9 +531,18 @@ class ControllerTests(unittest.TestCase):
         result = lcrl.closure_check()
         self.assertTrue(result["ok"])
         self.assertEqual(result["scope"], "local_controller_only")
+        self.assertEqual(result["executed_checks"], ["controller_selftest"])
+        self.assertFalse(result["repository_tests_run"])
+        self.assertIsNone(result["repository_tests_passed"])
+        self.assertTrue(all(
+            status == "not_run_by_closure_check"
+            for status in result["checks"].values()
+        ))
         self.assertFalse(result["real_device_gate_passed"])
         self.assertFalse(result["public_beta_gate_passed"])
         rendered = json.dumps(result, ensure_ascii=False)
+        self.assertIn("仓库测试未执行", rendered)
+        self.assertNotIn("本地测试覆盖", rendered)
         self.assertNotIn("闭环可用", rendered)
         self.assertNotIn("这一轮已经完成", rendered)
 

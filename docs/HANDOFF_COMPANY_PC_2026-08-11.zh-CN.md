@@ -17,11 +17,11 @@ SuperLuna 是 Codex 插件，不是独立桌面软件。产品由插件、交互
 
 ## 2. 当前源码基线
 
-- 包版本：`0.2.0-alpha.39`
-- Python 版本：`0.2.0a39`
+- 包版本：`0.2.0-alpha.40`
+- Python 版本：`0.2.0a40`
 - 控制器：47
 - 状态 schema：7
-- Skill revision：`2026-08-12.1`
+- Skill revision：`2026-08-12.2`
 - 当前源码尚未重新打包；最新历史归档仍是 Alpha 27。
 - Public Beta：`false`
 
@@ -54,7 +54,8 @@ Windows UNSEEN Memory 真实零干预复测结果为 **1/3**，不是通过：
 - controller selftest：15/15
 - Skill quick validator：PASS
 - plugin validator：PASS
-- closure-check：PASS，但作用域仅为 `local_controller_only`
+- closure-check：仅 15 项内置 selftest PASS；仓库测试未由该命令执行，作用域为
+  `local_controller_only`
 
 在公司电脑克隆后，从项目根目录运行：
 
@@ -81,7 +82,7 @@ cd SuperLuna
 1. 完整阅读 `AGENTS.md`、`README.md`、`README.zh-CN.md`、`docs/ROADMAP.md`、
    `CHANGELOG.md`、`release/alpha_release_report.json` 和当前更新说明。
 2. 运行第 4 节全部验证。
-3. 确认源码控制器仍是 47、Skill revision 仍是 `2026-08-12.1`。
+3. 确认源码控制器仍是 48、Skill revision 仍是 `2026-08-12.2`。
 4. 不要自动覆盖公司电脑的已安装 Skill；先比较版本，再由用户确认是否安装。
 5. 不要继承旧电脑的浏览器标签、Chat 身份、automation ID、等待 token 或项目绝对路径。
 6. 新的真实测试必须在公司电脑重新绑定唯一固定 Chat，并重新建立机器本地状态。

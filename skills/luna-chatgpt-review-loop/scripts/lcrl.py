@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 47
-SKILL_REVISION = "2026-08-12.1"
+CONTROLLER_VERSION = 48
+SKILL_REVISION = "2026-08-12.2"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -5380,22 +5380,25 @@ def closure_check() -> dict[str, Any]:
     """Summarize local controller coverage without claiming a release gate."""
     selftest()
     checks = {
-        "主任务自主提交、等待、读取和继续": "本地测试覆盖",
-        "四个中断位置恢复": "本地测试覆盖",
-        "防重复提交、读取和应用": "本地测试覆盖",
-        "退役后台入口无副作用": "本地测试覆盖",
-        "等待检查排队补跑零副作用": "本地测试覆盖",
+        "主任务自主提交、等待、读取和继续": "not_run_by_closure_check",
+        "四个中断位置恢复": "not_run_by_closure_check",
+        "防重复提交、读取和应用": "not_run_by_closure_check",
+        "退役后台入口无副作用": "not_run_by_closure_check",
+        "等待检查排队补跑零副作用": "not_run_by_closure_check",
     }
     return {
         "ok": True,
-        "result": "本地控制器自检通过",
+        "result": "控制器内置 selftest 通过；仓库测试未执行",
         "scope": "local_controller_only",
+        "executed_checks": ["controller_selftest"],
+        "repository_tests_run": False,
+        "repository_tests_passed": None,
         "real_device_gate_passed": False,
         "public_beta_gate_passed": False,
         "checks": checks,
         "user_status": "正在开发",
-        "user_message": "本地控制器自检通过；真实设备与公开 Beta 发布门仍未完成。",
-        "user_next_choice": "继续完成真实设备和发布证据验证。",
+        "user_message": "控制器内置 selftest 通过；仓库测试、真实设备与公开 Beta 发布门均未由本命令验证。",
+        "user_next_choice": "另行运行仓库测试，并继续完成真实设备和发布证据验证。",
     }
 
 
