@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Updated the validation workflow to `actions/checkout@v7` and
+  `actions/setup-python@v7`. Both official action releases use the Node 24
+  runtime, removing the GitHub-hosted runner warning that the older Node 20
+  actions were being forced onto Node 24. Product runtime behavior and release
+  metadata are unchanged.
 - Fixed a published-schema false green in controller 47 / Skill revision
   `2026-08-12.1`. The release schema previously accepted an active waiting
   check during local work, and accepted stale waiting identities after the
