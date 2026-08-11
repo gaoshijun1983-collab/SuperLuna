@@ -13,8 +13,13 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.38`; the latest archive remains
-Alpha 27. Controller 46 / Skill revision `2026-08-11.11` makes the legacy
+The current source candidate is `0.2.0-alpha.39`; the latest archive remains
+Alpha 27. Controller 47 / Skill revision `2026-08-12.1` closes a published-
+schema false green: a waiting check may now be active only when the runtime is
+in `review_receipt_pending` or `review_waiting` under `waiting_only` mode, and
+all waiting identities must be cleared outside that boundary. Cross-field
+identity equality that JSON Schema cannot express remains controller-enforced,
+and the full nested schema audit remains open. Controller 46 makes the legacy
 `--replace` flag unable to preempt any active lease. Same-task serial recovery
 remains limited to ordinary orphaned `turn_entry` or `apply_result` leases;
 cross-task, waiting-read, and browser-reopen leases fail closed regardless of

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Fixed a published-schema false green in controller 47 / Skill revision
+  `2026-08-12.1`. The release schema previously accepted an active waiting
+  check during local work, and accepted stale waiting identities after the
+  runtime left `review_receipt_pending` / `review_waiting`, although runtime
+  validation rejects both states. A failing package regression now requires
+  the schema to activate the check and token only at the exact waiting-only
+  boundary and to clear the token, automation id, and claim id everywhere
+  else. Cross-field id equality remains controller-enforced, so the full nested
+  schema audit and Public Beta gates remain open.
 - Fixed a lease-preemption hole in controller 46 / Skill revision
   `2026-08-11.11`. The legacy `guard --replace` flag previously bypassed the
   active-lease branch outside waiting states, allowing a caller to clear a

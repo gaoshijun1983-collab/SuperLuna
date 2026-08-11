@@ -3,14 +3,24 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.38`（Python 元数据：`0.2.0a38`）
-- 当前源码控制器：46（Alpha 27 归档仍为旧源码）
+- 版本：`0.2.0-alpha.39`（Python 元数据：`0.2.0a39`）
+- 当前源码控制器：47（Alpha 27 归档仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-11.11`
+- 当前源码 Skill 修订：`2026-08-12.1`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 本阶段主要更新
+
+### 0O. 等待检查的发布 schema 不再假绿
+
+- 运行时只允许 `waiting_only` 且状态为 `review_receipt_pending` /
+  `review_waiting` 时激活等待检查，但旧发布 schema 仍会接受本地开发状态中的
+  活跃等待 token，也会接受离开等待边界后遗留的 automation / claim ID。
+- 先加入失败的包反例，再为 schema 增加一条最小跨段规则：只在精确等待边界
+  要求 active + 非 `none` token，其他情况必须清空 token、automation ID 和 claim ID。
+- JSON Schema 无法表达的 claim ID 与 automation ID 跨字段相等仍由控制器强制；
+  `published_state_schema_nested_contract_complete` 仍为 false，本地修复不增加真机或 Beta 证据。
 
 ### 0N. `--replace` 不再绕过活动 lease
 
@@ -559,9 +569,9 @@
 - 更深的 progress、routing、Pro、Terra 配额账本及 review 阶段跨字段关系仍未宣称完整。
   本修复不改 controller 30、schema 7 或包版本，也不生成 ZIP。
 
-## 截至 2026-08-10 的实际验证
+## 截至 2026-08-12 的实际验证
 
-- repository unittest：184/184 通过。
+- repository unittest：185/185 通过。
 - App Chat identity 专项：23/23 通过。
 - 控制器 selftest：15/15 通过。
 - closure-check：`ok=true`，且 `scope=local_controller_only`、真实设备门与 Public Beta 门均为 false。
@@ -599,8 +609,8 @@
 
 ## 仍未完成
 
-- 发布 schema 与运行时合同仍需继续嵌套层级审计；当前已补齐 naming template 1–3 和全部
-  运行时顶层段落，但未宣称跨字段状态机不变量整体等价。
+- 发布 schema 与运行时合同仍需继续嵌套层级审计；当前已补齐 naming template 1–3、全部
+  运行时顶层段落和等待活动/身份清理边界，但未宣称跨字段状态机不变量整体等价。
 - closure-check 仍是控制器自检摘要，不是完整真实设备发布门。
 - 旧 3 轮、控制器 21 的 4 个浏览器回合及控制器 22 的新 Chat 初始化只保留为历史/缺陷证据；
   控制器 24 / Skill `.4` 本次有 10 次互动但只有 9 次 apply-valid，隔离后的有效尾段为 4/10；

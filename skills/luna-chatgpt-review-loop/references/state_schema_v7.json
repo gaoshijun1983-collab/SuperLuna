@@ -608,6 +608,47 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "required": ["automation", "review"],
+        "properties": {
+          "automation": {
+            "required": ["heartbeat_mode"],
+            "properties": {"heartbeat_mode": {"const": "waiting_only"}}
+          },
+          "review": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "enum": ["review_receipt_pending", "review_waiting"]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "automation": {
+            "properties": {
+              "waiting_check_active": {"const": true},
+              "waiting_check_token": {"not": {"const": "none"}}
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "automation": {
+            "properties": {
+              "waiting_check_active": {"const": false},
+              "waiting_check_token": {"const": "none"},
+              "waiting_check_automation_id": {"const": "none"},
+              "waiting_check_claimed_id": {"const": "none"}
+            }
+          }
+        }
+      }
     }
   ],
   "additionalProperties": true

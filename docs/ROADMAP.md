@@ -58,6 +58,9 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 - Keep every runtime-required top-level state section declared and required by
   the published schema; continue auditing nested invariants without treating
   top-level parity as full contract equivalence.
+- Keep waiting-check activity, token presence, and stale-identity cleanup tied
+  to the exact runtime waiting-only status boundary in the published schema;
+  leave claim/automation id equality explicitly controller-enforced.
 - Keep the runtime policy locks in the published schema as required constants,
   including the review-transport/control-source relationship.
 - Require the runtime's durable confirmation evidence and confirmed-mode trust

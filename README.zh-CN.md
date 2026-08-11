@@ -16,8 +16,11 @@ Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 
 ## 当前源码状态
 
-当前源码候选是 `0.2.0-alpha.38`，最新归档仍为 Alpha 27。控制器 46 / Skill revision
-`2026-08-11.11` 让兼容参数 `--replace` 不再跳过任何活动 lease：同任务串行恢复仍只允许普通
+当前源码候选是 `0.2.0-alpha.39`，最新归档仍为 Alpha 27。控制器 47 / Skill revision
+`2026-08-12.1` 修复发布 schema 的一项假绿：只有在 `waiting_only` 模式下处于
+`review_receipt_pending` / `review_waiting` 时，等待检查才允许激活；离开该边界后 token、
+automation ID 与 claim ID 必须全部清空。JSON Schema 无法表达的跨字段身份相等关系仍由
+控制器强制执行，完整嵌套 schema 核查仍未完成。控制器 46 让兼容参数 `--replace` 不再跳过任何活动 lease：同任务串行恢复仍只允许普通
 `turn_entry` / `apply_result`，不同任务、等待读取和浏览器重开 lease 无论是否传参都失败关闭。
 控制器 45 在唯一单次等待项真正绑定前禁止提交 turn 结束，并允许同一实施任务的后续
 串行 turn 原子替换遗留的普通入口或结果应用 lease；不同任务与等待/浏览器 lease 仍不可抢占。

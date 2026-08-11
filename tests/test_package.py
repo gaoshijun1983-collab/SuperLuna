@@ -482,6 +482,50 @@ class PackageTests(unittest.TestCase):
         self.assertIn("第一项可执行动作必须是", skill)
         self.assertIn("first executable action", protocol.lower())
 
+    def test_published_wait_state_schema_rejects_runtime_invalid_wait_binding(self):
+        schema = json.loads(
+            (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        monitor_statuses = {"review_receipt_pending", "review_waiting"}
+        wait_state_rules = [
+            rule
+            for rule in schema["allOf"]
+            if rule.get("if", {}).get("properties", {}).get("automation", {})
+            .get("properties", {}).get("heartbeat_mode", {}).get("const")
+            == "waiting_only"
+            and set(
+                rule.get("if", {}).get("properties", {}).get("review", {})
+                .get("properties", {}).get("status", {}).get("enum", [])
+            )
+            == monitor_statuses
+        ]
+
+        self.assertEqual(len(wait_state_rules), 1)
+        wait_state_rule = wait_state_rules[0]
+        active = wait_state_rule["then"]["properties"]["automation"]["properties"]
+        inactive = wait_state_rule["else"]["properties"]["automation"]["properties"]
+        self.assertTrue(active["waiting_check_active"]["const"])
+        self.assertEqual(active["waiting_check_token"]["not"]["const"], "none")
+        self.assertFalse(inactive["waiting_check_active"]["const"])
+        for field in (
+            "waiting_check_token",
+            "waiting_check_automation_id",
+            "waiting_check_claimed_id",
+        ):
+            self.assertEqual(inactive[field]["const"], "none")
+
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+        self.assertIn(
+            'MONITOR_STATUSES = {"review_receipt_pending", "review_waiting"}',
+            source,
+        )
+        self.assertIn(
+            "status in MONITOR_STATUSES and heartbeat_mode == \"waiting_only\"",
+            source,
+        )
+
     def test_source_tree_contains_no_python_cache_artifacts(self):
         artifacts = [
             path for path in ROOT.rglob("*")
