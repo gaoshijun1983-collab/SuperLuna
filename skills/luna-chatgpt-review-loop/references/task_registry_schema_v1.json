@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SuperLuna Task Binding Registry V1 (LCRL compatibility)",
+  "type": "object",
+  "required": ["schema_version", "revision", "updated_at", "tasks"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "revision": {"type": "integer", "minimum": 0},
+    "updated_at": {"type": "string"},
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "task_id",
+          "display_name",
+          "implementation_thread_id",
+          "reviewer_thread_id",
+          "automation_id",
+          "iteration",
+          "work_status_label",
+          "titles",
+          "naming_template_version",
+          "updated_at"
+        ]
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,52 @@
+# V8 P0 binding registry
+
+## Purpose
+
+Keep exactly one formal Chat reviewer bound to each implementation task. A legacy recovery automation ID may remain during migration, but new foreground-only bindings use `none`. Treat stable Work and Chat IDs as truth and titles as a user-facing projection.
+
+## Registry location
+
+Store the mutable registry outside the Skill directory, normally at:
+
+```text
+<codex-root>/lcrl/registry/tasks.json
+```
+
+Use schema [task_registry_schema_v1.json](task_registry_schema_v1.json).
+
+## Readable title contract
+
+Generate titles with the controller; do not hand-build variants:
+
+```text
+🛠 <display_name>｜执行｜<iteration>
+💬 <display_name>｜评审｜<iteration>
+⏳ <display_name>｜等待｜<iteration>
+```
+
+Keep `display_name` at most 12 characters and each iteration/status component at most 12 characters. The leading symbols form a fixed visual role set; use identical `display_name` and `iteration` for all three surfaces. Model and reasoning choices are deliberately excluded because they can change without changing the binding.
+
+`register-binding` returns `title_actions`. The active task must apply the implementation-task title with the Codex task title tool, apply the reviewer title only to the already selected dedicated Chat, and use the waiting title for any one-shot waiting check. Then it must verify the visible titles before the first formal submission. The controller records intent; it cannot silently rename App surfaces by itself.
+
+Update titles only on initial binding, iteration change, blocker, completion, or handoff. Never rename from a heartbeat poll.
+
+## Uniqueness
+
+Require every active registry entry to have a unique:
+
+- `task_id`
+- `implementation_thread_id`
+- `reviewer_thread_id`
+- `automation_id`, only when a legacy automation still exists
+
+Reject a second formal Chat for one Work, a Chat reused by two Works, duplicate legacy automations, or stale generated titles. Do not create a new task, Chat, or automation to repair a naming problem.
+
+## New Chat discovery
+
+The App orchestration layer may remove manual ID copying by taking a read-only `list_threads` snapshot before the user creates a regular Chat and another snapshot afterward. Pass both snapshots to `discover-reviewer-chat`. The controller considers only `kind=chatgpt`, never creates state or a registry entry, and returns one confirmation candidate only when the new stable identity is unambiguous. Zero or multiple candidates fail closed. A visible title may narrow the candidates but never replaces the stable ID or the user's confirmation.
+
+## Recovery
+
+If a user manually renames a surface, keep the binding because its stable ID is unchanged. Regenerate and apply the expected title at the next explicit naming event. If an ID changes, invalidate the confirmation lease and require the user to select the replacement Chat.
+
+If registry and state diverge, stop formal submission, run `doctor-registry` and `doctor`, then re-register the existing stable IDs. Never infer identity from a similar title.

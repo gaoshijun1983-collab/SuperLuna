@@ -1,0 +1,7 @@
+[LCRL_HEARTBEAT_V8_P0_BEGIN]
+使用 $luna-chatgpt-review-loop 退出一张旧恢复检查。
+v={{controller_version}} r={{skill_revision}} a={{automation_id}}
+state={{state_file}}
+运行：python -B "{{cli_path}}" tick --source heartbeat --state "{{state_file}}"
+固定恢复检查已经退役。上述命令只能返回 monitor_retired。不得读取 Chat、开发、提交、应用结果、取得 lease 或补跑旧检查；请暂停这张自动任务并立即结束。真正恢复只能由用户在前台说“继续”或“恢复”后运行 tick --source foreground。
+[LCRL_HEARTBEAT_V8_P0_END]

@@ -1,0 +1,4 @@
+interface:
+  display_name: "SuperLuna"
+  short_description: "让 Codex 实施、App Chat 评审，并安全继续原任务"
+  default_prompt: "使用 $luna-chatgpt-review-loop 启动或恢复 SuperLuna 闭环；检查只在等待 Chat 时存在。"

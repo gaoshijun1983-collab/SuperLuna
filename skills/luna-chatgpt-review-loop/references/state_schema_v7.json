@@ -1,0 +1,614 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SuperLuna State V7 with V8/LCRL compatibility fields",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "revision",
+    "created_at",
+    "updated_at",
+    "automation",
+    "policy",
+    "confirmation",
+    "capabilities",
+    "review",
+    "review_history",
+    "browser_binding",
+    "binding",
+    "attachment",
+    "capability_probes",
+    "next_operation",
+    "model_policy",
+    "recovery",
+    "alternative",
+    "runtime"
+  ],
+  "properties": {
+    "schema_version": {"const": 7},
+    "revision": {"type": "integer", "minimum": 1},
+    "created_at": {"type": "string"},
+    "updated_at": {"type": "string"},
+    "automation": {
+      "type": "object",
+      "required": [
+        "id",
+        "implementation_thread_id",
+        "project_path",
+        "profile",
+        "interval_minutes",
+        "heartbeat_mode",
+        "title",
+        "waiting_check_token",
+        "waiting_check_active",
+        "waiting_check_automation_id",
+        "waiting_check_claimed_id"
+      ],
+      "properties": {
+        "id": {"type": "string"},
+        "implementation_thread_id": {"type": "string"},
+        "project_path": {"type": "string"},
+        "profile": {"type": "string"},
+        "interval_minutes": {"enum": [0, 3]},
+        "heartbeat_mode": {"enum": ["foreground_only", "waiting_only", "legacy_fixed"]},
+        "title": {"type": "string"},
+        "waiting_check_token": {
+          "type": "string",
+          "description": "Identity of the single currently authorized future waiting-check occurrence; rotated before updating the stable platform heartbeat."
+        },
+        "waiting_check_active": {"type": "boolean"},
+        "waiting_check_automation_id": {
+          "type": "string",
+          "description": "Stable platform heartbeat identity for the live waiting phase; consecutive future occurrences may reuse it."
+        },
+        "waiting_check_claimed_id": {
+          "type": "string",
+          "description": "Platform heartbeat identity claimed by the current occurrence; cleared only by an authorized rearm or phase exit."
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"heartbeat_mode": {"const": "foreground_only"}}},
+          "then": {"properties": {"interval_minutes": {"const": 0}}}
+        },
+        {
+          "if": {"properties": {"heartbeat_mode": {"const": "waiting_only"}}},
+          "then": {"properties": {"interval_minutes": {"const": 0}}}
+        },
+        {
+          "if": {"properties": {"heartbeat_mode": {"const": "legacy_fixed"}}},
+          "then": {"properties": {"interval_minutes": {"const": 3}}}
+        }
+      ]
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "implementation_role",
+        "reviewer_kind",
+        "review_quota_source",
+        "codex_review_forbidden",
+        "transport_locked",
+        "reviewer_read_only",
+        "reviewer_reasoning_required",
+        "reviewer_reasoning_control"
+      ],
+      "properties": {
+        "implementation_role": {"enum": ["luna_medium", "terra_medium"]},
+        "reviewer_kind": {"const": "chatgpt"},
+        "review_quota_source": {"const": "chatgpt"},
+        "codex_review_forbidden": {"const": true},
+        "transport_locked": {"const": true},
+        "reviewer_read_only": {"const": true},
+        "reviewer_reasoning_required": {"const": "extreme"},
+        "reviewer_reasoning_control": {
+          "enum": ["manual_app_chat", "in_app_browser"]
+        }
+      }
+    },
+    "confirmation": {
+      "type": "object",
+      "required": [
+        "lease_id",
+        "reviewer_thread_id",
+        "reviewer_context_mode",
+        "confirmed_at",
+        "valid",
+        "invalidated_reason",
+        "reviewer_reasoning_mode",
+        "reviewer_reasoning_confirmed",
+        "reviewer_reasoning_confirmed_at",
+        "reviewer_reasoning_control_source",
+        "reviewer_reasoning_observed_label",
+        "reviewer_reasoning_observed_thread_id",
+        "reviewer_reasoning_native_app_instance_id"
+      ],
+      "properties": {
+        "lease_id": {"type": "string"},
+        "reviewer_thread_id": {"type": "string"},
+        "reviewer_context_mode": {"const": "existing_chat"},
+        "confirmed_at": {"type": "string"},
+        "valid": {"type": "boolean"},
+        "invalidated_reason": {"type": "string"},
+        "reviewer_reasoning_mode": {"enum": ["unconfirmed", "extreme"]},
+        "reviewer_reasoning_confirmed": {"type": "boolean"},
+        "reviewer_reasoning_confirmed_at": {"type": "string"},
+        "reviewer_reasoning_control_source": {"enum": ["none", "user", "main_app", "native_app", "in_app_browser"]},
+        "reviewer_reasoning_observed_label": {"type": "string"},
+        "reviewer_reasoning_observed_thread_id": {"type": "string"},
+        "reviewer_reasoning_native_app_instance_id": {"type": "string"}
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "required": ["attachment_send", "filesystem_read"],
+      "properties": {
+        "chat_list": {"type": "boolean"},
+        "chat_read": {"type": "boolean"},
+        "chat_send": {"type": "boolean"},
+        "chat_create": {"type": "string"},
+        "attachment_send": {"enum": ["native", "manual", "unavailable"]},
+        "filesystem_read": {"enum": ["inline", "mcp_verified", "unavailable"]}
+      }
+    },
+    "review": {
+      "type": "object",
+      "required": [
+        "current_stage",
+        "status",
+        "goal_mode",
+        "overall_completion_confirmed",
+        "overall_completion_evidence",
+        "cycle_id",
+        "submission_fingerprint",
+        "request_turn_id",
+        "request_message_id",
+        "request_persisted_at",
+        "request_stage",
+        "request_reasoning_mode",
+        "request_native_app_instance_id",
+        "response_turn_id",
+        "response_message_id",
+        "response_completed_at",
+        "response_complete",
+        "response_envelope_hash",
+        "response_stage",
+        "response_valid_for_apply",
+        "response_quarantined_reason"
+      ],
+      "properties": {
+        "transport": {"enum": ["app_chat_review", "in_app_browser"]},
+        "goal_mode": {"enum": ["continuous", "single_stage"]},
+        "overall_completion_confirmed": {"type": "boolean"},
+        "overall_completion_evidence": {"type": "string"},
+        "status": {
+          "enum": [
+            "local_work",
+            "review_submit_pending",
+            "review_receipt_pending",
+            "review_waiting",
+            "result_received",
+            "result_quarantined",
+            "external_blocked",
+            "completed"
+          ]
+        },
+        "cycle_id": {"type": "string"},
+        "request_reasoning_mode": {"enum": ["none", "extreme", "unconfirmed", "legacy"]},
+        "request_native_app_instance_id": {"type": "string"},
+        "response_complete": {"type": "boolean"},
+        "response_valid_for_apply": {"type": "boolean"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": ["goal_mode", "status"],
+            "properties": {
+              "goal_mode": {"const": "continuous"},
+              "status": {"const": "completed"}
+            }
+          },
+          "then": {
+            "required": ["overall_completion_confirmed", "overall_completion_evidence"],
+            "properties": {
+              "overall_completion_confirmed": {"const": true},
+              "overall_completion_evidence": {"not": {"enum": ["", "none"]}}
+            }
+          }
+        }
+      ]
+    },
+    "review_history": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {"type": "object"}
+    },
+    "browser_binding": {
+      "type": "object",
+      "required": [
+          "status",
+          "browser_id",
+          "provider_tab_id",
+          "provisioned_chat",
+          "conversation_id",
+        "conversation_url",
+        "observed_title",
+        "bound_at"
+      ],
+      "properties": {
+        "status": {"enum": ["not_applicable", "unbound", "bound"]},
+        "browser_id": {
+          "type": "string",
+          "description": "Stable in-app browser binding identity, not a run-local tab handle."
+        },
+          "provider_tab_id": {
+            "type": "string",
+            "description": "Provider-owned tab identity used to reclaim the same user tab in a later waiting occurrence."
+          },
+          "provisioned_chat": {
+            "type": "boolean",
+            "description": "True only when this reviewer Chat was created under the current task's explicit one-time provisioning authorization."
+          },
+        "conversation_id": {"type": "string"},
+        "conversation_url": {"type": "string"},
+        "observed_title": {"type": "string"},
+        "bound_at": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "binding": {
+      "type": "object",
+      "required": ["status", "registry_path", "task_id", "display_name", "iteration", "work_status_label", "naming_template_version", "expected_work_title", "expected_chat_title", "expected_automation_title"],
+      "properties": {
+        "status": {"enum": ["unbound", "bound"]},
+        "naming_template_version": {"enum": [1, 2, 3]}
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "required": ["required", "verification", "expected_names", "observed_names", "verified_at"],
+      "properties": {
+        "verification": {"enum": ["not_required", "unverified", "verified", "manual_confirmed", "unavailable"]},
+        "expected_names": {"type": "array", "items": {"type": "string"}},
+        "observed_names": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "capability_probes": {
+      "type": "object",
+      "required": ["terra_next_turn"],
+      "properties": {"terra_next_turn": {"enum": ["unverified", "supported", "unsupported"]}}
+    },
+    "next_operation": {
+      "type": "object",
+      "required": [
+        "status",
+        "path",
+        "sha256",
+        "source_response_message_id",
+        "source_stage",
+        "next_stage",
+        "result_hash",
+        "validated_at",
+        "applied_at"
+      ],
+      "properties": {
+        "status": {"enum": ["none", "validated", "applied"]}
+      }
+    },
+    "model_policy": {
+      "type": "object",
+      "required": [
+        "version",
+        "automatic_model_switch",
+        "automatic_thread_creation",
+        "executor",
+        "reviewer",
+        "progress",
+        "routing",
+        "pro",
+        "terra"
+      ],
+      "properties": {
+        "version": {"const": 5},
+        "automatic_model_switch": {"const": false},
+        "automatic_thread_creation": {"const": false},
+        "executor": {
+          "type": "object",
+          "required": ["default", "current"],
+          "properties": {
+            "default": {"enum": ["luna_medium", "terra_medium"]},
+            "current": {"enum": ["luna_medium", "terra_medium"]}
+          }
+        },
+        "reviewer": {
+          "type": "object",
+          "required": ["default", "current"],
+          "properties": {
+            "default": {"const": "sol_extreme"},
+            "current": {"enum": ["sol_extreme", "chat_pro"]}
+          }
+        },
+        "progress": {"type": "object"},
+        "routing": {"type": "object"},
+        "pro": {"type": "object"},
+        "terra": {"type": "object"}
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "properties": {
+        "network_state": {"enum": ["healthy", "disconnected", "recovering", "rate_limited"]},
+        "network_error_count": {"type": "integer", "minimum": 0},
+        "next_retry_not_before": {"type": "string"},
+        "browser_consecutive_network_errors": {"type": "integer", "minimum": 0},
+        "browser_consecutive_rate_limits": {"type": "integer", "minimum": 0},
+        "browser_last_observation_at": {"type": "string"},
+        "browser_reload_same_tab_required": {"type": "boolean"}
+      }
+    },
+    "alternative": {
+      "type": "object",
+      "required": ["sent", "scope", "fingerprint"],
+      "properties": {
+        "sent": {"type": "boolean"},
+        "scope": {"type": "string"},
+        "fingerprint": {"type": "string"}
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "codex_root",
+        "session_log",
+        "last_observed_runtime_timestamp",
+        "action_lease_id",
+        "action_lease_acquired_at",
+        "action_lease_expires_at",
+        "action_lease_reason",
+        "browser_submission_reopen_browser_id"
+      ],
+      "properties": {
+        "action_lease_id": {"type": "string"},
+        "action_lease_expires_at": {"type": "string"},
+        "browser_submission_reopen_browser_id": {
+          "type": "string",
+          "description": "Current in-app browser identity authorized by a submission-reopen lease; cleared with that lease."
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["policy"],
+        "properties": {
+          "policy": {
+            "required": ["implementation_role"],
+            "properties": {"implementation_role": {"const": "luna_medium"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "model_policy": {
+            "properties": {
+              "executor": {
+                "properties": {
+                  "default": {"const": "luna_medium"},
+                  "current": {"const": "luna_medium"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["policy"],
+        "properties": {
+          "policy": {
+            "required": ["implementation_role"],
+            "properties": {"implementation_role": {"const": "terra_medium"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "model_policy": {
+            "properties": {
+              "executor": {
+                "properties": {
+                  "default": {"const": "terra_medium"},
+                  "current": {"const": "terra_medium"}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["review"],
+        "properties": {
+          "review": {
+            "required": ["payload_mode"],
+            "properties": {"payload_mode": {"const": "mcp_readonly"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "properties": {"filesystem_read": {"const": "mcp_verified"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["capabilities"],
+        "properties": {
+          "capabilities": {
+            "required": ["filesystem_read"],
+            "properties": {"filesystem_read": {"const": "mcp_verified"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "review": {
+            "properties": {"payload_mode": {"const": "mcp_readonly"}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["review"],
+        "properties": {
+          "review": {
+            "required": ["transport"],
+            "properties": {"transport": {"const": "app_chat_review"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "reviewer_reasoning_control": {"const": "manual_app_chat"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["review"],
+        "properties": {
+          "review": {
+            "required": ["transport"],
+            "properties": {"transport": {"const": "in_app_browser"}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "policy": {
+            "properties": {
+              "reviewer_reasoning_control": {"const": "in_app_browser"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["review"],
+        "properties": {
+          "review": {
+            "required": ["status"],
+            "properties": {
+              "status": {
+                "enum": [
+                  "local_work",
+                  "review_submit_pending",
+                  "review_receipt_pending",
+                  "review_waiting",
+                  "result_received",
+                  "result_quarantined"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confirmation": {
+            "properties": {
+              "valid": {"const": true},
+              "reviewer_thread_id": {"not": {"enum": ["", "none"]}}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["confirmation"],
+        "properties": {
+          "confirmation": {
+            "required": ["reviewer_reasoning_confirmed"],
+            "properties": {"reviewer_reasoning_confirmed": {"const": true}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confirmation": {
+            "properties": {
+              "reviewer_reasoning_mode": {"const": "extreme"},
+              "reviewer_reasoning_control_source": {
+                "enum": ["user", "main_app", "native_app", "in_app_browser"]
+              },
+              "reviewer_reasoning_observed_label": {"const": "极高"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["review", "confirmation"],
+        "properties": {
+          "review": {
+            "required": ["transport"],
+            "properties": {"transport": {"const": "in_app_browser"}}
+          },
+          "confirmation": {
+            "required": ["reviewer_reasoning_confirmed"],
+            "properties": {"reviewer_reasoning_confirmed": {"const": true}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confirmation": {
+            "properties": {
+              "reviewer_reasoning_control_source": {"const": "in_app_browser"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["review", "confirmation"],
+        "properties": {
+          "review": {
+            "required": ["transport"],
+            "properties": {"transport": {"const": "app_chat_review"}}
+          },
+          "confirmation": {
+            "required": ["reviewer_reasoning_confirmed"],
+            "properties": {"reviewer_reasoning_confirmed": {"const": true}}
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "confirmation": {
+            "properties": {
+              "reviewer_reasoning_control_source": {
+                "enum": ["user", "main_app", "native_app"]
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "additionalProperties": true
+}

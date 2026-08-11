@@ -1,0 +1,34 @@
+{
+  "name": "luna-review-loop",
+  "version": "0.2.0-alpha.34",
+  "description": "A safe Codex implementation and ChatGPT review loop for Codex Desktop.",
+  "author": {
+    "name": "SuperLuna Contributors"
+  },
+  "keywords": [
+    "codex",
+    "chatgpt",
+    "review",
+    "workflow",
+    "local-first"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "SuperLuna",
+    "shortDescription": "A safe Codex and ChatGPT development loop.",
+    "longDescription": "Runs a simple, recoverable handoff between one Codex implementation task and one bound ChatGPT web conversation. Checks exist only while waiting for Chat, clear natural-language replies continue the original task once, and internal safety state stays hidden from routine use.",
+    "developerName": "SuperLuna Contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Local state",
+      "Independent review",
+      "Quota-aware orchestration"
+    ],
+    "defaultPrompt": [
+      "Start a SuperLuna development and web Chat review loop.",
+      "Diagnose my SuperLuna loop.",
+      "Resume SuperLuna safely."
+    ]
+  }
+}

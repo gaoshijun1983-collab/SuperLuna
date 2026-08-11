@@ -1,0 +1,15 @@
+{
+  "controller_version": 42,
+  "state_schema_version": 7,
+  "skill_revision": "2026-08-11.7",
+  "model_policy_version": 5,
+  "heartbeat_template": "references/heartbeat_v8_p0.txt",
+  "cli": "scripts/lcrl.py",
+  "default_transport": "in_app_browser",
+  "default_payload_mode": "inline_packet",
+  "heartbeat_interval_minutes": 0,
+  "heartbeat_mode": "waiting_only",
+  "browser_refresh_interval_seconds": 180,
+  "browser_rate_limit_backoff_seconds": [900, 1800, 3600],
+  "max_heartbeat_bytes": 1200
+}

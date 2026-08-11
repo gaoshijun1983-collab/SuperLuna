@@ -1,0 +1,9 @@
+[LCRL_HEARTBEAT_V7_BEGIN]
+使用 $luna-chatgpt-review-loop 执行一次 V7.8 短唤醒。
+controller_version: {{controller_version}}
+skill_revision: {{skill_revision}}
+automation_id: {{automation_id}}
+state_file: {{state_file}}
+运行：python -B "{{cli_path}}" tick --state "{{state_file}}"
+只执行 tick 返回的一项 action。local_work 绝不调用 App Chat，只能完成本地小步后转 review_submit_pending；只有 review_submit 可发送。所有 *_wait、concurrent_backoff、network_backoff 立即静默结束；所有 *_notify 只通知一次。apply_result 必须有 response_valid_for_apply=true。真实 action 后运行 release --state "{{state_file}}" --lease-id <tick返回值>。网络失败不重发、不并发写入、不切换 Chat/网页/Sol。每轮2分钟内结束并返回非空 heartbeat XML。
+[LCRL_HEARTBEAT_V7_END]

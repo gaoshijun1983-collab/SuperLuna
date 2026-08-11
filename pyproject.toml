@@ -1,0 +1,9 @@
+[project]
+name = "superluna"
+version = "0.2.0a34"
+description = "A safe Codex and ChatGPT development review loop"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.unittest]
+start-directory = "tests"
