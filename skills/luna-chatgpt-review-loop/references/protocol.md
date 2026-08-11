@@ -71,6 +71,12 @@ exception: its first action remains `waiting-check`, followed by
 `authorize-waiting-chat-read`; an ordinary user or coordinator message cannot
 claim that source.
 
+The compatibility `--replace` flag cannot preempt any active lease. A later
+serial turn may recover only an ordinary `turn_entry` or `apply_result` lease
+when it supplies the exact persisted implementation-task identity. Cross-task,
+waiting-read, and browser-reopen leases remain non-reclaimable with or without
+the flag.
+
 ## 3. Submit exactly once
 
 Immediately before the send, capture the same tab, conversation id, visible

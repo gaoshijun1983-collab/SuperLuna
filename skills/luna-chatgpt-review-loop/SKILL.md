@@ -76,11 +76,13 @@ python -B <skill-root>/scripts/lcrl.py guard \
 
 若返回 `action=waiting_turn_blocked`，本 turn 没有取得执行权：不得读取项目、修改文件、运行
 测试、初始化或读取浏览器、提交审阅、更新等待项或改变状态；直接保持“等待 Chat”并结束。
-`--replace` 不能绕过等待门。只有用户明确终止/重置当前闭环并由控制器完成状态迁移后，普通
+`--replace` 是兼容参数，不能绕过等待门，也不能抢占不同任务、等待读取或浏览器重开 lease。
+只有用户明确终止/重置当前闭环并由控制器完成状态迁移后，普通
 turn 才能重新取得执行权。
 同一实施任务若上一 turn 已结束、但遗留普通 `turn_entry` 或 `apply_result` lease，新的串行
 turn 可用同一个持久实施任务 ID 原子回收并重建 lease；不同任务、等待读取 lease、浏览器重开
-lease 或未提供精确任务 ID 时仍失败关闭。这只消除已结束 turn 的自阻塞，不是并发抢占。
+lease 或未提供精确任务 ID 时仍失败关闭；传入 `--replace` 也不会改变该判定。这只消除已结束
+turn 的自阻塞，不是并发抢占。
 
 唯一例外是平台到期的合法等待 occurrence：它的第一条动作仍必须是下文规定的
 `waiting-check`，而不是 `guard`。只有 `waiting-check` 与随后

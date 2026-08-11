@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fixed a lease-preemption hole in controller 46 / Skill revision
+  `2026-08-11.11`. The legacy `guard --replace` flag previously bypassed the
+  active-lease branch outside waiting states, allowing a caller to clear a
+  different task's ordinary lease or a protected browser-reopen lease. The
+  flag remains accepted for CLI compatibility but no longer changes lease
+  authorization. Exact same-task serial recovery still applies only to
+  orphaned `turn_entry` and `apply_result` leases. A failing regression now
+  covers cross-task and protected-lease preservation.
 - Converted three macOS branch failures into fail-closed controller behavior.
   Controller 45 no longer permits a submitted turn to end until its unique
   one-shot waiting job is actually bound, and a later serial turn from the

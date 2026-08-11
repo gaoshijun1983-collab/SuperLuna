@@ -13,8 +13,12 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.37`; the latest archive remains
-Alpha 27. Controller 45 / Skill revision `2026-08-11.10` keeps a submitted turn
+The current source candidate is `0.2.0-alpha.38`; the latest archive remains
+Alpha 27. Controller 46 / Skill revision `2026-08-11.11` makes the legacy
+`--replace` flag unable to preempt any active lease. Same-task serial recovery
+remains limited to ordinary orphaned `turn_entry` or `apply_result` leases;
+cross-task, waiting-read, and browser-reopen leases fail closed regardless of
+the flag. Controller 45 keeps a submitted turn
 active until its unique one-shot waiting job is bound and lets a later serial
 turn from the same implementation task replace an orphaned ordinary entry or
 result-application lease. Controller 44 additionally releases

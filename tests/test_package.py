@@ -71,6 +71,8 @@ class PackageTests(unittest.TestCase):
             "action=waiting_turn_blocked",
             "不得读取项目",
             "普通外部消息不能冒充等待 occurrence",
+            "`--replace` 是兼容参数",
+            "传入 `--replace` 也不会改变该判定",
         ):
             self.assertIn(requirement, skill)
         for requirement in (
@@ -78,6 +80,8 @@ class PackageTests(unittest.TestCase):
             "waiting_turn_blocked",
             "creates no action lease",
             "cannot\nclaim that source",
+            "cannot preempt any active lease",
+            "Cross-task,\nwaiting-read, and browser-reopen leases remain non-reclaimable",
         ):
             self.assertIn(requirement, protocol)
         for requirement in (

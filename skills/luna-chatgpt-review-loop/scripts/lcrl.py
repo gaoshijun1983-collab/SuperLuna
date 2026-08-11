@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 45
-SKILL_REVISION = "2026-08-11.10"
+CONTROLLER_VERSION = 46
+SKILL_REVISION = "2026-08-11.11"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -3951,7 +3951,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             "revision": revision,
         })
     recovered_same_task_lease = False
-    if active_action_lease(state) and not args.replace:
+    if active_action_lease(state):
         implementation_thread_id = str(
             getattr(args, "implementation_thread_id", None) or "none"
         ).strip()

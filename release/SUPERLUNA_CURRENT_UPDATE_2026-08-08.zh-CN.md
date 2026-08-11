@@ -3,14 +3,23 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.37`（Python 元数据：`0.2.0a37`）
-- 当前源码控制器：45（Alpha 27 归档仍为旧源码）
+- 版本：`0.2.0-alpha.38`（Python 元数据：`0.2.0a38`）
+- 当前源码控制器：46（Alpha 27 归档仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-11.10`
+- 当前源码 Skill 修订：`2026-08-11.11`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 本阶段主要更新
+
+### 0N. `--replace` 不再绕过活动 lease
+
+- 控制器 45 的串行恢复只应允许同一实施任务回收普通 `turn_entry` / `apply_result` lease，但
+  兼容参数 `--replace` 仍会跳过整个活动 lease 判定，能够清除不同任务或浏览器重开 lease。
+- 控制器 46 保留该 CLI 参数以兼容旧调用，但参数不再改变授权；精确同任务普通 lease 仍可按
+  既有规则恢复，不同任务、等待读取和浏览器重开 lease 全部失败关闭且保持原状态。
+- 反例先证明旧行为会抢占，再验证跨任务和受保护 lease 均保持不变。本地合同修复不增加真实
+  设备或 Public Beta 证据。
 
 ### 0M. 三支线真实测试后的等待绑定与串行恢复门
 
@@ -552,7 +561,7 @@
 
 ## 截至 2026-08-10 的实际验证
 
-- repository unittest：183/183 通过。
+- repository unittest：184/184 通过。
 - App Chat identity 专项：23/23 通过。
 - 控制器 selftest：15/15 通过。
 - closure-check：`ok=true`，且 `scope=local_controller_only`、真实设备门与 Public Beta 门均为 false。

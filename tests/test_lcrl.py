@@ -338,6 +338,47 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(apply_recovered["recovered_same_task_lease"])
             self.assertNotEqual(apply_recovered["lease_id"], apply_lease["lease_id"])
 
+    def test_guard_replace_cannot_preempt_cross_task_or_protected_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            first = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "unexpired action lease"):
+                lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry", replace=True,
+                    implementation_thread_id="different-task",
+                ))
+            self.assertEqual(
+                lcrl.load_state(state_path)["runtime"]["action_lease_id"],
+                first["lease_id"],
+            )
+
+            lcrl.release_action(Namespace(
+                state=str(state_path), lease_id=first["lease_id"], force=False,
+            ))
+            state = lcrl.load_state(state_path)
+            revision = state["revision"]
+            protected = lcrl.claim_action_lease(
+                state, "browser_submission_reopen", minutes=10,
+            )
+            state["runtime"]["browser_submission_reopen_browser_id"] = "browser-1"
+            lcrl.save_state(state_path, state, expected_revision=revision)
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "unexpired action lease"):
+                lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry", replace=True,
+                    implementation_thread_id="implementation",
+                ))
+            runtime = lcrl.load_state(state_path)["runtime"]
+            self.assertEqual(runtime["action_lease_id"], protected)
+            self.assertEqual(runtime["action_lease_reason"], "browser_submission_reopen")
+            self.assertEqual(
+                runtime["browser_submission_reopen_browser_id"], "browser-1",
+            )
+
     def test_scheduled_execution_is_retired_and_never_queues_an_action(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))
