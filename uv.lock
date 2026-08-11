@@ -4,5 +4,5 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "superluna"
-version = "0.2.0a35"
+version = "0.2.0a36"
 source = { virtual = "." }

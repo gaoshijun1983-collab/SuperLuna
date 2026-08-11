@@ -13,8 +13,11 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.35`; the latest archive remains
-Alpha 27. Controller 43 / Skill revision `2026-08-11.8` adds a mandatory
+The current source candidate is `0.2.0-alpha.36`; the latest archive remains
+Alpha 27. Controller 44 / Skill revision `2026-08-11.9` additionally releases
+an ordinary turn-entry lease atomically when its review submission is
+confirmed, so the first legal waiting check no longer stalls until the lease
+timeout. Controller 43 added a mandatory
 turn-entry guard after a real macOS external message woke a task whose saved
 state was still waiting for Chat and the task began modifying its project.
 Ordinary resumed turns now receive `waiting_turn_blocked`, no action lease, and

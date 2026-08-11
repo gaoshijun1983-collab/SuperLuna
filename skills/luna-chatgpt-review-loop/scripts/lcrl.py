@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 43
-SKILL_REVISION = "2026-08-11.8"
+CONTROLLER_VERSION = 44
+SKILL_REVISION = "2026-08-11.9"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -4046,6 +4046,16 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
         and _bound_browser_chat_can_reopen(state)
     ):
         raise LCRLError("browser submission reopen lease proof is invalid or expired")
+    submission_lease_id = reopen_lease_id
+    if (
+        submission_lease_id == "none"
+        and runtime.get("action_lease_reason") == "turn_entry"
+        and active_action_lease(state)
+    ):
+        # The entry lease protects local work and the visible send. Keeping it
+        # after a durable submission would make the first legal waiting check
+        # collide with work that has already finished.
+        submission_lease_id = str(runtime.get("action_lease_id") or "none")
     expected = sorted(state["attachment"].get("expected_names", [])) if review["payload_mode"] == "app_attachment" else []
     observed = sorted(args.attachment_name or [])
     if expected != observed:
@@ -4062,7 +4072,7 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
         filesystem_read=None, quarantine_unconfirmed=False, recovery_override=False,
         deleted_automation_id=getattr(args, "deleted_automation_id", None),
         release_action_lease_id=(
-            reopen_lease_id if reopen_lease_id != "none" else None
+            submission_lease_id if submission_lease_id != "none" else None
         ),
         browser_rebind_id=(
             reopen_browser_id if reopen_lease_id != "none" else None

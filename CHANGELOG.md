@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed a real Controller 43 dogfood regression where an ordinary
+  `turn_entry` lease survived a successful review submission. The first legal
+  waiting occurrence then returned `waiting_check_busy` and delayed the loop
+  until the full lease timeout. Controller 44 now releases that exact entry
+  lease atomically while confirming the submission; a regression test proves
+  the first bound waiting check can immediately return `review_poll`.
 - Fixed the deterministic part of an external-message wakeup bug. A normal new
   turn must now enter through `guard` before project or browser access. While
   the saved workflow is waiting for a receipt or reply, the controller returns

@@ -2072,6 +2072,11 @@ class ControllerTests(unittest.TestCase):
             state_path = self.make_state(root)
             self.transition(state_path, "review_submit_pending", stage="S1", fingerprint="submission-S1")
             lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at=None))
+            entry = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20,
+                reason="turn_entry", replace=False,
+            ))
+            self.assertNotEqual(entry["lease_id"], "none")
             confirmed = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="review-chat", request_turn_id="turn-S1",
                 request_message_id="message-S1", attachment_name=None, submitted_at=None,
@@ -2087,6 +2092,17 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(repeated["action"], "already_confirmed")
             self.assertEqual(repeated["waiting_check_action"], "schedule_once")
             self.assertEqual(repeated["waiting_check_token"], confirmed["waiting_check_token"])
+            state = lcrl.load_state(state_path)
+            self.assertEqual(state["runtime"]["action_lease_id"], "none")
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=confirmed["waiting_check_token"],
+                automation_id="wait-submission-S1",
+            ))
+            first_wait = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=confirmed["waiting_check_token"],
+                automation_id="wait-submission-S1",
+            ))
+            self.assertEqual(first_wait["action"], "review_poll")
 
     def test_resume_before_submission_keeps_the_review_unsubmitted(self):
         with tempfile.TemporaryDirectory() as directory:
