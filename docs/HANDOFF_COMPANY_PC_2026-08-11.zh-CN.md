@@ -67,10 +67,10 @@ python -X utf8 -B skills\luna-chatgpt-review-loop\scripts\lcrl.py closure-check
 
 ## 5. 公司电脑接手步骤
 
-私有仓库创建后，将下面占位地址替换为实际仓库地址：
+私有仓库：`https://github.com/gaoshijun1983-collab/SuperLuna`
 
 ```powershell
-git clone <PRIVATE_REPOSITORY_URL>
+git clone https://github.com/gaoshijun1983-collab/SuperLuna.git
 cd SuperLuna
 ```
 
