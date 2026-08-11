@@ -13,8 +13,11 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.36`; the latest archive remains
-Alpha 27. Controller 44 / Skill revision `2026-08-11.9` additionally releases
+The current source candidate is `0.2.0-alpha.37`; the latest archive remains
+Alpha 27. Controller 45 / Skill revision `2026-08-11.10` keeps a submitted turn
+active until its unique one-shot waiting job is bound and lets a later serial
+turn from the same implementation task replace an orphaned ordinary entry or
+result-application lease. Controller 44 additionally releases
 an ordinary turn-entry lease atomically when its review submission is
 confirmed, so the first legal waiting check no longer stalls until the lease
 timeout. Controller 43 added a mandatory

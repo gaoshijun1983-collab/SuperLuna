@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Converted three macOS branch failures into fail-closed controller behavior.
+  Controller 45 no longer permits a submitted turn to end until its unique
+  one-shot waiting job is actually bound, and a later serial turn from the
+  exact same implementation task may atomically replace an orphaned ordinary
+  `turn_entry` or `apply_result` lease. Different tasks and waiting/browser
+  leases remain non-reclaimable. The Skill now states the platform deletion
+  limitation explicitly: passing an automation id is not proof that an ACTIVE
+  job was deleted, so real runs must verify platform retirement.
 - Fixed a real Controller 43 dogfood regression where an ordinary
   `turn_entry` lease survived a successful review submission. The first legal
   waiting occurrence then returned `waiting_check_busy` and delayed the loop

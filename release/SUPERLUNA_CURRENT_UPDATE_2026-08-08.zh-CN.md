@@ -3,14 +3,23 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.36`（Python 元数据：`0.2.0a36`）
-- 当前源码控制器：44（Alpha 27 归档仍为旧源码）
+- 版本：`0.2.0-alpha.37`（Python 元数据：`0.2.0a37`）
+- 当前源码控制器：45（Alpha 27 归档仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-11.9`
+- 当前源码 Skill 修订：`2026-08-11.10`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 本阶段主要更新
+
+### 0M. 三支线真实测试后的等待绑定与串行恢复门
+
+- 提交确认后仅生成 waiting token 不再足以结束 turn；唯一未来 `RDATE` 等待项必须创建并通过
+  `bind-waiting-check` 绑定，否则控制器持续返回 `create_and_bind_waiting_check`、禁止结束。
+- 同一实施任务的新串行 turn 可原子替换已结束 turn 遗留的普通 `turn_entry` 或
+  `apply_result` lease；不同任务、等待读取与浏览器重开 lease 仍失败关闭。
+- 平台 automation 的真实删除仍不能由本地插件进程查询或物理证明；Skill 要求先取得平台删除
+  回执再消费回复，并在活动/完成边界复查不存在 ACTIVE 旧任务。真实测试遗留旧任务即判失败。
 
 ### 0L. 审阅提交后立即释放入口执行权
 
@@ -543,7 +552,7 @@
 
 ## 截至 2026-08-10 的实际验证
 
-- repository unittest：182/182 通过。
+- repository unittest：183/183 通过。
 - App Chat identity 专项：23/23 通过。
 - 控制器 selftest：15/15 通过。
 - closure-check：`ok=true`，且 `scope=local_controller_only`、真实设备门与 Public Beta 门均为 false。

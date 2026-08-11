@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 44
-SKILL_REVISION = "2026-08-11.9"
+CONTROLLER_VERSION = 45
+SKILL_REVISION = "2026-08-11.10"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -1777,6 +1777,17 @@ def user_status_exit(status: str) -> dict[str, Any]:
     }
 
 
+def waiting_check_binding_pending(state: dict[str, Any]) -> bool:
+    automation = state["automation"]
+    return bool(
+        state["review"]["status"] in MONITOR_STATUSES
+        and automation.get("heartbeat_mode") == "waiting_only"
+        and automation.get("waiting_check_active") is True
+        and automation.get("waiting_check_token", "none") != "none"
+        and automation.get("waiting_check_automation_id", "none") == "none"
+    )
+
+
 def add_platform_wait_contract(result: dict[str, Any]) -> dict[str, Any]:
     """Make the platform schedule shape explicit wherever one wait is requested."""
     output = dict(result)
@@ -1794,6 +1805,20 @@ def add_user_status_exit(result: dict[str, Any]) -> dict[str, Any]:
     output = add_platform_wait_contract(result)
     if "status" in output:
         output.update(user_status_exit(str(output["status"])))
+        if (
+            str(output["status"]) in MONITOR_STATUSES
+            and output.get("waiting_check_action") == "schedule_once"
+            and output.get("waiting_check_automation_id", "none") == "none"
+        ):
+            output.update({
+                "user_status": "正在开发",
+                "user_message": "本轮已提交，正在建立唯一等待检查。",
+                "user_next_choice": "无需操作。",
+                "user_choice_required": False,
+                "continuation_required": True,
+                "next_action": "create_and_bind_waiting_check",
+                "turn_completion_allowed": False,
+            })
     return output
 
 
@@ -1818,12 +1843,25 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
         "external_blocked": ("自动可做部分已经完成。", "请说明要继续、调整方向，还是停止。"),
         "completed": ("用户总体目标已经完成。", "无需操作。"),
     }[status]
-    return {
+    output = {
         "ok": True,
         "completed_step": completed_step,
         "next_step": next_step,
         **user_status_exit(status),
     }
+    if waiting_check_binding_pending(state):
+        output.update({
+            "user_status": "正在开发",
+            "user_message": "本轮已提交，正在建立唯一等待检查。",
+            "user_next_choice": "无需操作。",
+            "completed_step": "本轮已交给 Chat。",
+            "next_step": "SuperLuna 创建并绑定唯一单次等待检查。",
+            "user_choice_required": False,
+            "continuation_required": True,
+            "next_action": "create_and_bind_waiting_check",
+            "turn_completion_allowed": False,
+        })
+    return output
 
 
 def _load_app_thread_snapshot(path_value: str | Path) -> dict[str, Any]:
@@ -3099,7 +3137,10 @@ def bind_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     current_id = automation.get("waiting_check_automation_id", "none")
     claimed_id = automation.get("waiting_check_claimed_id", "none")
     if current_id == args.automation_id:
-        return {"ok": True, "bound": True, "duplicate": True, "automation_id": args.automation_id}
+        return add_user_status_exit({
+            "ok": True, "action": "waiting_check_bound", "status": state["review"]["status"],
+            "bound": True, "duplicate": True, "automation_id": args.automation_id,
+        })
     if current_id != "none":
         if claimed_id != current_id or active_action_lease(state):
             raise LCRLError("cannot replace an unclaimed or still-running waiting check")
@@ -3107,7 +3148,10 @@ def bind_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     automation["waiting_check_automation_id"] = args.automation_id
     automation["waiting_check_claimed_id"] = "none"
     save_state(path, state, expected_revision=revision)
-    return {"ok": True, "bound": True, "duplicate": False, "automation_id": args.automation_id}
+    return add_user_status_exit({
+        "ok": True, "action": "waiting_check_bound", "status": state["review"]["status"],
+        "bound": True, "duplicate": False, "automation_id": args.automation_id,
+    })
 
 
 def rearm_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -3906,8 +3950,19 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             "lease_id": "none",
             "revision": revision,
         })
+    recovered_same_task_lease = False
     if active_action_lease(state) and not args.replace:
-        raise LCRLError("an unexpired action lease already exists")
+        implementation_thread_id = str(
+            getattr(args, "implementation_thread_id", None) or "none"
+        ).strip()
+        same_task_recovery = bool(
+            implementation_thread_id != "none"
+            and implementation_thread_id == state["automation"].get("implementation_thread_id")
+            and state["runtime"].get("action_lease_reason") in {"turn_entry", "apply_result"}
+        )
+        if not same_task_recovery:
+            raise LCRLError("an unexpired action lease already exists")
+        recovered_same_task_lease = True
     clear_action_lease(state)
     lease_id = claim_action_lease(state, args.reason, args.minutes)
     save_state(path, state, expected_revision=revision)
@@ -3917,6 +3972,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         "execution_allowed": True,
         "lease_id": lease_id,
         "expires_at": state["runtime"]["action_lease_expires_at"],
+        "recovered_same_task_lease": recovered_same_task_lease,
     }
 
 
@@ -4385,6 +4441,7 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
         review["status"] == "review_submit_pending"
         and review.get("transport") == "in_app_browser"
     )
+    pending_wait_binding = waiting_check_binding_pending(state)
     continuous_active = (
         review.get("goal_mode") == "continuous"
         and review["status"] in {"local_work", "result_received", "review_submit_pending"}
@@ -4394,6 +4451,8 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
         "result_received": "apply_review_result",
         "review_submit_pending": "submit_review_once",
     }.get(review["status"], "none")
+    if pending_wait_binding:
+        continuous_next_action = "create_and_bind_waiting_check"
     return add_platform_wait_contract({
         "ok": True,
         "status": review["status"],
@@ -4408,9 +4467,9 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
             if browser_submission_preflight_required else "none"
         ),
         "direct_claim_missing_tab_allowed": False,
-        "continuation_required": continuous_active,
+        "continuation_required": continuous_active or pending_wait_binding,
         "next_action": continuous_next_action,
-        "turn_completion_allowed": not continuous_active,
+        "turn_completion_allowed": not (continuous_active or pending_wait_binding),
     })
 
 
@@ -5563,6 +5622,7 @@ def build_parser() -> argparse.ArgumentParser:
     guard.add_argument("--state", required=True)
     guard.add_argument("--minutes", type=int, default=20)
     guard.add_argument("--reason", required=True)
+    guard.add_argument("--implementation-thread-id")
     guard.add_argument("--replace", action="store_true")
 
     release = sub.add_parser("release")

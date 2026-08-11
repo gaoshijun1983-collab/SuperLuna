@@ -305,6 +305,39 @@ class ControllerTests(unittest.TestCase):
             state = lcrl.load_state(state_path)
             self.assertEqual(state["runtime"]["action_lease_id"], entered["lease_id"])
 
+    def test_same_task_guard_reclaims_an_orphaned_ordinary_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            first = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+            recovered = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+            self.assertTrue(recovered["recovered_same_task_lease"])
+            self.assertNotEqual(recovered["lease_id"], first["lease_id"])
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "unexpired action lease"):
+                lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                    implementation_thread_id="different-task",
+                ))
+            lcrl.release_action(Namespace(
+                state=str(state_path), lease_id=recovered["lease_id"], force=False,
+            ))
+            apply_lease = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="apply_result", replace=False,
+                implementation_thread_id="implementation",
+            ))
+            apply_recovered = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+            self.assertTrue(apply_recovered["recovered_same_task_lease"])
+            self.assertNotEqual(apply_recovered["lease_id"], apply_lease["lease_id"])
+
     def test_scheduled_execution_is_retired_and_never_queues_an_action(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))
@@ -1425,11 +1458,14 @@ class ControllerTests(unittest.TestCase):
                 request_turn_id="turn-request-S", request_message_id="message-request-S",
                 attachment_name=None, submitted_at=now,
             ))
-            self.assertEqual(submitted["user_status"], "等待 Chat")
+            self.assertEqual(submitted["user_status"], "正在开发")
+            self.assertFalse(submitted["turn_completion_allowed"])
             token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
-            lcrl.bind_waiting_check_command(Namespace(
+            bound = lcrl.bind_waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id="once-S",
             ))
+            self.assertEqual(bound["user_status"], "等待 Chat")
+            self.assertTrue(bound["turn_completion_allowed"])
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id="once-S",
             ))
@@ -2083,7 +2119,9 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertTrue(confirmed["confirmed"])
             self.assertEqual(confirmed["waiting_check_action"], "schedule_once")
-            self.assertEqual(confirmed["user_status"], "等待 Chat")
+            self.assertEqual(confirmed["user_status"], "正在开发")
+            self.assertFalse(confirmed["turn_completion_allowed"])
+            self.assertEqual(confirmed["next_action"], "create_and_bind_waiting_check")
             repeated = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="review-chat", request_turn_id="turn-S1",
                 request_message_id="message-S1", attachment_name=None, submitted_at=None,
@@ -2092,12 +2130,19 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(repeated["action"], "already_confirmed")
             self.assertEqual(repeated["waiting_check_action"], "schedule_once")
             self.assertEqual(repeated["waiting_check_token"], confirmed["waiting_check_token"])
+            self.assertFalse(repeated["turn_completion_allowed"])
+            progress = lcrl.progress_query_command(Namespace(state=str(state_path)))
+            self.assertEqual(progress["user_status"], "正在开发")
+            self.assertEqual(progress["next_action"], "create_and_bind_waiting_check")
+            self.assertFalse(progress["turn_completion_allowed"])
             state = lcrl.load_state(state_path)
             self.assertEqual(state["runtime"]["action_lease_id"], "none")
-            lcrl.bind_waiting_check_command(Namespace(
+            bound = lcrl.bind_waiting_check_command(Namespace(
                 state=str(state_path), token=confirmed["waiting_check_token"],
                 automation_id="wait-submission-S1",
             ))
+            self.assertEqual(bound["user_status"], "等待 Chat")
+            self.assertTrue(bound["turn_completion_allowed"])
             first_wait = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=confirmed["waiting_check_token"],
                 automation_id="wait-submission-S1",

@@ -70,13 +70,17 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 
 ```text
 python -B <skill-root>/scripts/lcrl.py guard \
-  --state <state-file> --reason turn_entry
+  --state <state-file> --reason turn_entry \
+  --implementation-thread-id <当前实施任务ID>
 ```
 
 若返回 `action=waiting_turn_blocked`，本 turn 没有取得执行权：不得读取项目、修改文件、运行
 测试、初始化或读取浏览器、提交审阅、更新等待项或改变状态；直接保持“等待 Chat”并结束。
 `--replace` 不能绕过等待门。只有用户明确终止/重置当前闭环并由控制器完成状态迁移后，普通
 turn 才能重新取得执行权。
+同一实施任务若上一 turn 已结束、但遗留普通 `turn_entry` 或 `apply_result` lease，新的串行
+turn 可用同一个持久实施任务 ID 原子回收并重建 lease；不同任务、等待读取 lease、浏览器重开
+lease 或未提供精确任务 ID 时仍失败关闭。这只消除已结束 turn 的自阻塞，不是并发抢占。
 
 唯一例外是平台到期的合法等待 occurrence：它的第一条动作仍必须是下文规定的
 `waiting-check`，而不是 `guard`。只有 `waiting-check` 与随后
@@ -212,6 +216,9 @@ provider 标签只有在两个当前列表都不存在其精确 URL 时，才能
 
 正式回执确认并进入 `review_waiting` 后，当前提交 occurrence 必须立即把原标签保留为
 `status: "handoff"` 并结束；同一 occurrence 不读取回复，即使回复已经可见或完整。
+但只有平台已经创建唯一未来 `RDATE` 等待项、并且 `bind-waiting-check` 成功后才允许结束；
+控制器在此之前返回 `next_action=create_and_bind_waiting_check` 与
+`turn_completion_allowed=false`。不能把“已经生成 token”误写成“已经安排等待”。
 提交后不得截取整页或全视口，也不得先生成含回复区域的预览再裁剪；如需视觉回执证据，
 只能直接截取新用户消息区域。无法直接安全裁剪时省略提交后截图，状态中的唯一请求身份即为回执证据。
 回复只能由下一次通过双重授权的 `waiting_check` occurrence 读取和消费。不得因为 Chat
@@ -293,6 +300,12 @@ python -B <skill-root>/scripts/lcrl.py resume-from-reply \
 ```text
 --source waiting_check --deleted-automation-id <已退休的等待任务ID>
 ```
+
+传入 ID 之前必须先真实调用平台 `automation_update delete`，并确认返回的删除状态；不能只把
+仍为 ACTIVE 的任务 ID 填入命令冒充删除证明。删除失败时不得消费回复、改变状态或继续开发。
+回复消费后、活动状态或完成状态结束前还必须复查该等待任务不再 ACTIVE。当前控制器无法从
+插件进程直接查询平台调度数据库，因此这是宿主工具合同，不是本地可物理强制的证明；真实
+测试若留下 ACTIVE 旧任务，该轮必须判失败并清理。
 
 - 明确修改、测试或下一步：原实施任务立即继续。
 - 明确要求新增本地合成反例、SQLite/内存数据反例或测试夹具失效验证时，其中对测试记录的
