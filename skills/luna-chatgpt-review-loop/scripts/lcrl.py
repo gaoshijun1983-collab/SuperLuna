@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 42
-SKILL_REVISION = "2026-08-11.7"
+CONTROLLER_VERSION = 43
+SKILL_REVISION = "2026-08-11.8"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -3892,12 +3892,32 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.state).resolve()
     state = load_state(path)
     revision = state["revision"]
+    status = state["review"]["status"]
+    if status in MONITOR_STATUSES:
+        return add_user_status_exit({
+            "ok": True,
+            "action": "waiting_turn_blocked",
+            "status": status,
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "waiting_check_only": True,
+            "lease_id": "none",
+            "revision": revision,
+        })
     if active_action_lease(state) and not args.replace:
         raise LCRLError("an unexpired action lease already exists")
     clear_action_lease(state)
     lease_id = claim_action_lease(state, args.reason, args.minutes)
     save_state(path, state, expected_revision=revision)
-    return {"ok": True, "lease_id": lease_id, "expires_at": state["runtime"]["action_lease_expires_at"]}
+    return {
+        "ok": True,
+        "action": "turn_entry_allowed",
+        "execution_allowed": True,
+        "lease_id": lease_id,
+        "expires_at": state["runtime"]["action_lease_expires_at"],
+    }
 
 
 def release_action(args: argparse.Namespace) -> dict[str, Any]:

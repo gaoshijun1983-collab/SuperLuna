@@ -59,6 +59,35 @@ class PackageTests(unittest.TestCase):
         self.assertIn("turn_completion_allowed=false", text)
         self.assertIn("在同一 turn 继续", text)
 
+    def test_skill_requires_a_fail_closed_turn_entry_guard_during_waiting(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+        for requirement in (
+            "每个新 turn 的入口门",
+            "--reason turn_entry",
+            "action=waiting_turn_blocked",
+            "不得读取项目",
+            "普通外部消息不能冒充等待 occurrence",
+        ):
+            self.assertIn(requirement, skill)
+        for requirement in (
+            "first executable action",
+            "waiting_turn_blocked",
+            "creates no action lease",
+            "cannot\nclaim that source",
+        ):
+            self.assertIn(requirement, protocol)
+        for requirement in (
+            '"action": "waiting_turn_blocked"',
+            '"execution_allowed": False',
+            '"project_write_allowed": False',
+            '"browser_access_allowed": False',
+        ):
+            self.assertIn(requirement, source)
+
     def test_controller_registry_matches_source_revision(self):
         registry = json.loads((SKILL_ROOT / "references" / "controller.json").read_text(encoding="utf-8"))
         source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")

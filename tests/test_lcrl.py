@@ -242,6 +242,69 @@ class ControllerTests(unittest.TestCase):
             third = lcrl.tick(state_path)
             self.assertEqual(third["action"], "local_work")
 
+    def test_turn_entry_guard_blocks_external_wakeup_while_waiting_without_side_effects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="ENTRY1",
+                fingerprint="turn-entry-ENTRY1",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-entry-request",
+                request_message_id="message-entry-request",
+                request_persisted_at=now,
+            )
+            before = state_path.read_bytes()
+            state_before = lcrl.load_state(state_path)
+
+            blocked = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20,
+                reason="external_message_turn_entry", replace=False,
+            ))
+
+            self.assertEqual(blocked["action"], "waiting_turn_blocked")
+            self.assertFalse(blocked["execution_allowed"])
+            self.assertFalse(blocked["project_read_allowed"])
+            self.assertFalse(blocked["project_write_allowed"])
+            self.assertFalse(blocked["browser_access_allowed"])
+            self.assertTrue(blocked["waiting_check_only"])
+            self.assertEqual(blocked["lease_id"], "none")
+            self.assertEqual(blocked["user_status"], "等待 Chat")
+            self.assertEqual(state_path.read_bytes(), before)
+            state_after = lcrl.load_state(state_path)
+            self.assertEqual(state_after["revision"], state_before["revision"])
+            self.assertEqual(state_after["runtime"]["action_lease_id"], "none")
+            self.assertEqual(
+                state_after["automation"]["waiting_check_token"],
+                state_before["automation"]["waiting_check_token"],
+            )
+
+            replace_cannot_bypass = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20,
+                reason="external_message_turn_entry", replace=True,
+            ))
+            self.assertEqual(replace_cannot_bypass["action"], "waiting_turn_blocked")
+            self.assertEqual(state_path.read_bytes(), before)
+
+    def test_turn_entry_guard_still_claims_one_lease_during_local_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            entered = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20,
+                reason="normal_turn_entry", replace=False,
+            ))
+            self.assertTrue(entered["ok"])
+            self.assertEqual(entered["action"], "turn_entry_allowed")
+            self.assertTrue(entered["execution_allowed"])
+            self.assertNotEqual(entered["lease_id"], "none")
+            state = lcrl.load_state(state_path)
+            self.assertEqual(state["runtime"]["action_lease_id"], entered["lease_id"])
+
     def test_scheduled_execution_is_retired_and_never_queues_an_action(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))

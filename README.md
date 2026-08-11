@@ -13,8 +13,16 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.34`; the latest archive remains
-Alpha 27. This unpackaged controller-42/Skill-revision-2026-08-11.7 update
+The current source candidate is `0.2.0-alpha.35`; the latest archive remains
+Alpha 27. Controller 43 / Skill revision `2026-08-11.8` adds a mandatory
+turn-entry guard after a real macOS external message woke a task whose saved
+state was still waiting for Chat and the task began modifying its project.
+Ordinary resumed turns now receive `waiting_turn_blocked`, no action lease, and
+no project/browser authority while waiting; even `--replace` cannot bypass the
+gate. The platform waiting occurrence remains the sole legal reader. This is a
+deterministic local mitigation, not a host-level interceptor, and still needs a
+clean real retest. The preceding unpackaged controller-42/Skill-revision-
+2026-08-11.7 update
 fixes blockers found while existing UNSEEN tasks dogfooded SuperLuna. A
 bounded local SQLite/synthetic counterexample that deletes or invalidates test
 records no longer trips the destructive-action gate, while production, user

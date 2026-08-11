@@ -60,6 +60,17 @@ For a `continuous` goal, transitions into the active `local_work`,
 next action in the same turn. An active boundary, local milestone, or statement
 that the loop remains in progress is not permission to end the turn.
 
+Every ordinary resumed turn with an existing state must run `guard --state
+<state> --reason turn_entry` as its first executable action, before project
+reads, tests, browser initialization, or writes. While the saved status is
+`review_receipt_pending` or `review_waiting`, the guard returns
+`waiting_turn_blocked`, creates no action lease, and changes no state. The turn
+must then end without project or browser access. `--replace` cannot override
+this waiting boundary. A platform-fired waiting occurrence is the only
+exception: its first action remains `waiting-check`, followed by
+`authorize-waiting-chat-read`; an ordinary user or coordinator message cannot
+claim that source.
+
 ## 3. Submit exactly once
 
 Immediately before the send, capture the same tab, conversation id, visible

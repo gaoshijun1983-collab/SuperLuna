@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Fixed the deterministic part of an external-message wakeup bug. A normal new
+  turn must now enter through `guard` before project or browser access. While
+  the saved workflow is waiting for a receipt or reply, the controller returns
+  `waiting_turn_blocked` with no lease and no state mutation; `--replace`
+  cannot bypass it. The only legal waiting wakeup remains the platform
+  occurrence whose first action is `waiting-check`. This does not claim a host-
+  level tool interceptor: a model that skips the mandatory guard still cannot
+  be forcibly stopped by the current Codex host.
 - Recorded the macOS Codex host capability audit for the remaining same-turn
   continuation blocker. The plugin-visible host surface exposes no turn-end
   interceptor, final rejection hook, or native guaranteed continuation API.

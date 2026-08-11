@@ -17,15 +17,16 @@ SuperLuna 是 Codex 插件，不是独立桌面软件。产品由插件、交互
 
 ## 2. 当前源码基线
 
-- 包版本：`0.2.0-alpha.34`
-- Python 版本：`0.2.0a34`
-- 控制器：42
+- 包版本：`0.2.0-alpha.35`
+- Python 版本：`0.2.0a35`
+- 控制器：43
 - 状态 schema：7
-- Skill revision：`2026-08-11.7`
+- Skill revision：`2026-08-11.8`
 - 当前源码尚未重新打包；最新历史归档仍是 Alpha 27。
 - Public Beta：`false`
 
-当前版本新增了连续活动边界合同。`local_work`、`result_received` 和
+当前版本新增普通新 turn 的等待入口门：状态仍在等待回执/回复时，`guard` 只返回
+`waiting_turn_blocked`，不取得项目或浏览器执行权。此前连续活动边界合同仍有效：`local_work`、`result_received` 和
 `review_submit_pending` 会返回 `continuation_required=true`、明确 `next_action` 和
 `turn_completion_allowed=false`。
 
@@ -48,7 +49,7 @@ Windows UNSEEN Memory 真实零干预复测结果为 **1/3**，不是通过：
 
 当前已经通过：
 
-- repository unittest：179/179
+- repository unittest：182/182
 - controller selftest：15/15
 - Skill quick validator：PASS
 - plugin validator：PASS
@@ -79,7 +80,7 @@ cd SuperLuna
 1. 完整阅读 `AGENTS.md`、`README.md`、`README.zh-CN.md`、`docs/ROADMAP.md`、
    `CHANGELOG.md`、`release/alpha_release_report.json` 和当前更新说明。
 2. 运行第 4 节全部验证。
-3. 确认源码控制器仍是 42、Skill revision 仍是 `2026-08-11.7`。
+3. 确认源码控制器仍是 43、Skill revision 仍是 `2026-08-11.8`。
 4. 不要自动覆盖公司电脑的已安装 Skill；先比较版本，再由用户确认是否安装。
 5. 不要继承旧电脑的浏览器标签、Chat 身份、automation ID、等待 token 或项目绝对路径。
 6. 新的真实测试必须在公司电脑重新绑定唯一固定 Chat，并重新建立机器本地状态。

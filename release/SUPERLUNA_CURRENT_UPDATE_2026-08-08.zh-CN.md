@@ -3,14 +3,26 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.34`（Python 元数据：`0.2.0a34`）
-- 当前源码控制器：42（Alpha 27 归档仍为旧源码）
+- 版本：`0.2.0-alpha.35`（Python 元数据：`0.2.0a35`）
+- 当前源码控制器：43（Alpha 27 归档仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-11.7`
+- 当前源码 Skill 修订：`2026-08-11.8`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 本阶段主要更新
+
+### 0K. 等待状态的普通消息唤醒不得取得执行权
+
+- macOS 三支线真实测试中，时尚任务已进入 `review_waiting`，随后普通外部消息唤醒任务；任务
+  未先核验控制器状态便开始修改项目，证明等待门只覆盖定时 occurrence，不覆盖新 turn 入口。
+- 控制器 43 让 `guard` 在 `review_receipt_pending` / `review_waiting` 下确定返回
+  `waiting_turn_blocked`：不创建租约、不改变 state/revision/token，不授权项目读取、写入或浏览器；
+  `--replace` 不能绕过。
+- Skill/协议要求已有 state 的普通新 turn 将 `guard --reason turn_entry` 作为第一条可执行动作。
+  合法平台等待 occurrence 仍以 `waiting-check` 开始，再经过浏览器读取授权。
+- 本地反例已覆盖；宿主仍没有工具权限拦截，模型完全跳过入口命令时插件无法物理阻止，真实
+  三轮发布证据保持未完成。
 
 ### 0J. 连续任务活动边界不得提前停轮
 
@@ -524,7 +536,7 @@
 
 ## 截至 2026-08-10 的实际验证
 
-- repository unittest：179/179 通过。
+- repository unittest：182/182 通过。
 - App Chat identity 专项：23/23 通过。
 - 控制器 selftest：15/15 通过。
 - closure-check：`ok=true`，且 `scope=local_controller_only`、真实设备门与 Public Beta 门均为 false。

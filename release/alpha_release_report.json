@@ -1,9 +1,9 @@
 {
   "product_name": "SuperLuna",
-  "package_version": "0.2.0-alpha.34",
-  "controller_version": 42,
+  "package_version": "0.2.0-alpha.35",
+  "controller_version": 43,
   "schema_version": 7,
-  "skill_revision": "2026-08-11.7",
+  "skill_revision": "2026-08-11.8",
   "source_contains_unreleased_hotfix": true,
   "dist_archive_matches_current_source": false,
   "compatibility_entrypoints": {
@@ -12,7 +12,7 @@
     "command": "lcrl"
   },
   "automated_evidence": {
-    "repository_tests": 179,
+    "repository_tests": 182,
     "controller_selftests": 15,
     "native_session_concurrent_start_serialized": true,
     "native_session_spawn_process_exclusion": true,
@@ -200,6 +200,9 @@
     "windows_controller42_second_cycle_reply_applied": true,
     "windows_controller42_second_cycle_continuation_stopped": true,
     "windows_controller42_three_round_monitor_passed": false,
+    "macos_controller43_external_message_wait_bypass_observed": true,
+    "controller43_waiting_turn_entry_guard_local_tested": true,
+    "controller43_waiting_turn_entry_guard_real_retested": false,
     "host_browser_tool_gate_enforcement_available": false,
     "windows_in_app_browser_home_page_readable": true,
     "windows_in_app_browser_home_page_checked_at": "2026-08-09",
@@ -207,7 +210,7 @@
     "browser_real_network_recovery": false,
     "browser_real_rate_limit_recovery": false,
     "real_project_blocker": "Controller 24 / Skill revision 2026-08-10.4 completed ten real Windows browser interactions, but one same-occurrence foreground read was correctly quarantined. Skill revision 2026-08-10.5 then submitted once and ended before reply consumption; its independent wait found the provisioned tab absent from both browser listings. Controller 25 / revision 2026-08-10.6 successfully reopened the already-bound canonical URL and retrieved the unique paired PASS, but the natural-language high-impact gate falsely treated a deferred mention of later release validation as the current action. Controller 26 / revision 2026-08-10.7 fixed a labelled next-step scope and its first clean Windows round uniquely paired a PASS, but an explicit recommendation to stop the completed monster-AI review had no next-step heading, so the whole-prose fallback again treated deferred release testing as a current action and required manual recovery. Controller 27 / revision 2026-08-10.8 fixed that local stop scope, but its real visual retest found the same provisioned pending-handoff Chat absent from both tab listings before a later submission; the task correctly stopped with zero submissions because only waiting-side URL recovery existed. Controller 28 / revision 2026-08-10.9 added a short fingerprint-bound submission reopen lease, but its real retest found that the restarted in-app browser had a new browser id and correctly stopped with zero submissions. Controller 29 / revision 2026-08-10.10 added a lease-bound one-browser rebind; its real visual retest sent one uniquely identified request but the two-minute lease expired before confirmation, so the task did not rebind or resend. Controller 30 / revision 2026-08-10.11 extended the lease to ten minutes and its real Windows retest successfully sent once, persisted the new browser id, and consumed the lease, but a temporary full-viewport evidence preview exposed the fast reply in the submitting occurrence. Skill revision 2026-08-10.12 forbids that preview, and its follow-up real Windows visual-isolation diagnostic passed with one submission, atomic browser-id rebind, zero duplicates, and no post-submit page/viewport/assistant read; direct locator capture was unsupported, so the optional screenshot was safely omitted. A later revision-.12 diagnostic began with no fixed-URL tab in either listing, used one controller-authorized canonical-URL open, submitted once, and then uniquely paired and consumed the complete PASS response in a separate waiting occurrence; replay was a no-op. This verifies revision-.12's Windows fixed-Chat transport function end to end, but the waiting occurrence was manually awakened and no real platform automation was created, so it does not count toward the autonomous gate. Revision 2026-08-10.13 then synchronized the published policy schema with runtime role, reviewer, reasoning, and transport locks. Revision 2026-08-10.14 further synchronized the published confirmation trust fields and transport-specific control-source constraints. Revision 2026-08-10.15 synchronized the attachment/filesystem capability enums, required Terra capability probe, and the bidirectional MCP payload constraint. Revision 2026-08-10.16 synchronized the model-policy version, automatic-action locks, executor, and reviewer safety core; these local schema corrections change the frozen candidate without adding real-device credit. The frozen consecutive gate remains zero, and no-outside-wakeup Windows scheduling on revision-.16, real macOS browser matrices, plus real network/rate-limit recovery evidence remain incomplete",
-    "current_source_blocker": "Controller 42 / Skill revision 2026-08-11.7 passed the first cycle of its clean Windows Memory retest: a platform RDATE woke the task, the paired round-8 reply was consumed, real project work completed, round 9 was submitted once, and the same wait identity was rearmed. The second RDATE also woke automatically and the task consumed round 9 plus changed the real project, but it then ended at local_work with no round-10 submission even though controller status declared turn_completion_allowed=false. The wait was deleted when the reply was consumed, so no legal third cycle could start. This is a 1/3 monitor result, not a pass. The host provides no plugin-level turn-finalization or browser-tool permission interceptor, so controller/Skill machine fields can detect this noncompliance but cannot deterministically prevent the model from ending. The frozen consecutive gate remains zero. Alpha 34 also still needs ten consecutive real project cycles, the Windows host enforcement gap, the macOS browser matrix, and real network/rate-limit recovery.",
+    "current_source_blocker": "Controller 43 / Skill revision 2026-08-11.8 adds a mandatory ordinary-turn entry guard after a real macOS external message woke a task whose controller state was still review_waiting and the task began modifying its project. Local regression evidence proves guard now returns waiting_turn_blocked with no lease, no state/revision/token mutation, and no project or browser authority; --replace cannot bypass it. A legal platform waiting occurrence still begins with waiting-check. This deterministic mitigation has not yet passed a clean real retest and cannot physically stop a model that skips the guard because the host exposes no plugin-level tool or turn-finalization interceptor. The earlier Controller 42 Windows monitor remains 1/3, not a pass. The frozen consecutive gate remains zero. Alpha 35 still needs a clean external-message wake retest, ten consecutive real project cycles, the Windows host enforcement gap, the macOS browser matrix, and real network/rate-limit recovery.",
     "consecutive_real_project_cycles": 0,
     "required_real_project_cycles": 10,
     "windows_full_loop": false,

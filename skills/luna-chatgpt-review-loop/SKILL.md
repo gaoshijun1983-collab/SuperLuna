@@ -62,6 +62,26 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 
 ## 启动
 
+### 每个新 turn 的入口门
+
+只要当前任务已经有 SuperLuna state，任何普通用户消息、协调消息、工具回执或其他外部事件
+唤醒的新 turn，都必须在读取项目文件、运行测试、初始化浏览器或写入任何内容之前，把以下
+命令作为第一条可执行动作：
+
+```text
+python -B <skill-root>/scripts/lcrl.py guard \
+  --state <state-file> --reason turn_entry
+```
+
+若返回 `action=waiting_turn_blocked`，本 turn 没有取得执行权：不得读取项目、修改文件、运行
+测试、初始化或读取浏览器、提交审阅、更新等待项或改变状态；直接保持“等待 Chat”并结束。
+`--replace` 不能绕过等待门。只有用户明确终止/重置当前闭环并由控制器完成状态迁移后，普通
+turn 才能重新取得执行权。
+
+唯一例外是平台到期的合法等待 occurrence：它的第一条动作仍必须是下文规定的
+`waiting-check`，而不是 `guard`。只有 `waiting-check` 与随后
+`authorize-waiting-chat-read` 双重通过，才能读取 Chat。普通外部消息不能冒充等待 occurrence。
+
 1. 首先同时使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器
    binding；不得因为尚未调用该浏览器 Skill、当前标签列表为空或协调任务曾经打开过网页，
    就声称 Codex 没有浏览器能力。若没有旧状态，先在这个实现任务自己的内置浏览器打开
