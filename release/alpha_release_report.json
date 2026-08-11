@@ -98,6 +98,8 @@
     "macos_isolated_native_app_full_loop": true,
     "macos_isolated_duplicate_reply_noop": true,
     "macos_native_direct_item_reply_pairing": true,
+    "macos_host_turn_finalization_checked_at": "2026-08-11",
+    "macos_host_turn_finalization_enforcement_available": false,
     "real_project_preflight_completed": true,
     "at_least_one_real_project_loop_observed": true,
     "historical_real_project_cycles": 3,
@@ -214,6 +216,7 @@
   "beta_gate_status": {
     "ready": false,
     "blocking_items": [
+      "codex_host_same_turn_continuation_enforcement",
       "ten_consecutive_real_project_cycles_on_frozen_candidate",
       "windows_waiting_check_platform_automation",
       "windows_in_app_browser_full_loop",

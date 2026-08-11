@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Recorded the macOS Codex host capability audit for the remaining same-turn
+  continuation blocker. The plugin-visible host surface exposes no turn-end
+  interceptor, final rejection hook, or native guaranteed continuation API.
+  The release report now lists this as an explicit Public Beta blocker; no
+  scheduler, controller behavior, version, or real-cycle credit changed.
 - Fixed deterministic portions of eight blockers found by continuous dogfooding
   in controller 42 / Skill revision `2026-08-11.7`. An explicitly local
   SQLite/synthetic counterexample

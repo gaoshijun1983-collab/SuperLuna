@@ -6,6 +6,10 @@ SuperLuna 是一个让 Codex 与 ChatGPT 网页版安全协作的浏览器优先
 Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 ```
 
+家里与公司两地开发时，GitHub `origin/main` 是唯一共享源码基线：开始前使用
+`git pull --ff-only`，完成一个已验证的小阶段后提交并推送；未完成内容进入日期化 `wip/`
+分支，正式验证过的打包里程碑才创建版本标签。旧交接目录不再作为代码来源。
+
 公开产品名是 `SuperLuna`。为兼容旧安装，插件 ID 仍为 `luna-review-loop`，Skill/文件夹
 仍为 `luna-chatgpt-review-loop`，命令仍为 `lcrl`。产品形态仍是 Codex 插件 + Skill +
 标准库 Python 控制器，不是独立桌面软件。

@@ -24,6 +24,23 @@ This directory is the dedicated source workspace for the SuperLuna Codex plugin 
 4. Keep plugin, Python, lockfile, release report, README, controller registry, and Skill revision metadata synchronized.
 5. Never claim real macOS/Windows App capability from mocks or local unit tests.
 
+## Two-location Git workflow
+
+- GitHub `origin/main` is the only shared source of truth. Do not copy code from
+  old handoff folders into this repository.
+- At the start of work at home or the office, require a clean worktree, run
+  `git fetch origin --prune`, and update with `git pull --ff-only` before editing.
+- Keep each verified development slice in one focused commit and push it before
+  leaving that location. Never force-push `main` or rewrite shared history.
+- If work is incomplete, push it to a dated `wip/YYYY-MM-DD-location-topic`
+  branch instead of placing an unverified checkpoint on `main`. Continue that
+  branch at the other location after fetching it explicitly.
+- Git commits provide the daily rollback history. Create annotated version tags
+  only for validated packaged milestones, using the existing version naming;
+  do not create a release tag for every work session.
+- Before pushing, fetch again and use a normal merge/rebase only after inspecting
+  divergence. Never discard the other location's changes to make a push succeed.
+
 ## Required validation
 
 Run from this directory:

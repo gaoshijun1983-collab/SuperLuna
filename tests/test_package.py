@@ -703,6 +703,13 @@ class PackageTests(unittest.TestCase):
         self.assertFalse(closure["public_beta_gate_passed"])
         self.assertEqual(report["real_device_evidence"]["consecutive_real_project_cycles"], 0)
         self.assertEqual(report["real_device_evidence"]["historical_real_project_cycles"], 3)
+        self.assertFalse(
+            report["real_device_evidence"]["macos_host_turn_finalization_enforcement_available"]
+        )
+        self.assertIn(
+            "codex_host_same_turn_continuation_enforcement",
+            report["beta_gate_status"]["blocking_items"],
+        )
         self.assertFalse(report["beta_gate_status"]["ready"])
         self.assertFalse(report["public_beta_ready"])
 

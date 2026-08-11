@@ -132,6 +132,7 @@ skills/luna-chatgpt-review-loop
 
 - 当前事实与发布门：`release/alpha_release_report.json`
 - 当前版本说明：`release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md`
+- macOS 宿主续行能力核查：`docs/HOST_CONTINUATION_CAPABILITY_AUDIT_MACOS_2026-08-11.zh-CN.md`
 - 路线图：`docs/ROADMAP.md`
 - 运行协议：`skills/luna-chatgpt-review-loop/references/protocol.md`
 - 控制器注册表：`skills/luna-chatgpt-review-loop/references/controller.json`
