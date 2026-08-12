@@ -283,6 +283,7 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(third["action"], "account_browser_access_queued")
             self.assertTrue(first["browser_skill_read_allowed"])
             self.assertTrue(first["browser_runtime_initialization_allowed"])
+            self.assertFalse(first["health_probe_home_navigation_allowed"])
             self.assertFalse(third["slot_acquired"])
             self.assertFalse(third["browser_skill_read_allowed"])
             self.assertFalse(third["browser_runtime_initialization_allowed"])
@@ -405,6 +406,7 @@ class ControllerTests(unittest.TestCase):
                 implementation_thread_id="task-one", operation="health_probe",
                 registry=str(registry), at="2026-08-12T08:00:00Z",
             ))
+            self.assertTrue(probe["health_probe_home_navigation_allowed"])
             lcrl.release_account_browser_slot_command(Namespace(
                 implementation_thread_id="task-one", lease_id=probe["lease_id"],
                 outcome="healthy", registry=str(registry), at="2026-08-12T08:00:10Z",

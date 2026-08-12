@@ -132,6 +132,8 @@ class PackageTests(unittest.TestCase):
         self.assertIn("Every browser initialization", transport)
         self.assertIn("30-minute account", transport)
         self.assertIn("homepage alone is not health evidence", transport)
+        self.assertIn("health_probe_home_navigation_allowed=true", transport)
+        self.assertIn("must not open an unrelated conversation", transport)
 
     def test_account_slot_precedes_browser_skill_and_runtime(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")

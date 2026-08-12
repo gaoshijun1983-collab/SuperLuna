@@ -19,7 +19,7 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 71 / Skill revision `2026-08-12.25`, requires the shared account slot
+Controller 72 / Skill revision `2026-08-12.26`, requires the shared account slot
 before even reading the browser Skill or initializing its runtime, and keeps active startup/submission
 turns alive through the 180-second quiet handoff instead of ending without a
 wake source; it never creates an execution-state timer. Controller 63 preserves the two-task limit and

@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 71
-SKILL_REVISION = "2026-08-12.25"
+CONTROLLER_VERSION = 72
+SKILL_REVISION = "2026-08-12.26"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -850,6 +850,7 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "slot_acquired": True,
                 "browser_skill_read_allowed": True,
                 "browser_runtime_initialization_allowed": True,
+                "health_probe_home_navigation_allowed": existing["operation"] == "health_probe",
                 "lease_id": existing["lease_id"],
                 "expires_at": existing["expires_at"],
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
@@ -932,6 +933,7 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             "slot_acquired": True,
             "browser_skill_read_allowed": True,
             "browser_runtime_initialization_allowed": True,
+            "health_probe_home_navigation_allowed": args.operation == "health_probe",
             "lease_id": lease_id,
             "expires_at": expires_at,
             "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,

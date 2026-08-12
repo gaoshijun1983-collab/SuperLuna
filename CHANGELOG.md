@@ -1,5 +1,13 @@
 # Changelog
 
+- Unreleased Controller 72 / Skill revision `2026-08-12.26`: real projectless
+  Mac C3 obeyed the slot-before-browser order, but a fresh browser had no tab
+  from which to prove post-cooldown conversation-history health. A health-probe
+  lease now explicitly authorizes one temporary exact-home navigation when no
+  tabs exist. The page itself still proves nothing: the task must observe at
+  least one real conversation-history entry without opening an unrelated Chat,
+  sending, refreshing, or creating a conversation, then close the probe tab.
+
 - Unreleased Controller 71 / Skill revision `2026-08-12.25`: the Controller 70
   Windows Python 3.13 matrix showed that simultaneous processes could be denied
   while opening the lock sidecar, before they entered the serialized registry

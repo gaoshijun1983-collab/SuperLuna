@@ -212,6 +212,15 @@ an empty new-chat composer, or successful login. Release a probe as healthy only
 with `--health-proof conversation_history_accessible`; otherwise keep the circuit
 fail closed or report the real rate-limit notice.
 
+A new implementation browser can legitimately start with no user or controlled
+tabs. Only a `health_probe` lease that returns
+`health_probe_home_navigation_allowed=true` may open one temporary controlled tab
+at exactly `https://chatgpt.com/`. The task must then prove that the sidebar or
+history surface contains at least one real existing conversation entry and no
+rate-limit notice. It must not open an unrelated conversation. The homepage,
+login, account menu, and composer still do not count. Close the temporary probe
+tab before releasing the slot.
+
 Do not reload a healthy page, do not reload while a response is visibly
 streaming, and do not retry blindly after a failed UI action. 不得切回 App Chat、
 不得新开 Chat、不得换标签页发送。A local state transition or mock proves only
