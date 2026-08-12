@@ -27,6 +27,17 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 `需要你决定`、`已完成`。内部 token、lease、revision、消息身份和刷新标记不应成为
 日常操作词汇。
 
+同一台机器、同一 ChatGPT 账户的网页 Chat 访问由共享账户门统一限制为**最多 2 个**。
+本地开发任务可以超过两个，但初始化浏览器、列举/认领/打开标签、读取 DOM、发送或刷新前
+都必须先取得一个短期账户名额；第三个任务只排队，不能触碰浏览器。名额不得跨本地开发、
+模型思考或等待期长期持有，网页动作结束后必须立即释放。
+
+任何任务看到 ChatGPT 的“请求过于频繁 / 已暂时限制访问对话记录”等真实限流提示，必须用
+本次名额报告 `rate_limited`。控制器会清空所有本机名额并打开账户级熔断：首次 30 分钟，
+连续再次出现为 60 分钟。熔断期间所有任务禁止初始化、读取、刷新、发送或用其他 Chat 探测；
+到期后只允许一个 `health_probe` 做只读页面健康检查，成功后才恢复最多两个名额。该共享门
+只能协调本机任务，无法证明另一台电脑没有同时访问；跨设备同时运行仍由用户避免。
+
 自动模式活动期间不得输出三选一、任务成果卡片或把阶段性成功写成最终答复。绑定恢复、
 本地实施完成、审阅包登记和回复吸收都只是循环中的中间状态；在没有真实阻塞时继续执行
 控制器给出的下一动作。用户在启动本次固定 Chat 自动闭环时已经授权正常的正式审阅发送，
@@ -123,11 +134,26 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 并强制重新目视确认评审 Chat 的推理档位；返回后必须在同一 turn 继续新目标。普通“继续”、
 状态询问、调度补跑、Chat 回复或没有稳定授权身份的外部消息不得调用它。
 
-1. 首先同时使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器
+1. 在使用 `browser:control-in-app-browser` 或进行任何网页动作前，先取得机器级共享名额：
+
+```text
+python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
+  --implementation-thread-id <当前实施任务ID> \
+  --operation startup|submission|waiting_read|health_probe
+```
+
+只有 `slot_acquired=true` 才可继续。`account_browser_access_queued` 或
+`account_browser_rate_limit_backoff` 均不得初始化浏览器；等待 occurrence 必须释放其读取 lease，
+并把同一个单次等待项移到不早于 `retry_not_before`，普通启动/提交则保持原状态静默结束。
+网页动作结束后必须用匹配任务和 `lease_id` 运行 `release-account-browser-slot`；正常结束使用
+`--outcome completed`。到期后的唯一只读健康探测成功时使用 `--outcome healthy`。看到真实限流
+提示时不再读取、点击或刷新，立即使用 `--outcome rate_limited`。
+
+2. 随后使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器
    binding；不得因为尚未调用该浏览器 Skill、当前标签列表为空或协调任务曾经打开过网页，
    就声称 Codex 没有浏览器能力。若没有旧状态，先在这个实现任务自己的内置浏览器打开
    `https://chatgpt.com/` 并检查登录状态；这一步不发送消息、不创建 Chat、不改模型。
-2. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
+3. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
    一次性新 Chat 授权，先按 `browser_chat_provisioning.md` 创建并初始化唯一 reviewer
    conversation；初始化消息不计入正式回合。否则继续认领用户已有 Chat。
    在打开任何新标签前，先分别统计 `user.openTabs()` 与当前 `tabs.list()` 中精确 canonical
@@ -146,7 +172,7 @@ python -B <skill-root>/scripts/lcrl.py browser-startup-plan \
    都没有精确 URL 且返回 `open_exact_url_once` 时才允许新建标签。实际选择后用相同参数追加
    `--selected-source user_open_tabs|controlled_tabs|authorized_exact_url_open` 再核验；来源冲突必须
    失败关闭。不得因为已有标签暂时未聚焦、标题变化或 DOM 文案不熟悉而另开同 URL。
-3. 若旧状态已保存明确 provisioned Chat 且仍为 `pending_handoff`，新任务不得要求用户再次
+4. 若旧状态已保存明确 provisioned Chat 且仍为 `pending_handoff`，新任务不得要求用户再次
    手动打开，也不得另建 Chat。用当前 `browser.browserId` 调用
    `authorize-browser-startup-reopen`；只有返回 `browser_startup_reopen_authorized`，才在
    **新实现任务自己的内置浏览器**中打开一次返回的精确 canonical URL。核验已登录、URL
@@ -158,16 +184,16 @@ python -B <skill-root>/scripts/lcrl.py browser-startup-plan \
    或总体目标完成才允许结束。
    没有这种持久状态时，认领该现有标签，也就是当前实现任务浏览器中用户已有的目标 Chat，并记录 URL 中的
    conversation id；只有身份含糊或需要用户选择现有 Chat 时才请求用户决定。
-4. 在任何项目写入和正式发送之前，核验该标签可读、URL 仍是绑定 Chat、页面主体确为
+5. 在任何项目写入和正式发送之前，核验该标签可读、URL 仍是绑定 Chat、页面主体确为
    ChatGPT。网络错误或登录页不允许先开发二十分钟后才发现无法提交。既有 conversation 的
    内容证据使用稳定消息结构（例如真实 `[data-message-author-role]`、`[data-message-id]` 或
    conversation article 节点）和固定 URL；不得搜索“你说：”“ChatGPT 说：”等本地化快照文案。
    composer 可用性必须读取实际 textbox/contenteditable 与发送控件的可交互/disabled 状态，
    不得以 DOM snapshot 是否含 `[active]` 字符串判断。推理档位仍需在可见界面或无障碍按钮上
    真实确认“极高”；仅对整个 DOM 做 `includes("极高")` 既不能证明也不能否定该档位。
-5. 用户亲眼确认该 Chat 当前显示所需推理模式。以 `in_app_browser` 记录确认；
+6. 用户亲眼确认该 Chat 当前显示所需推理模式。以 `in_app_browser` 记录确认；
    SuperLuna 不替用户切换。
-6. 运行只读能力预检：
+7. 运行只读能力预检：
 
 新实施任务在真正初始化 SuperLuna 之前，先由调用方提供已经观察到的事实并运行一次独立
 只读启动自检。该命令不打开浏览器、不创建或读取 Chat、不创建等待任务、不初始化 state；
@@ -198,7 +224,7 @@ python -B <skill-root>/scripts/lcrl.py autonomous-preflight \
   --chat-read available --chat-send available --one-shot-automation available
 ```
 
-7. 预检返回 `ready_automatic` 后创建状态：
+8. 预检返回 `ready_automatic` 后创建状态：
 
 ```text
 python -B <skill-root>/scripts/lcrl.py init \
@@ -209,7 +235,7 @@ python -B <skill-root>/scripts/lcrl.py init \
   --review-transport in_app_browser --goal-mode continuous
 ```
 
-8. 将刚才认领的浏览器与用户标签稳定身份写入状态。`browser-id` 使用当前内置浏览器
+9. 将刚才认领的浏览器与用户标签稳定身份写入状态。`browser-id` 使用当前内置浏览器
    binding，`provider-tab-id` 使用本次 `user.openTabs()` 返回的 `providerTabId`；不得持久化或跨轮复用 `Tab.id`：
 
 ```text
@@ -251,7 +277,7 @@ Chat。只在控制器返回 `canonical_url_reopen_allowed=true` 的当前提交
 把固定 canonical URL 打开一次；打开后必须先核验精确 URL、ChatGPT 页面和本轮 request
 identity，不能发送或创建 Chat。不得因此新建第二个 Chat，也不得持久化数字 `Tab.id`。
 
-9. 记录用户可见确认：
+10. 记录用户可见确认：
 
 ```text
 python -B <skill-root>/scripts/lcrl.py confirm-review-mode \
@@ -270,6 +296,7 @@ python -B <skill-root>/scripts/lcrl.py confirm-review-mode \
 
 发送前：
 
+- 先取得 `submission` 账户名额；未取得时保持 `review_submit_pending`，不得初始化浏览器；
 - 再核验同一标签、同一 conversation id、页面可读和用户确认仍有效；
 - 捕获当前可见用户消息身份基线和将发送的完整正文身份；
 - 通过该标签的可见 composer 只发送一次。
@@ -307,6 +334,8 @@ lease 与一次性授权 revision 原子写入 state；把返回的 `revision` �
 发送后只接受基线以后新出现、正文一致且身份唯一的用户消息作为回执。网络结果不确定时
 不得重发；只在同一标签协调可见回执。旧轮次同文消息、多个候选、换 Chat、换正文或
 丢失上下文都必须失败关闭。
+
+单次发送与回执协调结束后立即释放 `submission` 账户名额；不得为了等待回复长期占用名额。
 
 正式回执确认并进入 `review_waiting` 后，当前提交 occurrence 必须立即把原标签保留为
 `status: "handoff"` 并结束；同一 occurrence 不读取回复，即使回复已经可见或完整。
@@ -387,12 +416,15 @@ python -B <skill-root>/scripts/lcrl.py observe-runs \
 
 到期 heartbeat 的第一项可执行动作必须是本地 CLI `waiting-check`。在保存其返回 JSON 且
 `action` 为 `review_poll`/`receipt_reconcile` 之前，禁止初始化浏览器运行时、列举或认领标签、
-读取 DOM；随后仍必须取得 `authorize-waiting-chat-read` 的 `browser_read_authorized`。若观察到
+读取 DOM；随后必须先取得 `waiting_read` 账户名额，再取得
+`authorize-waiting-chat-read` 的 `browser_read_authorized`。若观察到
 任何提前浏览器访问，本轮即为合同失败，不能把读到的内容消费、应用或计为成功。
 
 1. 用 `waiting-check` 领取本次 occurrence；
-2. 用 `authorize-waiting-chat-read` 再核验状态、token、稳定等待任务 ID、claim 和 lease；
-3. 若返回 `browser_read_authorized`，在同一个内置浏览器标签读取 DOM，不刷新；
+2. 用 `acquire-account-browser-slot --operation waiting_read` 取得本机共享账户名额；未取得时不得
+   初始化浏览器，释放读取 lease，并把同一个等待项错峰移动到返回时间；
+3. 用 `authorize-waiting-chat-read` 再核验状态、token、稳定等待任务 ID、claim 和 lease；
+4. 若返回 `browser_read_authorized`，在同一个内置浏览器标签读取 DOM，不刷新；
    授权结果会返回持久化的 browser/provider identity。若上一轮标签对象已经失效，使用现有
    浏览器 binding 调用 `user.openTabs()`，唯一匹配 `providerTabId` 与固定 URL 后把该原始
    tab 对象传给 `user.claimTab(tab)`；不得使用上一轮数字 `Tab.id`。若标签已在本次运行受控，
@@ -407,7 +439,7 @@ python -B <skill-root>/scripts/lcrl.py observe-runs \
    canonical URL、已登录 ChatGPT 且当前 request identity 唯一可见后才能读取；不得发送、
    新建 Chat、改 URL或保存数字句柄；普通用户标签也必须满足相同的固定绑定、双重授权和
    两个列表都没有精确 URL 的条件；
-4. 若页面出现浏览器网络错误或加载失败，释放 lease 后记录：
+5. 若页面出现浏览器网络错误或加载失败，释放 lease 后记录：
 
 ```text
 python -B <skill-root>/scripts/lcrl.py browser-network-observation \
@@ -415,16 +447,20 @@ python -B <skill-root>/scripts/lcrl.py browser-network-observation \
   --outcome network_error
 ```
 
-5. 只有返回 `schedule_browser_refresh` 才用 `rearm-waiting-check` 更新原有等待任务，
+6. 只有返回 `schedule_browser_refresh` 才用 `rearm-waiting-check` 更新原有等待任务，
    安排 180 秒后的一个未来 occurrence；不创建第二个调度器；
-6. 下一次授权若返回 `browser_refresh_authorized` 且
+7. 下一次授权若返回 `browser_refresh_authorized` 且
    `reload_same_tab_once=true`，只刷新同一标签一次，等待页面加载并复核同一 Chat，再读取；
-7. 页面恢复后记录 `browser-network-observation --outcome loaded`。如果仍没有完整回复，
+8. 页面恢复后记录 `browser-network-observation --outcome loaded`。如果仍没有完整回复，
    释放 lease，再把同一等待门更新为下一次单一未来检查；
-8. 离开等待状态立即退休检查。健康页面不刷新，回复正在流式生成时不刷新。
+9. 离开等待状态立即退休检查。健康页面不刷新，回复正在流式生成时不刷新。
    尚需后续检查时，浏览器最后一个动作必须保留原标签为 `status: "handoff"`，让下一次
    occurrence 重新认领同一个用户标签；若平台不保留明确授权的自建标签，则下一次只可走
    上述受权精确 URL 重开路径，而不是把临时句柄当成持久身份。
+
+无论读取成功、无完整回复、网络失败或安全停止，本 occurrence 结束前都必须释放账户名额。
+真实限流必须以 `release-account-browser-slot --outcome rate_limited` 打开共享熔断；不得仅写入
+当前任务自己的 `browser-network-observation` 后让其他任务继续访问。
 
 完整网页合同见 [browser_transport.md](references/browser_transport.md)，状态机细节见
 [protocol.md](references/protocol.md)。

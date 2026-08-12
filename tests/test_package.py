@@ -104,6 +104,31 @@ class PackageTests(unittest.TestCase):
         self.assertIn(f'CONTROLLER_VERSION = {registry["controller_version"]}', source)
         self.assertIn(f'SKILL_REVISION = "{registry["skill_revision"]}"', source)
 
+    def test_account_browser_gate_is_two_slot_and_fail_closed_on_rate_limit(self):
+        registry = json.loads((SKILL_ROOT / "references" / "controller.json").read_text(encoding="utf-8"))
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(encoding="utf-8")
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+        self.assertEqual(registry["account_browser_max_active"], 2)
+        self.assertEqual(registry["account_browser_rate_limit_backoff_seconds"], [1800, 3600])
+        for requirement in (
+            "acquire-account-browser-slot",
+            "release-account-browser-slot",
+            "account_browser_access_queued",
+            "account_browser_circuit_opened",
+            "ACCOUNT_BROWSER_MAX_ACTIVE = 2",
+        ):
+            self.assertIn(requirement, source)
+        for requirement in (
+            "最多 2 个",
+            "第三个任务只排队",
+            "--outcome rate_limited",
+            "health_probe",
+        ):
+            self.assertIn(requirement, skill)
+        self.assertIn("Every browser initialization", transport)
+        self.assertIn("30-minute account", transport)
+
     def test_published_state_schema_accepts_every_runtime_reasoning_source(self):
         schema = json.loads(
             (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(encoding="utf-8")

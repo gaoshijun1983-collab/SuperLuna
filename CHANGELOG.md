@@ -1,5 +1,12 @@
 # Changelog
 
+- Unreleased Controller 60 / Skill revision `2026-08-12.14`: added a
+  machine-wide two-slot ChatGPT account browser gate. A third local run queues
+  before browser initialization; any real conversation-history rate-limit
+  notice clears all slots and opens a shared 30/60-minute circuit followed by a
+  single read-only health probe. This does not coordinate another computer and
+  does not add real-device release credit.
+
 ## Unreleased
 
 - Added controller 59 / Skill revision `2026-08-12.13` after the UNSEEN Insight

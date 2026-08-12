@@ -19,7 +19,13 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source is
-Controller 59 / Skill revision `2026-08-12.13`: browser startup now claims a
+Controller 60 / Skill revision `2026-08-12.14` adds a machine-wide ChatGPT
+account gate after a real three-task macOS test triggered a conversation-history
+security rate limit. Local development remains parallel, but only two tasks may
+touch web Chat at once; a third queues before browser initialization. Any real
+rate-limit notice clears all local slots and opens a 30/60-minute shared circuit,
+followed by one read-only health probe. The gate is local-machine evidence and
+cannot coordinate another computer using the same account. Controller 59 / Skill revision `2026-08-12.13`: browser startup now claims a
 unique user-open exact-URL Chat before considering a controlled or new tab, and
 uses stable message nodes plus actual composer state instead of localized
 snapshot phrases. Controller 58 / Skill revision `2026-08-12.12`: an explicitly terminated,

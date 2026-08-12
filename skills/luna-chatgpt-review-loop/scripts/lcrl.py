@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 59
-SKILL_REVISION = "2026-08-12.13"
+CONTROLLER_VERSION = 60
+SKILL_REVISION = "2026-08-12.14"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -96,6 +96,12 @@ VALID_REVIEW_TRANSPORTS = {"app_chat_review", "in_app_browser"}
 BROWSER_REFRESH_INTERVAL_SECONDS = 180
 BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 900
 BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600
+ACCOUNT_BROWSER_GATE_VERSION = 1
+ACCOUNT_BROWSER_MAX_ACTIVE = 2
+ACCOUNT_BROWSER_SLOT_SECONDS = 600
+ACCOUNT_BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 1800
+ACCOUNT_BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600
+VALID_ACCOUNT_BROWSER_OPERATIONS = {"startup", "submission", "waiting_read", "health_probe"}
 VALID_ATTACHMENT_VERIFICATION = {"not_required", "unverified", "verified", "manual_confirmed", "unavailable"}
 VALID_PRO_STATUSES = {"tracking", "eligible", "confirmation_required", "in_review"}
 VALID_TERRA_STATUSES = {"idle", "requested", "approved"}
@@ -582,6 +588,293 @@ def save_binding_registry(path: str | Path, value: dict[str, Any], expected_revi
     registry_path.parent.mkdir(parents=True, exist_ok=True)
     with acquire_state_lock(registry_path):
         return _save_binding_registry_locked(registry_path, value, expected_revision)
+
+
+def default_account_browser_gate_path() -> Path:
+    """Return the machine-wide gate shared by every local SuperLuna run."""
+    configured_root = os.environ.get("CODEX_HOME")
+    codex_root = Path(configured_root).expanduser() if configured_root else Path.home() / ".codex"
+    return (codex_root / "superluna" / "account-browser-gate.json").resolve()
+
+
+def empty_account_browser_gate() -> dict[str, Any]:
+    return {
+        "schema_version": ACCOUNT_BROWSER_GATE_VERSION,
+        "revision": 0,
+        "updated_at": utc_now(),
+        "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+        "cooldown_until": "none",
+        "consecutive_rate_limits": 0,
+        "slots": [],
+    }
+
+
+def validate_account_browser_gate(value: dict[str, Any]) -> None:
+    errors: list[str] = []
+    if value.get("schema_version") != ACCOUNT_BROWSER_GATE_VERSION:
+        errors.append(f"account browser gate schema_version must be {ACCOUNT_BROWSER_GATE_VERSION}")
+    if value.get("max_active") != ACCOUNT_BROWSER_MAX_ACTIVE:
+        errors.append(f"account browser gate max_active must be {ACCOUNT_BROWSER_MAX_ACTIVE}")
+    if not isinstance(value.get("revision"), int) or value.get("revision", -1) < 0:
+        errors.append("account browser gate revision must be a non-negative integer")
+    if not isinstance(value.get("consecutive_rate_limits"), int) or value.get("consecutive_rate_limits", -1) < 0:
+        errors.append("account browser rate-limit count must be a non-negative integer")
+    cooldown_until = value.get("cooldown_until")
+    if cooldown_until != "none" and not is_timestamp(cooldown_until):
+        errors.append("account browser cooldown_until must be none or a timestamp")
+    slots = value.get("slots")
+    if not isinstance(slots, list):
+        errors.append("account browser gate slots must be a list")
+        slots = []
+    if len(slots) > ACCOUNT_BROWSER_MAX_ACTIVE:
+        errors.append("account browser gate exceeds the two-slot limit")
+    lease_ids: set[str] = set()
+    task_ids: set[str] = set()
+    for index, slot in enumerate(slots):
+        if not isinstance(slot, dict):
+            errors.append(f"account browser slot {index} must be an object")
+            continue
+        lease_id = str(slot.get("lease_id", "")).strip()
+        task_id = str(slot.get("implementation_thread_id", "")).strip()
+        operation = slot.get("operation")
+        if not lease_id or lease_id == "none" or lease_id in lease_ids:
+            errors.append(f"account browser slot {index} has an invalid or duplicate lease")
+        else:
+            lease_ids.add(lease_id)
+        if not task_id or task_id == "none" or task_id in task_ids:
+            errors.append(f"account browser slot {index} has an invalid or duplicate task identity")
+        else:
+            task_ids.add(task_id)
+        if operation not in VALID_ACCOUNT_BROWSER_OPERATIONS:
+            errors.append(f"account browser slot {index} has an invalid operation")
+        if not is_timestamp(slot.get("acquired_at")) or not is_timestamp(slot.get("expires_at")):
+            errors.append(f"account browser slot {index} requires valid timestamps")
+    if errors:
+        raise LCRLError("; ".join(errors))
+
+
+def load_account_browser_gate(path: str | Path, allow_missing: bool = False) -> dict[str, Any]:
+    gate_path = Path(path).expanduser().resolve()
+    if not gate_path.exists():
+        if allow_missing:
+            return empty_account_browser_gate()
+        raise LCRLError(f"account browser gate not found: {gate_path}")
+    try:
+        value = json.loads(gate_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise LCRLError(f"invalid account browser gate {gate_path}: {exc}") from exc
+    validate_account_browser_gate(value)
+    return value
+
+
+def _save_account_browser_gate_locked(
+    gate_path: Path,
+    value: dict[str, Any],
+    expected_revision: int | None = None,
+) -> int:
+    if gate_path.exists() and expected_revision is not None:
+        current = json.loads(gate_path.read_text(encoding="utf-8"))
+        if current.get("revision") != expected_revision:
+            raise LCRLError(
+                f"account browser gate revision conflict: expected {expected_revision}, found {current.get('revision')}"
+            )
+    updated = deepcopy(value)
+    updated["schema_version"] = ACCOUNT_BROWSER_GATE_VERSION
+    updated["max_active"] = ACCOUNT_BROWSER_MAX_ACTIVE
+    updated["revision"] = int(value.get("revision", 0)) + 1
+    updated["updated_at"] = utc_now()
+    validate_account_browser_gate(updated)
+    gate_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(updated, ensure_ascii=False, indent=2) + "\n"
+    descriptor, temp_name = tempfile.mkstemp(prefix=f".{gate_path.name}.", suffix=".tmp", dir=gate_path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        atomic_replace(temp_name, gate_path)
+    finally:
+        if os.path.exists(temp_name):
+            os.unlink(temp_name)
+    value.clear()
+    value.update(updated)
+    return updated["revision"]
+
+
+def _account_gate_now(value: str | None = None) -> datetime:
+    return parse_time(value) or datetime.now(timezone.utc)
+
+
+def _live_account_browser_slots(gate: dict[str, Any], now: datetime) -> list[dict[str, Any]]:
+    return [slot for slot in gate["slots"] if (parse_time(slot.get("expires_at")) or now) > now]
+
+
+def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, Any]:
+    gate_path = Path(args.registry).expanduser().resolve() if args.registry else default_account_browser_gate_path()
+    task_id = title_component(args.implementation_thread_id, "implementation_thread_id", 160)
+    if args.operation not in VALID_ACCOUNT_BROWSER_OPERATIONS:
+        raise LCRLError("invalid account browser operation")
+    now = _account_gate_now(args.at)
+    with acquire_state_lock(gate_path):
+        gate = load_account_browser_gate(gate_path, allow_missing=True)
+        revision = gate["revision"]
+        gate["slots"] = _live_account_browser_slots(gate, now)
+        cooldown_until = parse_time(gate.get("cooldown_until"))
+        if cooldown_until and cooldown_until > now:
+            if gate_path.exists() and len(gate["slots"]) != len(load_account_browser_gate(gate_path)["slots"]):
+                _save_account_browser_gate_locked(gate_path, gate, expected_revision=revision)
+            return {
+                "ok": True,
+                "action": "account_browser_rate_limit_backoff",
+                "slot_acquired": False,
+                "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                "active_count": len(gate["slots"]),
+                "retry_not_before": gate["cooldown_until"],
+                "registry": str(gate_path),
+            }
+        recovery_probe_required = int(gate.get("consecutive_rate_limits", 0)) > 0
+        if recovery_probe_required and args.operation != "health_probe":
+            return {
+                "ok": True,
+                "action": "account_browser_health_probe_required",
+                "slot_acquired": False,
+                "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                "active_count": len(gate["slots"]),
+                "retry_not_before": "now",
+                "registry": str(gate_path),
+            }
+        existing = next(
+            (slot for slot in gate["slots"] if slot["implementation_thread_id"] == task_id), None
+        )
+        if existing:
+            return {
+                "ok": True,
+                "action": "account_browser_slot_reused",
+                "slot_acquired": True,
+                "lease_id": existing["lease_id"],
+                "expires_at": existing["expires_at"],
+                "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                "active_count": len(gate["slots"]),
+                "registry": str(gate_path),
+            }
+        if recovery_probe_required and gate["slots"]:
+            return {
+                "ok": True,
+                "action": "account_browser_access_queued",
+                "slot_acquired": False,
+                "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                "active_count": len(gate["slots"]),
+                "retry_not_before": min(slot["expires_at"] for slot in gate["slots"]),
+                "health_probe_only": True,
+                "registry": str(gate_path),
+            }
+        if len(gate["slots"]) >= ACCOUNT_BROWSER_MAX_ACTIVE:
+            retry_not_before = min(slot["expires_at"] for slot in gate["slots"])
+            return {
+                "ok": True,
+                "action": "account_browser_access_queued",
+                "slot_acquired": False,
+                "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                "active_count": len(gate["slots"]),
+                "retry_not_before": retry_not_before,
+                "registry": str(gate_path),
+            }
+        acquired_at = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        expires_at = (now + timedelta(seconds=ACCOUNT_BROWSER_SLOT_SECONDS)).replace(
+            microsecond=0
+        ).isoformat().replace("+00:00", "Z")
+        lease_id = "browser-slot-" + secrets.token_hex(8)
+        gate["slots"].append({
+            "lease_id": lease_id,
+            "implementation_thread_id": task_id,
+            "operation": args.operation,
+            "acquired_at": acquired_at,
+            "expires_at": expires_at,
+        })
+        _save_account_browser_gate_locked(gate_path, gate, expected_revision=revision)
+        return {
+            "ok": True,
+            "action": "account_browser_slot_acquired",
+            "slot_acquired": True,
+            "lease_id": lease_id,
+            "expires_at": expires_at,
+            "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+            "active_count": len(gate["slots"]),
+            "registry": str(gate_path),
+        }
+
+
+def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, Any]:
+    gate_path = Path(args.registry).expanduser().resolve() if args.registry else default_account_browser_gate_path()
+    task_id = title_component(args.implementation_thread_id, "implementation_thread_id", 160)
+    now = _account_gate_now(args.at)
+    with acquire_state_lock(gate_path):
+        gate = load_account_browser_gate(gate_path)
+        revision = gate["revision"]
+        gate["slots"] = _live_account_browser_slots(gate, now)
+        matched = next(
+            (
+                slot for slot in gate["slots"]
+                if slot["lease_id"] == args.lease_id
+                and slot["implementation_thread_id"] == task_id
+            ),
+            None,
+        )
+        if not matched:
+            raise LCRLError("account browser slot identity does not match an active lease")
+        gate["slots"] = [slot for slot in gate["slots"] if slot["lease_id"] != args.lease_id]
+        retry_not_before = "none"
+        if args.outcome == "rate_limited":
+            count = int(gate.get("consecutive_rate_limits", 0)) + 1
+            delay = min(
+                ACCOUNT_BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS * (2 ** min(count - 1, 1)),
+                ACCOUNT_BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS,
+            )
+            gate["consecutive_rate_limits"] = count
+            gate["slots"] = []
+            retry_not_before = (now + timedelta(seconds=delay)).replace(
+                microsecond=0
+            ).isoformat().replace("+00:00", "Z")
+            gate["cooldown_until"] = retry_not_before
+            action = "account_browser_circuit_opened"
+        elif args.outcome == "healthy":
+            cooldown_until = parse_time(gate.get("cooldown_until"))
+            if cooldown_until and cooldown_until > now:
+                raise LCRLError("account browser health cannot clear an active cooldown")
+            gate["cooldown_until"] = "none"
+            gate["consecutive_rate_limits"] = 0
+            action = "account_browser_health_confirmed"
+        else:
+            action = "account_browser_slot_released"
+        _save_account_browser_gate_locked(gate_path, gate, expected_revision=revision)
+        return {
+            "ok": True,
+            "action": action,
+            "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+            "active_count": len(gate["slots"]),
+            "consecutive_rate_limits": gate["consecutive_rate_limits"],
+            "retry_not_before": retry_not_before,
+            "registry": str(gate_path),
+        }
+
+
+def show_account_browser_gate_command(args: argparse.Namespace) -> dict[str, Any]:
+    gate_path = Path(args.registry).expanduser().resolve() if args.registry else default_account_browser_gate_path()
+    gate = load_account_browser_gate(gate_path, allow_missing=True)
+    now = _account_gate_now(args.at)
+    live_slots = _live_account_browser_slots(gate, now)
+    cooldown_until = parse_time(gate.get("cooldown_until"))
+    return {
+        "ok": True,
+        "action": "account_browser_gate_status",
+        "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+        "active_count": len(live_slots),
+        "cooldown_active": bool(cooldown_until and cooldown_until > now),
+        "retry_not_before": gate["cooldown_until"] if cooldown_until and cooldown_until > now else "none",
+        "consecutive_rate_limits": gate["consecutive_rate_limits"],
+        "slots": deepcopy(live_slots),
+        "registry": str(gate_path),
+    }
 
 
 def skill_root() -> Path:
@@ -6403,6 +6696,33 @@ def build_parser() -> argparse.ArgumentParser:
     )
     browser_startup_plan.add_argument("--exact-url-open-authorized", action="store_true")
 
+    acquire_account_browser_slot = sub.add_parser(
+        "acquire-account-browser-slot",
+        help="在任何网页 Chat 访问前取得机器级共享名额（最多两个）",
+    )
+    acquire_account_browser_slot.add_argument("--implementation-thread-id", required=True)
+    acquire_account_browser_slot.add_argument(
+        "--operation", required=True, choices=sorted(VALID_ACCOUNT_BROWSER_OPERATIONS),
+    )
+    acquire_account_browser_slot.add_argument("--registry")
+    acquire_account_browser_slot.add_argument("--at")
+
+    release_account_browser_slot = sub.add_parser(
+        "release-account-browser-slot",
+        help="释放网页 Chat 名额；真实限流会打开账户级熔断",
+    )
+    release_account_browser_slot.add_argument("--implementation-thread-id", required=True)
+    release_account_browser_slot.add_argument("--lease-id", required=True)
+    release_account_browser_slot.add_argument(
+        "--outcome", required=True, choices=("completed", "healthy", "rate_limited"),
+    )
+    release_account_browser_slot.add_argument("--registry")
+    release_account_browser_slot.add_argument("--at")
+
+    show_account_browser_gate = sub.add_parser("show-account-browser-gate")
+    show_account_browser_gate.add_argument("--registry")
+    show_account_browser_gate.add_argument("--at")
+
     retire_missing_wait = sub.add_parser("retire-missing-wait")
     retire_missing_wait.add_argument("--state", required=True)
     retire_missing_wait.add_argument("--automation-id", required=True)
@@ -6714,6 +7034,12 @@ def main(argv: list[str] | None = None) -> int:
             result = startup_diagnostics_command(args)
         elif args.command == "browser-startup-plan":
             result = browser_startup_plan_command(args)
+        elif args.command == "acquire-account-browser-slot":
+            result = acquire_account_browser_slot_command(args)
+        elif args.command == "release-account-browser-slot":
+            result = release_account_browser_slot_command(args)
+        elif args.command == "show-account-browser-gate":
+            result = show_account_browser_gate_command(args)
         elif args.command == "retire-missing-wait":
             result = retire_missing_wait_command(args)
         elif args.command == "record-network-error":

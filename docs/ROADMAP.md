@@ -49,7 +49,10 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 - Inspect healthy pages without refresh. After a network/load failure, permit one
   same-tab reload at the next 180-second authorized check.
 - Treat ChatGPT rate limiting separately: no reload/read/send and deterministic
-  15/30/60-minute backoff.
+  machine-wide 30/60-minute circuit breaking. All local runs share at most two
+  short-lived web-Chat access slots; the third queues before browser startup,
+  and only one read-only health probe may close an expired circuit. Cross-device
+  access remains outside the local controller's proof boundary.
 - Preserve receipt reconciliation and duplicate-send protection without making
   hashes or internal state routine user concepts.
 - Preserve full natural-language review context while treating an explicitly

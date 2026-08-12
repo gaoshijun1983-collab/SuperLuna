@@ -5,6 +5,22 @@ formal reviewer is one user-selected ChatGPT conversation in Codex's in-app
 browser. `app_chat_review` remains readable for compatibility with saved state,
 but new runs use `in_app_browser`.
 
+## Shared account access gate
+
+All local runs using the same ChatGPT account share a machine-wide browser gate.
+Every browser initialization, tab list/claim/open, DOM inspection, read, send,
+or reload requires one of two short-lived slots. A third run queues without
+initializing its browser. A real conversation-history rate-limit notice releases
+the reporting slot, clears every other local slot, and opens a 30-minute account
+circuit; a consecutive notice opens it for 60 minutes. After cooldown only one
+read-only health probe may run, and a healthy result is required to restore the
+two-slot limit. Slots never span local implementation or reviewer waiting.
+
+The registry defaults to
+`~/.codex/superluna/account-browser-gate.json` (or the configured Codex home),
+so it coordinates projects and tasks on the current machine. It cannot prove
+that another computer signed into the same ChatGPT account is idle.
+
 ## Fixed identity
 
 - Bind the exact conversation id from `https://chatgpt.com/c/<conversation-id>`.

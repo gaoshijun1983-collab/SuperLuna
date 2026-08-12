@@ -155,6 +155,29 @@ def _register_binding_worker(
         connection.close()
 
 
+def _acquire_account_browser_slot_worker(
+    registry_path: str,
+    task_number: int,
+    barrier,
+    connection,
+) -> None:
+    """Race for the machine-wide ChatGPT browser limit."""
+    module = _load_lcrl_module()
+    barrier.wait(timeout=30)
+    try:
+        result = module.acquire_account_browser_slot_command(Namespace(
+            implementation_thread_id=f"browser-task-{task_number}",
+            operation="startup",
+            registry=registry_path,
+            at="2026-08-12T08:00:00Z",
+        ))
+        connection.send({"ok": True, "result": result})
+    except Exception as exc:  # pragma: no cover - surfaces as test failure
+        connection.send({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+    finally:
+        connection.close()
+
+
 class ControllerTests(unittest.TestCase):
     def make_state(self, root: Path):
         state_path = root / "state.json"
@@ -164,6 +187,133 @@ class ControllerTests(unittest.TestCase):
         state["runtime"]["session_log"] = str(root / "session.jsonl")
         lcrl.save_state(state_path, state)
         return state_path
+
+    def test_account_browser_gate_allows_two_and_queues_third(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="startup",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            second = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-two", operation="waiting_read",
+                registry=str(registry), at="2026-08-12T08:00:01Z",
+            ))
+            third = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-three", operation="submission",
+                registry=str(registry), at="2026-08-12T08:00:02Z",
+            ))
+
+            self.assertEqual(first["action"], "account_browser_slot_acquired")
+            self.assertEqual(second["action"], "account_browser_slot_acquired")
+            self.assertEqual(third["action"], "account_browser_access_queued")
+            self.assertFalse(third["slot_acquired"])
+            self.assertEqual(third["max_active"], 2)
+            self.assertEqual(third["active_count"], 2)
+            gate = lcrl.load_account_browser_gate(registry)
+            self.assertEqual(len(gate["slots"]), 2)
+
+    def test_account_browser_gate_enforces_two_under_process_race(self):
+        ctx = mp.get_context("spawn")
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            process_count = 6
+            barrier = ctx.Barrier(process_count)
+            workers = []
+            receivers = []
+            for number in range(process_count):
+                receiver, sender = ctx.Pipe(duplex=False)
+                worker = ctx.Process(
+                    target=_acquire_account_browser_slot_worker,
+                    args=(str(registry), number, barrier, sender),
+                )
+                receivers.append(receiver)
+                workers.append(worker)
+                worker.start()
+            payloads = [receiver.recv() for receiver in receivers]
+            for worker in workers:
+                worker.join(timeout=30)
+                self.assertEqual(worker.exitcode, 0)
+            self.assertTrue(all(item["ok"] for item in payloads), payloads)
+            acquired = [
+                item["result"] for item in payloads
+                if item["result"]["action"] == "account_browser_slot_acquired"
+            ]
+            queued = [
+                item["result"] for item in payloads
+                if item["result"]["action"] == "account_browser_access_queued"
+            ]
+            self.assertEqual(len(acquired), 2, payloads)
+            self.assertEqual(len(queued), 4, payloads)
+            self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 2)
+
+    def test_account_rate_limit_opens_global_circuit_and_clears_slots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="startup",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-two", operation="startup",
+                registry=str(registry), at="2026-08-12T08:00:01Z",
+            ))
+            limited = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="rate_limited", registry=str(registry), at="2026-08-12T08:01:00Z",
+            ))
+            blocked = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-three", operation="waiting_read",
+                registry=str(registry), at="2026-08-12T08:02:00Z",
+            ))
+
+            self.assertEqual(limited["action"], "account_browser_circuit_opened")
+            self.assertEqual(limited["active_count"], 0)
+            self.assertEqual(limited["retry_not_before"], "2026-08-12T08:31:00Z")
+            self.assertEqual(blocked["action"], "account_browser_rate_limit_backoff")
+            self.assertFalse(blocked["slot_acquired"])
+            gate = lcrl.load_account_browser_gate(registry)
+            self.assertEqual(gate["slots"], [])
+            self.assertEqual(gate["consecutive_rate_limits"], 1)
+
+    def test_account_health_probe_clears_expired_circuit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="health_probe",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="rate_limited", registry=str(registry), at="2026-08-12T08:00:30Z",
+            ))
+            normal = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-normal", operation="startup",
+                registry=str(registry), at="2026-08-12T08:31:00Z",
+            ))
+            self.assertEqual(normal["action"], "account_browser_health_probe_required")
+            self.assertFalse(normal["slot_acquired"])
+            probe = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-health", operation="health_probe",
+                registry=str(registry), at="2026-08-12T08:31:00Z",
+            ))
+            second_probe = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-health-two", operation="health_probe",
+                registry=str(registry), at="2026-08-12T08:31:00Z",
+            ))
+            self.assertEqual(second_probe["action"], "account_browser_access_queued")
+            self.assertTrue(second_probe["health_probe_only"])
+            healthy = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-health", lease_id=probe["lease_id"],
+                outcome="healthy", registry=str(registry), at="2026-08-12T08:31:01Z",
+            ))
+            self.assertEqual(healthy["action"], "account_browser_health_confirmed")
+            self.assertEqual(healthy["consecutive_rate_limits"], 0)
+            status = lcrl.show_account_browser_gate_command(Namespace(
+                registry=str(registry), at="2026-08-12T08:31:02Z",
+            ))
+            self.assertFalse(status["cooldown_active"])
+            self.assertEqual(status["active_count"], 0)
 
     def seed_terra_advice(self, state_path: Path, signal: str = "debugger_impasse"):
         state = lcrl.load_state(state_path)

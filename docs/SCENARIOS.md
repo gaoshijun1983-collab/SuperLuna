@@ -20,6 +20,11 @@ SuperLuna never changes the model/reasoning selector automatically.
 
 Each workflow has a unique implementation task, reviewer conversation, and
 waiting identity. Readable titles help the user but never rebind a workflow.
+Local implementation may run in parallel, but all workflows on one machine
+share one ChatGPT-account browser gate. At most two tasks may initialize,
+inspect, read, send, or refresh web Chat at the same time. A third task queues
+before browser initialization. Slots are short-lived and never remain held
+while Codex implements locally or waits for the reviewer.
 
 ## Long reviewer reasoning
 
@@ -37,9 +42,13 @@ then reverifies the same conversation before reading. No resend is authorized.
 
 ## ChatGPT says requests are too frequent
 
-Record `rate_limited`. Do not reload, read conversation history, or send. The
-single waiting gate backs off for 15 minutes; consecutive notices use 30 and 60
-minutes. A readable page resets the rate-limit counter.
+Release the current shared browser slot with `rate_limited`. Do not click,
+reload, read conversation history, send, or probe another Chat. This clears all
+local slots and opens the machine-wide account circuit for 30 minutes; a
+consecutive notice uses 60 minutes. After cooldown, exactly one read-only health
+probe may run. Only a healthy probe closes the circuit and restores the two-slot
+limit. Per-run waiting recovery remains subordinate to this account-wide gate.
+The local gate cannot coordinate another computer signed into the same account.
 
 ## Send result is uncertain
 
