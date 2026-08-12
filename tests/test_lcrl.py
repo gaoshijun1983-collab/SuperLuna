@@ -919,7 +919,11 @@ class ControllerTests(unittest.TestCase):
                 lcrl.MAX_HEARTBEAT_BYTES,
             )
             self.assertIn("browser_read_authorized 前禁用浏览器", rendered)
-            self.assertIn("消费前删除本 automation", rendered)
+            self.assertIn("先 release-account-browser-slot completed", rendered)
+            self.assertLess(
+                rendered.index("release-account-browser-slot"),
+                rendered.index("resume-from-reply"),
+            )
 
     def test_waiting_check_rejects_oversized_automation_identity(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -5303,6 +5307,75 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(recovered["action"], "browser_page_ready")
             self.assertEqual(recovered["browser_consecutive_network_errors"], 0)
             self.assertEqual(lcrl.load_state(state_path)["recovery"]["network_state"], "healthy")
+
+    def test_browser_waiting_reply_cannot_resume_while_read_slot_is_still_live(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry = root / "account-browser-gate.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "web-chat-release-first",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "web-chat-release-first")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="web-chat-release-first", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_submit_pending", stage="B1",
+                fingerprint="release-first-fingerprint",
+            )
+            self.transition(
+                state_path, "review_waiting", stage="B1", waiting_since=now,
+                request_turn_id="request-turn-release-first",
+                request_message_id="request-message-release-first",
+                request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            automation_id = "release-first-wait"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            claimed = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="web-chat-release-first",
+                operation="waiting_read", registry=str(registry), at=None,
+            ))
+            authorized = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=claimed["lease_id"], account_slot_lease_id=slot["lease_id"],
+                account_browser_registry=str(registry), at=None,
+            ))
+            self.assertEqual(authorized["action"], "browser_read_authorized")
+            reply = root / "reply.txt"
+            reply.write_text("请继续一个局部、可逆的修复。", encoding="utf-8")
+            resume_args = dict(
+                state=str(state_path), response_turn_id="response-turn-release-first",
+                response_message_id="response-message-release-first",
+                response_completed_at=now, result_file=str(reply), result_json=None,
+                result_base64=None, source="waiting_check",
+                deleted_automation_id=automation_id,
+                account_browser_registry=str(registry),
+            )
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "requires waiting_read slot release",
+            ):
+                lcrl.resume_from_reply_command(Namespace(**resume_args))
+
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", lease_id=slot["lease_id"],
+                outcome="completed", health_proof=None, registry=str(registry), at=None,
+            ))
+            resumed = lcrl.resume_from_reply_command(Namespace(**resume_args))
+            self.assertEqual(resumed["action"], "apply_result")
 
     def test_browser_rate_limit_backs_off_without_reloading_or_switching_chat(self):
         with tempfile.TemporaryDirectory() as directory:

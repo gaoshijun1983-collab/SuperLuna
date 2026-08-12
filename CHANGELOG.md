@@ -1,5 +1,12 @@
 # Changelog
 
+- Unreleased Controller 83 / Skill revision `2026-08-12.37`: C11 consumed its
+  second scheduled reply correctly but retained the `waiting_read` account slot
+  until preparing round three. The rendered one-shot prompt now orders account
+  release before wait deletion and resume, and `resume-from-reply` fails closed
+  while the owning task still has any live `waiting_read` slot. The compact
+  prompt remains within the immutable 1200-byte budget.
+
 - Unreleased Controller 82 / Skill revision `2026-08-12.36`: the clean C10
   macOS retest stopped at 0/3 because its task-local browser had no tabs and
   the only machine-verifiable home-navigation grant was for a health probe.

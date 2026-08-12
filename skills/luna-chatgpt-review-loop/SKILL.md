@@ -528,7 +528,10 @@ python -B <skill-root>/scripts/lcrl.py browser-network-observation \
    occurrence 重新认领同一个用户标签；若平台不保留明确授权的自建标签，则下一次只可走
    上述受权精确 URL 重开路径，而不是把临时句柄当成持久身份。
 
-无论读取成功、无完整回复、网络失败或安全停止，本 occurrence 结束前都必须释放账户名额。
+无论读取成功、无完整回复、网络失败或安全停止，本 occurrence 都必须释放账户名额。读取到
+完整回复时，顺序固定为：保存回复 → `release-account-browser-slot --outcome completed` → 删除
+当前一次性等待任务 → `resume-from-reply`。控制器会拒绝在同一实施任务仍持有有效
+`waiting_read` 名额时消费回复；不得把释放推迟到下一轮提交前。
 真实限流必须以 `release-account-browser-slot --outcome rate_limited` 打开共享熔断；不得仅写入
 当前任务自己的 `browser-network-observation` 后让其他任务继续访问。
 

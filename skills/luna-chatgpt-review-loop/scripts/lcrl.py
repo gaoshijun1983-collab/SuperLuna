@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 82
-SKILL_REVISION = "2026-08-12.36"
+CONTROLLER_VERSION = 83
+SKILL_REVISION = "2026-08-12.37"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 BINDING_REGISTRY_VERSION = 1
@@ -2280,10 +2280,10 @@ def _waiting_check_prompt(
         f"{command}\n"
         "仅 action=review_poll/receipt_reconcile 时运行：\n"
         f"{account_command}\n"
-        "仅 slot_acquired=true 才运行 authorize-waiting-chat-read，传同一 token、automation id、"
-        "waiting-check lease_id 和账户 lease_id。browser_read_authorized 前禁用浏览器；授权后重取"
-        "本轮标签句柄并禁用旧 Tab/id，只读绑定 Chat、配对真实身份。消费前删除本 automation，"
-        "再 resume-from-reply 并在原任务继续。其他 action 静默退出；禁循环规则和替代 Chat。"
+        "仅 slot_acquired=true 才运行 authorize-waiting-chat-read，传同一 token、task、read lease 和"
+        "账户 lease。browser_read_authorized 前禁用浏览器；授权后重取本轮标签句柄、禁用旧 Tab/id，"
+        "只读固定 Chat 并配对。读完先 release-account-browser-slot completed，再删本任务、"
+        "resume-from-reply 继续。其他 action 静默退出；禁循环和替代 Chat。"
     )
 
 
@@ -6578,6 +6578,28 @@ def resume_from_reply_command(args: argparse.Namespace) -> dict[str, Any]:
             claimed_id = state["automation"].get("waiting_check_claimed_id", "none")
             if current_id == "none" or claimed_id != current_id or deleted_id != current_id:
                 raise LCRLError("scheduled reply resume requires proof that its current one-shot was deleted")
+            if review.get("transport") == "in_app_browser":
+                gate_override = getattr(args, "account_browser_registry", None)
+                gate_path = (
+                    Path(gate_override).expanduser().resolve()
+                    if gate_override else default_account_browser_gate_path()
+                )
+                try:
+                    gate = load_account_browser_gate(gate_path, allow_missing=True)
+                    live_slots = _live_account_browser_slots(gate, _account_gate_now())
+                except (LCRLError, OSError, ValueError) as exc:
+                    raise LCRLError(
+                        "scheduled browser reply resume cannot verify account slot release"
+                    ) from exc
+                implementation_thread_id = state["automation"]["implementation_thread_id"]
+                if any(
+                    slot.get("implementation_thread_id") == implementation_thread_id
+                    and slot.get("operation") == "waiting_read"
+                    for slot in live_slots
+                ):
+                    raise LCRLError(
+                        "scheduled browser reply resume requires waiting_read slot release"
+                    )
             resumed_waiting_automation_id = current_id
         if review["status"] != "review_waiting":
             # Peer may have just consumed; treat as already_consumed when applicable.
@@ -7601,6 +7623,7 @@ def build_parser() -> argparse.ArgumentParser:
     resume_reply.add_argument("--result-base64")
     resume_reply.add_argument("--source", choices=("foreground", "waiting_check"), default="foreground")
     resume_reply.add_argument("--deleted-automation-id")
+    resume_reply.add_argument("--account-browser-registry")
 
     doctor_parser = sub.add_parser("doctor")
     doctor_parser.add_argument("--state", required=True)

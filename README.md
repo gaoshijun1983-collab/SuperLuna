@@ -19,13 +19,21 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 82 / Skill revision `2026-08-12.36`, gives an explicitly authorized
+Controller 83 / Skill revision `2026-08-12.37`, refuses to consume a scheduled
+browser reply while the owning task still holds a live `waiting_read` account
+slot, and the rendered one-shot prompt now releases that slot before deleting
+the wait and resuming. Controller 82 gives an explicitly authorized
 new reviewer Chat a controller-recorded, once-only startup home-navigation grant;
 an empty task browser no longer has to misuse the health-probe path, and the same
 authorization cannot be reused after its startup slot is released. Controller 81 closes a Windows 3.13
 concurrent-start race while initializing the first byte of a shared lock file
 and gives only the account-browser registry a bounded ten-second lock queue;
 persistent permission failures and ordinary state locks remain strict.
+The macOS C11 probe completed exactly three autonomous browser-review rounds in
+one fixed Extreme Chat, with three single-RDATE wakeups, three uniquely paired
+responses, a final PASS, and zero remaining waits or account slots. C11 exposed
+one late round-two read-slot release, so it validates the broader loop but does
+not count as a clean Controller 83 release-order run.
 Controller 80 keeps the exact one-shot wait
 prompt within its 1200-byte safety budget for the C9 macOS path and projects
 that prompt before any browser send; an unsupported longer path now fails
