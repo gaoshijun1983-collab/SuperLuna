@@ -2693,6 +2693,30 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertTrue(lcrl.reply_requires_user_decision(high_impact))
 
+    def test_standalone_unique_next_step_ignores_hypothetical_permission_background(self):
+        parsed = lcrl.parse_result(
+            "REVISE\n\n"
+            "最小反例：脚本第一次执行后改变自身、权限或工作区状态。\n\n"
+            "唯一下一步\n\n"
+            "目标：在隔离目录连续执行探针两次并记录输出。\n\n"
+            "完成条件：两次输出相同，且 before/after 文件清单只包含隔离目录。\n\n"
+            "最小验证：保存顺序日志、退出码和文件变更清单。\n\n"
+            "[SUPERLUNA_MODEL_ROUTE]\nMODEL_ROUTE: MEDIUM\nVERDICT: REVISE\n"
+            "[/SUPERLUNA_MODEL_ROUTE]"
+        )
+
+        scope = lcrl.natural_language_action_scope(
+            str(parsed["result"]["next_step"])
+        )
+        self.assertTrue(scope.startswith("唯一下一步"))
+        self.assertNotIn("权限", scope)
+        self.assertFalse(lcrl.reply_requires_user_decision(parsed))
+
+        real_permission_change = lcrl.parse_result(
+            "REVISE\n\n唯一下一步\n\n目标：修改生产环境权限后继续部署。"
+        )
+        self.assertTrue(lcrl.reply_requires_user_decision(real_permission_change))
+
     def test_local_counterexample_deletion_is_not_misclassified_as_user_high_impact(self):
         parsed = lcrl.parse_result(
             "REVISE\n\n"

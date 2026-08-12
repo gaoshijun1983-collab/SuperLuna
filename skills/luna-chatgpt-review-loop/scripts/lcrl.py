@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 75
-SKILL_REVISION = "2026-08-12.29"
+CONTROLLER_VERSION = 76
+SKILL_REVISION = "2026-08-12.30"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -198,7 +198,8 @@ VAGUE_REPLY_PATTERN = re.compile(
 )
 EXPLICIT_NEXT_STEP_HEADING_PATTERN = re.compile(
     r"(?im)^(?:#{1,6}\s*)?(?:(?:唯一)?下一步|"
-    r"(?:minimum\s+)?in[- ]scope\s+next\s+step)\s*[｜|:：]\s*.+$"
+    r"(?:minimum\s+)?in[- ]scope\s+next\s+step)"
+    r"(?:\s*[｜|:：]\s*.+)?\s*$"
 )
 EXPLICIT_STOP_ACTION_PATTERN = re.compile(
     r"(?im)^(?:#{1,6}\s*)?(?:最终结论\s*[｜|:：]\s*)?"

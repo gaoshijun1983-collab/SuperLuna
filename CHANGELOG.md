@@ -1,5 +1,14 @@
 # Changelog
 
+- Unreleased Controller 76 / Skill revision `2026-08-12.30`: the first clean
+  Controller 75 macOS waiting cycle acquired the exact `waiting_read` account
+  slot, authorized browser access, deleted its one-shot task, and consumed the
+  reply once. It then falsely required user input because the review used a
+  standalone `唯一下一步` heading and mentioned file permissions only in an
+  earlier hypothetical counterexample. Standalone Chinese and English next-step
+  headings now bound the actionable scope; real permission, release, and deploy
+  instructions inside that scope remain blocked.
+
 - Unreleased Controller 75 / Skill revision `2026-08-12.29`: a real macOS
   waiting occurrence passed the wait claim and browser-read authorization but
   then initialized the browser without first acquiring the shared

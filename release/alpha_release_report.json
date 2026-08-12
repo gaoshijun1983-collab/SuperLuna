@@ -1,9 +1,9 @@
 {
   "product_name": "SuperLuna",
   "package_version": "0.2.0-alpha.49",
-  "controller_version": 75,
+  "controller_version": 76,
   "schema_version": 7,
-  "skill_revision": "2026-08-12.29",
+  "skill_revision": "2026-08-12.30",
   "source_contains_unreleased_hotfix": true,
   "dist_archive_matches_current_source": false,
   "compatibility_entrypoints": {
@@ -12,9 +12,9 @@
     "command": "lcrl"
   },
   "automated_evidence": {
-    "repository_tests": 245,
+    "repository_tests": 246,
     "controller_selftests": 15,
-    "github_ci_run_id": 31595818847,
+    "github_ci_run_id": 31596773954,
     "github_ci_windows_macos_ubuntu_python_311_313_passed": true,
     "native_session_concurrent_start_serialized": true,
     "native_session_spawn_process_exclusion": true,
@@ -155,7 +155,9 @@
     "windows_controller74_binding_registry_queue_local_tested": true,
     "windows_controller74_binding_registry_queue_ci_passed": true,
     "controller75_waiting_read_account_slot_local_tested": true,
-    "controller75_waiting_read_account_slot_real_retest_passed": false,
+    "controller75_waiting_read_account_slot_real_retest_passed": true,
+    "controller76_standalone_next_step_scope_local_tested": true,
+    "controller76_standalone_next_step_scope_real_retest_passed": false,
     "macos_host_turn_finalization_checked_at": "2026-08-11",
     "macos_host_turn_finalization_enforcement_available": false,
     "real_project_preflight_completed": true,
@@ -275,7 +277,7 @@
     "browser_real_network_recovery": false,
     "browser_real_rate_limit_recovery": false,
     "real_project_blocker": "Controller 24 / Skill revision 2026-08-10.4 completed ten real Windows browser interactions, but one same-occurrence foreground read was correctly quarantined. Skill revision 2026-08-10.5 then submitted once and ended before reply consumption; its independent wait found the provisioned tab absent from both browser listings. Controller 25 / revision 2026-08-10.6 successfully reopened the already-bound canonical URL and retrieved the unique paired PASS, but the natural-language high-impact gate falsely treated a deferred mention of later release validation as the current action. Controller 26 / revision 2026-08-10.7 fixed a labelled next-step scope and its first clean Windows round uniquely paired a PASS, but an explicit recommendation to stop the completed monster-AI review had no next-step heading, so the whole-prose fallback again treated deferred release testing as a current action and required manual recovery. Controller 27 / revision 2026-08-10.8 fixed that local stop scope, but its real visual retest found the same provisioned pending-handoff Chat absent from both tab listings before a later submission; the task correctly stopped with zero submissions because only waiting-side URL recovery existed. Controller 28 / revision 2026-08-10.9 added a short fingerprint-bound submission reopen lease, but its real retest found that the restarted in-app browser had a new browser id and correctly stopped with zero submissions. Controller 29 / revision 2026-08-10.10 added a lease-bound one-browser rebind; its real visual retest sent one uniquely identified request but the two-minute lease expired before confirmation, so the task did not rebind or resend. Controller 30 / revision 2026-08-10.11 extended the lease to ten minutes and its real Windows retest successfully sent once, persisted the new browser id, and consumed the lease, but a temporary full-viewport evidence preview exposed the fast reply in the submitting occurrence. Skill revision 2026-08-10.12 forbids that preview, and its follow-up real Windows visual-isolation diagnostic passed with one submission, atomic browser-id rebind, zero duplicates, and no post-submit page/viewport/assistant read; direct locator capture was unsupported, so the optional screenshot was safely omitted. A later revision-.12 diagnostic began with no fixed-URL tab in either listing, used one controller-authorized canonical-URL open, submitted once, and then uniquely paired and consumed the complete PASS response in a separate waiting occurrence; replay was a no-op. This verifies revision-.12's Windows fixed-Chat transport function end to end, but the waiting occurrence was manually awakened and no real platform automation was created, so it does not count toward the autonomous gate. Revision 2026-08-10.13 then synchronized the published policy schema with runtime role, reviewer, reasoning, and transport locks. Revision 2026-08-10.14 further synchronized the published confirmation trust fields and transport-specific control-source constraints. Revision 2026-08-10.15 synchronized the attachment/filesystem capability enums, required Terra capability probe, and the bidirectional MCP payload constraint. Revision 2026-08-10.16 synchronized the model-policy version, automatic-action locks, executor, and reviewer safety core; these local schema corrections change the frozen candidate without adding real-device credit. The frozen consecutive gate remains zero, and no-outside-wakeup Windows scheduling on revision-.16, real macOS browser matrices, plus real network/rate-limit recovery evidence remain incomplete",
-    "current_source_blocker": "Controller 75 / Skill revision 2026-08-12.29 follows the first clean projectless Mac C4 round submission. Its single RDATE correctly woke the original task and claimed the wait, but the occurrence skipped the shared waiting_read account slot before browser authorization and page access. It detected the contract violation after reading, did not consume the reply, deleted the one-shot automation, released the wait lease, and stopped before rounds two and three. Controller 75 makes the exact live waiting_read slot lease a hard input to browser wait authorization and independently verifies task identity, operation, and expiry before browser initialization. Local repository tests pass 245/245; Controller 75 six-platform CI and a fresh real three-round retest are pending. Controller 74's six-platform run 31595818847 passed, including Windows Python 3.13 concurrent binding registration. Earlier A2 completed one autonomous submit/wait/read/apply cycle and duplicate-consumption no-op, but the frozen consecutive gate remains zero. The controller still cannot physically prevent a host model from bypassing the Skill, query platform automation deletion, reject host turn completion, or coordinate another computer using the same account. Alpha 49 still needs ten consecutive real project cycles, the macOS browser matrix, host enforcement coverage, and real network/rate-limit recovery.",
+    "current_source_blocker": "Controller 76 / Skill revision 2026-08-12.30 follows the first clean projectless Mac C6 cycle. C6 required one creation-time identity receipt because the platform returns the child threadId only after task creation, then acquired startup/submission account slots, reused the fixed Extreme Chat, submitted once, and created one RDATE. The first occurrence hit the account quiet handoff and rearmed the same one-shot without browser access. The second occurrence acquired the exact waiting_read slot, passed Controller 75 authorization, read the paired reply, deleted the one-shot automation, and consumed the response exactly once. This verifies Controller 75's real waiting-read hard gate. The REVISE reply then used a standalone Chinese '唯一下一步' heading while mentioning file permissions only in an earlier hypothetical counterexample; Controller 75 failed to bound the action scope and required user input. Controller 76 recognizes standalone Chinese and English next-step headings while retaining high-impact blocking inside the bounded action. Local repository tests pass 246/246; Controller 76 six-platform CI and a fresh continuation retest are pending. Controller 75's six-platform run 31596773954 passed. The frozen consecutive project gate remains zero. The controller still cannot physically prevent a host model from bypassing the Skill, query platform automation deletion, reject host turn completion, or coordinate another computer using the same account. Alpha 49 still needs ten consecutive real project cycles, the macOS browser matrix, host enforcement coverage, and real network/rate-limit recovery.",
     "consecutive_real_project_cycles": 0,
     "required_real_project_cycles": 10,
     "windows_full_loop": false,
