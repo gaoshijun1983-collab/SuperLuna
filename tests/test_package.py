@@ -259,6 +259,33 @@ class PackageTests(unittest.TestCase):
             },
         )
 
+    def test_published_quota_ledger_schema_matches_runtime_event_contract(self):
+        schema = json.loads(
+            (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        progress = schema["properties"]["model_policy"]["properties"]["progress"]
+        self.assertEqual(
+            set(progress["required"]),
+            {"active_minutes_since_pro", "meaningful_steps_since_pro", "events"},
+        )
+        self.assertEqual(progress["properties"]["events"]["maxItems"], 20)
+        event = progress["properties"]["events"]["items"]
+        self.assertEqual(
+            set(event["required"]),
+            {
+                "event_id",
+                "stage",
+                "active_minutes",
+                "meaningful_step",
+                "evidence_fingerprint",
+                "recorded_at",
+            },
+        )
+        self.assertEqual(event["properties"]["active_minutes"], {"type": "integer", "minimum": 1, "maximum": 120})
+        self.assertEqual(event["properties"]["meaningful_step"], {"type": "boolean"})
+
     def test_published_confirmation_schema_requires_runtime_trust_evidence(self):
         schema = json.loads(
             (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(encoding="utf-8")

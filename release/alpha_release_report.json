@@ -36,7 +36,7 @@
     "browser_submission_navigation_timeout_same_tab_reconciled": true,
     "browser_submission_fresh_pre_send_gate_local_tested": true,
     "published_state_schema_requires_every_runtime_top_level_section": true,
-    "published_state_schema_nested_contract_complete": false,
+    "published_state_schema_nested_contract_complete": true,
     "published_state_schema_policy_contract_matches_runtime": true,
     "published_state_schema_confirmation_trust_contract_matches_runtime": true,
     "published_state_schema_capabilities_contract_matches_runtime": true,

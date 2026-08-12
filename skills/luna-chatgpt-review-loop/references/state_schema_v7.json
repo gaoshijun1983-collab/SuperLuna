@@ -341,7 +341,37 @@
             "current": {"enum": ["sol_extreme", "chat_pro"]}
           }
         },
-        "progress": {"type": "object"},
+        "progress": {
+          "type": "object",
+          "required": ["active_minutes_since_pro", "meaningful_steps_since_pro", "events"],
+          "properties": {
+            "active_minutes_since_pro": {"type": "integer", "minimum": 0},
+            "meaningful_steps_since_pro": {"type": "integer", "minimum": 0},
+            "events": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "required": [
+                  "event_id",
+                  "stage",
+                  "active_minutes",
+                  "meaningful_step",
+                  "evidence_fingerprint",
+                  "recorded_at"
+                ],
+                "properties": {
+                  "event_id": {"type": "string"},
+                  "stage": {"type": "string"},
+                  "active_minutes": {"type": "integer", "minimum": 1, "maximum": 120},
+                  "meaningful_step": {"type": "boolean"},
+                  "evidence_fingerprint": {"type": "string"},
+                  "recorded_at": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
         "routing": {"type": "object"},
         "pro": {"type": "object"},
         "terra": {"type": "object"}
