@@ -609,6 +609,8 @@ def empty_account_browser_gate() -> dict[str, Any]:
         "consecutive_rate_limits": 0,
         "handoff_not_before": "none",
         "last_released_task_id": "none",
+        "handoff_bypass_task_id": "none",
+        "handoff_bypass_operation": "none",
         "slots": [],
     }
 
@@ -632,6 +634,12 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
     last_released_task_id = value.get("last_released_task_id", "none")
     if not isinstance(last_released_task_id, str) or not last_released_task_id.strip():
         errors.append("account browser last_released_task_id must be none or a task identity")
+    handoff_bypass_task_id = value.get("handoff_bypass_task_id", "none")
+    if not isinstance(handoff_bypass_task_id, str) or not handoff_bypass_task_id.strip():
+        errors.append("account browser handoff_bypass_task_id must be none or a task identity")
+    handoff_bypass_operation = value.get("handoff_bypass_operation", "none")
+    if handoff_bypass_operation not in VALID_ACCOUNT_BROWSER_OPERATIONS | {"none"}:
+        errors.append("account browser handoff_bypass_operation is invalid")
     slots = value.get("slots")
     if not isinstance(slots, list):
         errors.append("account browser gate slots must be a list")
@@ -675,6 +683,8 @@ def load_account_browser_gate(path: str | Path, allow_missing: bool = False) -> 
         raise LCRLError(f"invalid account browser gate {gate_path}: {exc}") from exc
     value.setdefault("handoff_not_before", "none")
     value.setdefault("last_released_task_id", "none")
+    value.setdefault("handoff_bypass_task_id", "none")
+    value.setdefault("handoff_bypass_operation", "none")
     validate_account_browser_gate(value)
     return value
 
@@ -771,11 +781,15 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             }
         handoff_not_before = parse_time(gate.get("handoff_not_before"))
         last_released_task_id = str(gate.get("last_released_task_id", "none"))
+        handoff_bypass_allowed = (
+            gate.get("handoff_bypass_task_id") == task_id
+            and gate.get("handoff_bypass_operation") == args.operation
+        )
         if (
             not recovery_probe_required
             and handoff_not_before
             and handoff_not_before > now
-            and last_released_task_id not in {"none", task_id}
+            and not handoff_bypass_allowed
         ):
             return {
                 "ok": True,
@@ -809,6 +823,9 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "retry_not_before": retry_not_before,
                 "registry": str(gate_path),
             }
+        if handoff_bypass_allowed or (handoff_not_before and handoff_not_before <= now):
+            gate["handoff_bypass_task_id"] = "none"
+            gate["handoff_bypass_operation"] = "none"
         acquired_at = now.replace(microsecond=0).isoformat().replace("+00:00", "Z")
         expires_at = (now + timedelta(seconds=ACCOUNT_BROWSER_SLOT_SECONDS)).replace(
             microsecond=0
@@ -868,6 +885,8 @@ def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             gate["cooldown_until"] = retry_not_before
             gate["handoff_not_before"] = "none"
             gate["last_released_task_id"] = task_id
+            gate["handoff_bypass_task_id"] = "none"
+            gate["handoff_bypass_operation"] = "none"
             action = "account_browser_circuit_opened"
         elif args.outcome == "healthy":
             health_proof = str(getattr(args, "health_proof", "") or "").strip()
@@ -883,12 +902,16 @@ def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             gate["cooldown_until"] = "none"
             gate["consecutive_rate_limits"] = 0
             gate["last_released_task_id"] = task_id
+            gate["handoff_bypass_task_id"] = task_id
+            gate["handoff_bypass_operation"] = "startup"
             gate["handoff_not_before"] = (
                 now + timedelta(seconds=ACCOUNT_BROWSER_CROSS_TASK_QUIET_SECONDS)
             ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             action = "account_browser_health_confirmed"
         else:
             gate["last_released_task_id"] = task_id
+            gate["handoff_bypass_task_id"] = "none"
+            gate["handoff_bypass_operation"] = "none"
             gate["handoff_not_before"] = (
                 now + timedelta(seconds=ACCOUNT_BROWSER_CROSS_TASK_QUIET_SECONDS)
             ).replace(microsecond=0).isoformat().replace("+00:00", "Z")

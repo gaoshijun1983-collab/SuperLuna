@@ -4,9 +4,10 @@
   two-task retest proved that the two-slot ceiling alone does not prevent rapid
   cross-task conversation-history requests from retriggering ChatGPT's account
   limit. The shared gate now preserves the two-task cap but queues a different
-  task for a 180-second quiet handoff after every completed or healthy release;
-  the releasing task may continue its own recovery/startup chain immediately.
-  Two deterministic regressions cover the blocked handoff and exact expiry.
+  task for a 180-second quiet handoff after every completed or healthy release.
+  Only one same-task `startup` immediately after a proven healthy probe may
+  bypass the interval, and acquisition consumes that bypass. Three deterministic
+  regressions cover blocking, exact expiry, and the bounded health/startup bypass.
 
 - Unreleased Controller 61 / Skill revision `2026-08-12.15`: a real macOS
   retest showed that the ChatGPT homepage could appear healthy while opening
