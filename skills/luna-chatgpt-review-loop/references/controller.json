@@ -1,7 +1,7 @@
 {
-  "controller_version": 80,
+  "controller_version": 81,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-12.34",
+  "skill_revision": "2026-08-12.35",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",
@@ -13,6 +13,7 @@
   "browser_rate_limit_backoff_seconds": [900, 1800, 3600],
   "account_browser_max_active": 2,
   "account_browser_slot_seconds": 600,
+  "account_browser_gate_lock_timeout_seconds": 10,
   "account_browser_cross_task_quiet_seconds": 180,
   "account_browser_rate_limit_backoff_seconds": [1800, 3600],
   "max_heartbeat_bytes": 1200,

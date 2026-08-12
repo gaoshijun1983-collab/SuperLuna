@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 80
-SKILL_REVISION = "2026-08-12.34"
+CONTROLLER_VERSION = 81
+SKILL_REVISION = "2026-08-12.35"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 BINDING_REGISTRY_VERSION = 1
@@ -231,6 +231,7 @@ class StateLockTimeout(LCRLError):
 STATE_LOCK_TIMEOUT_SECONDS = 2.0
 STATE_LOCK_POLL_SECONDS = 0.01
 BINDING_REGISTRY_LOCK_TIMEOUT_SECONDS = 10.0
+ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS = 10.0
 ATOMIC_REPLACE_TIMEOUT_SECONDS = 0.5
 ATOMIC_REPLACE_POLL_SECONDS = 0.01
 SHARED_REGISTRY_REPLACE_TIMEOUT_SECONDS = 2.0
@@ -312,6 +313,21 @@ def open_state_lock_file(path: str | Path, timeout: float = STATE_LOCK_TIMEOUT_S
             time.sleep(STATE_LOCK_POLL_SECONDS)
 
 
+def ensure_lockable_byte(fd: int, timeout: float = STATE_LOCK_TIMEOUT_SECONDS) -> None:
+    """Ensure a Windows byte-range lock target survives concurrent creation."""
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while os.fstat(fd).st_size == 0:
+        try:
+            os.write(fd, b"0")
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(STATE_LOCK_POLL_SECONDS)
+            continue
+        break
+    os.lseek(fd, 0, os.SEEK_SET)
+
+
 @contextmanager
 def acquire_state_lock(
     state_path: str | Path,
@@ -332,9 +348,7 @@ def acquire_state_lock(
     deadline = time.monotonic() + max(0.0, float(timeout))
     try:
         # Windows byte-range locks require at least one lockable byte.
-        if os.fstat(fd).st_size == 0:
-            os.write(fd, b"0")
-            os.lseek(fd, 0, os.SEEK_SET)
+        ensure_lockable_byte(fd, timeout=timeout)
         while True:
             try:
                 if os.name == "nt":  # pragma: no cover - exercised on Windows
@@ -828,7 +842,9 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
     if args.operation not in VALID_ACCOUNT_BROWSER_OPERATIONS:
         raise LCRLError("invalid account browser operation")
     now = _account_gate_now(args.at)
-    with acquire_state_lock(gate_path):
+    with acquire_state_lock(
+        gate_path, timeout=ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS,
+    ):
         gate = load_account_browser_gate(gate_path, allow_missing=True)
         revision = gate["revision"]
         gate["slots"] = _live_account_browser_slots(gate, now)
@@ -1012,7 +1028,9 @@ def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
     gate_path = Path(args.registry).expanduser().resolve() if args.registry else default_account_browser_gate_path()
     task_id = title_component(args.implementation_thread_id, "implementation_thread_id", 160)
     now = _account_gate_now(args.at)
-    with acquire_state_lock(gate_path):
+    with acquire_state_lock(
+        gate_path, timeout=ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS,
+    ):
         gate = load_account_browser_gate(gate_path)
         revision = gate["revision"]
         gate["slots"] = _live_account_browser_slots(gate, now)

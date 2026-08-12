@@ -1,5 +1,14 @@
 # Changelog
 
+- Unreleased Controller 81 / Skill revision `2026-08-12.35`: Controller 80's
+  first six-platform run passed five jobs but reproduced a narrow Windows 3.13
+  race: concurrent processes could all open a newly created lock sidecar, then
+  receive `PermissionError` while trying to create its first lockable byte.
+  Lock initialization now rechecks whether a competing process already wrote
+  that byte before retrying, while persistent denial still raises. The shared
+  account-browser gate also receives the same bounded 10-second lock queue as
+  the binding registry; ordinary state locks remain at two seconds.
+
 - Unreleased Controller 80 / Skill revision `2026-08-12.34`: the clean C9
   macOS retest proved the universal browser-send gate, then safely stopped
   because its controller-rendered waiting prompt was 1215 bytes—15 bytes over

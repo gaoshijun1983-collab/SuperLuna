@@ -19,7 +19,11 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 80 / Skill revision `2026-08-12.34`, keeps the exact one-shot wait
+Controller 81 / Skill revision `2026-08-12.35`, closes a Windows 3.13
+concurrent-start race while initializing the first byte of a shared lock file
+and gives only the account-browser registry a bounded ten-second lock queue;
+persistent permission failures and ordinary state locks remain strict.
+Controller 80 keeps the exact one-shot wait
 prompt within its 1200-byte safety budget for the C9 macOS path and projects
 that prompt before any browser send; an unsupported longer path now fails
 before the click instead of after a request has already been submitted.

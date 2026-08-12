@@ -42,6 +42,35 @@ class AtomicReplaceTests(unittest.TestCase):
 
             self.assertEqual(attempts, 2)
 
+    def test_lockable_byte_rechecks_size_after_transient_permission_error(self):
+        with (
+            mock.patch.object(
+                lcrl.os, "fstat",
+                side_effect=[Namespace(st_size=0), Namespace(st_size=1)],
+            ),
+            mock.patch.object(
+                lcrl.os, "write", side_effect=PermissionError(13, "transient"),
+            ) as write,
+            mock.patch.object(lcrl.os, "lseek") as seek,
+            mock.patch.object(lcrl.time, "sleep") as sleep,
+        ):
+            lcrl.ensure_lockable_byte(99, timeout=0.1)
+
+        write.assert_called_once_with(99, b"0")
+        sleep.assert_called_once_with(lcrl.STATE_LOCK_POLL_SECONDS)
+        seek.assert_called_once_with(99, 0, lcrl.os.SEEK_SET)
+
+    def test_lockable_byte_rethrows_persistent_permission_error(self):
+        with (
+            mock.patch.object(lcrl.os, "fstat", return_value=Namespace(st_size=0)),
+            mock.patch.object(
+                lcrl.os, "write", side_effect=PermissionError(13, "persistent"),
+            ),
+            mock.patch.object(lcrl.time, "monotonic", side_effect=[0.0, 0.2]),
+        ):
+            with self.assertRaises(PermissionError):
+                lcrl.ensure_lockable_byte(99, timeout=0.1)
+
     def test_state_lock_open_rethrows_persistent_permission_error(self):
         with mock.patch.object(
             lcrl.os,
@@ -388,6 +417,30 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(len(acquired), 2, payloads)
             self.assertEqual(len(queued), 4, payloads)
             self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 2)
+
+    def test_account_browser_gate_uses_shared_registry_lock_queue_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            real_acquire_state_lock = lcrl.acquire_state_lock
+            observed = []
+
+            def recording_lock(path, timeout=lcrl.STATE_LOCK_TIMEOUT_SECONDS):
+                observed.append((Path(path).resolve(), timeout))
+                return real_acquire_state_lock(path, timeout=timeout)
+
+            with mock.patch.object(
+                lcrl, "acquire_state_lock", side_effect=recording_lock,
+            ):
+                result = lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id="task-one", operation="startup",
+                    registry=str(registry), at="2026-08-12T08:00:00Z",
+                ))
+
+            self.assertTrue(result["slot_acquired"])
+            self.assertIn(
+                (registry.resolve(), lcrl.ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS),
+                observed,
+            )
 
     def test_shared_registries_use_bounded_windows_sharing_retry_budget(self):
         with tempfile.TemporaryDirectory() as directory:

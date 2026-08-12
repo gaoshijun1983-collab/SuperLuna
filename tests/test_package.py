@@ -110,6 +110,7 @@ class PackageTests(unittest.TestCase):
         transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(encoding="utf-8")
         source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
         self.assertEqual(registry["account_browser_max_active"], 2)
+        self.assertEqual(registry["account_browser_gate_lock_timeout_seconds"], 10)
         self.assertEqual(registry["account_browser_cross_task_quiet_seconds"], 180)
         self.assertEqual(registry["account_browser_rate_limit_backoff_seconds"], [1800, 3600])
         for requirement in (
@@ -119,6 +120,7 @@ class PackageTests(unittest.TestCase):
             "account_browser_handoff_quiet_period",
             "account_browser_circuit_opened",
             "ACCOUNT_BROWSER_MAX_ACTIVE = 2",
+            "ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS = 10.0",
         ):
             self.assertIn(requirement, source)
         for requirement in (
