@@ -1142,6 +1142,99 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertNotEqual(result["action"], "startup_ready")
 
+    def test_browser_startup_plan_always_prefers_the_unique_user_exact_url_tab(self):
+        planned = lcrl.browser_startup_plan_command(Namespace(
+            reviewer_thread_id="reviewer-chat",
+            user_exact_url_count=1,
+            controlled_exact_url_count=0,
+            selected_source=None,
+            exact_url_open_authorized=True,
+        ))
+        self.assertTrue(planned["ok"])
+        self.assertEqual(planned["action"], "claim_user_exact_url")
+        self.assertEqual(planned["required_source"], "user_open_tabs")
+        self.assertFalse(planned["new_tab_allowed"])
+
+        conflict = lcrl.browser_startup_plan_command(Namespace(
+            reviewer_thread_id="reviewer-chat",
+            user_exact_url_count=1,
+            controlled_exact_url_count=0,
+            selected_source="authorized_exact_url_open",
+            exact_url_open_authorized=True,
+        ))
+        self.assertFalse(conflict["ok"])
+        self.assertEqual(conflict["reason_code"], "selected_tab_source_conflict")
+
+    def test_browser_startup_plan_opens_exact_url_only_when_no_matching_tab_exists(self):
+        opened = lcrl.browser_startup_plan_command(Namespace(
+            reviewer_thread_id="reviewer-chat",
+            user_exact_url_count=0,
+            controlled_exact_url_count=0,
+            selected_source="authorized_exact_url_open",
+            exact_url_open_authorized=True,
+        ))
+        self.assertTrue(opened["ok"])
+        self.assertEqual(opened["action"], "open_exact_url_once")
+        self.assertTrue(opened["new_tab_allowed"])
+
+        ambiguous = lcrl.browser_startup_plan_command(Namespace(
+            reviewer_thread_id="reviewer-chat",
+            user_exact_url_count=2,
+            controlled_exact_url_count=0,
+            selected_source=None,
+            exact_url_open_authorized=True,
+        ))
+        self.assertFalse(ambiguous["ok"])
+        self.assertEqual(ambiguous["reason_code"], "multiple_user_exact_url_tabs")
+
+    def test_platform_not_found_proof_retires_the_matching_orphan_wait(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at=None))
+            self.transition(
+                state_path, "review_submit_pending", stage="orphan",
+                fingerprint="orphan-request",
+            )
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-orphan", request_message_id="message-orphan",
+                request_persisted_at=now,
+            )
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path),
+                token=lcrl.load_state(state_path)["automation"]["waiting_check_token"],
+                automation_id="platform-wait-orphan",
+            ))
+
+            retired = lcrl.retire_missing_wait_command(Namespace(
+                state=str(state_path), automation_id="platform-wait-orphan",
+                platform_lookup_result="not_found",
+                authorization_id="user-confirmed-platform-check",
+            ))
+            self.assertEqual(retired["action"], "missing_wait_retired")
+            updated = lcrl.load_state(state_path)
+            self.assertEqual(updated["review"]["status"], "external_blocked")
+            self.assertFalse(updated["automation"]["waiting_check_active"])
+            self.assertEqual(updated["automation"]["waiting_check_token"], "none")
+            self.assertEqual(updated["automation"]["waiting_check_automation_id"], "none")
+
+    def test_missing_wait_retirement_rejects_unmatched_or_unproven_platform_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            before = state_path.read_bytes()
+            for automation_id, lookup in (
+                ("wrong-task", "not_found"),
+                ("none", "not_found"),
+            ):
+                with self.assertRaises(lcrl.LCRLError):
+                    lcrl.retire_missing_wait_command(Namespace(
+                        state=str(state_path), automation_id=automation_id,
+                        platform_lookup_result=lookup,
+                        authorization_id="user-proof",
+                    ))
+                self.assertEqual(state_path.read_bytes(), before)
+
     def test_automatic_preflight_cannot_initialize_a_foreground_only_state(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

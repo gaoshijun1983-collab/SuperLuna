@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Added controller 59 / Skill revision `2026-08-12.13` after the UNSEEN Insight
+  and Observation retests showed two browser-startup false negatives. The new
+  `browser-startup-plan` requires claiming a unique user-open exact-URL Chat
+  before any controlled tab or authorized new tab. Browser evidence no longer
+  depends on localized `你说/ChatGPT 说` or snapshot `[active]` strings; stable
+  message nodes, actual composer state, and separate visible Extreme evidence
+  are required. A matching host automation lookup returning `not_found` can now
+  retire an orphaned local wait through `retire-missing-wait`; task assertions
+  alone cannot. Local evidence only, pending real Mac retest.
 - Added controller 58 / Skill revision `2026-08-12.12` after the UNSEEN Memory
   retest showed that a terminated historical state remained permanently bound
   to its old implementation task. The new `reset-for-retest` transition accepts

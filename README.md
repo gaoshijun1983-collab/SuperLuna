@@ -19,7 +19,10 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source is
-Controller 58 / Skill revision `2026-08-12.12`: an explicitly terminated,
+Controller 59 / Skill revision `2026-08-12.13`: browser startup now claims a
+unique user-open exact-URL Chat before considering a controlled or new tab, and
+uses stable message nodes plus actual composer state instead of localized
+snapshot phrases. Controller 58 / Skill revision `2026-08-12.12`: an explicitly terminated,
 wait-free state can now be atomically handed from its historical implementation
 task to one exact replacement task for a user-authorized retest. The same state
 file is reused and the old cycle is archived; live waiting work cannot use this

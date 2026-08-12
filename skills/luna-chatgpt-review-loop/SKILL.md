@@ -130,6 +130,22 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 2. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
    一次性新 Chat 授权，先按 `browser_chat_provisioning.md` 创建并初始化唯一 reviewer
    conversation；初始化消息不计入正式回合。否则继续认领用户已有 Chat。
+   在打开任何新标签前，先分别统计 `user.openTabs()` 与当前 `tabs.list()` 中精确 canonical
+   URL 的匹配数量，并运行：
+
+```text
+python -B <skill-root>/scripts/lcrl.py browser-startup-plan \
+  --reviewer-thread-id <网页conversation-id> \
+  --user-exact-url-count <用户标签精确匹配数> \
+  --controlled-exact-url-count <当前受控标签精确匹配数> \
+  [--exact-url-open-authorized]
+```
+
+   返回 `claim_user_exact_url` 时必须把 `user.openTabs()` 返回的唯一原始对象交给
+   `user.claimTab(tab)`；返回 `reuse_controlled_exact_url` 时只复用当前受控对象。只在两个列表
+   都没有精确 URL 且返回 `open_exact_url_once` 时才允许新建标签。实际选择后用相同参数追加
+   `--selected-source user_open_tabs|controlled_tabs|authorized_exact_url_open` 再核验；来源冲突必须
+   失败关闭。不得因为已有标签暂时未聚焦、标题变化或 DOM 文案不熟悉而另开同 URL。
 3. 若旧状态已保存明确 provisioned Chat 且仍为 `pending_handoff`，新任务不得要求用户再次
    手动打开，也不得另建 Chat。用当前 `browser.browserId` 调用
    `authorize-browser-startup-reopen`；只有返回 `browser_startup_reopen_authorized`，才在
@@ -143,7 +159,12 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
    没有这种持久状态时，认领该现有标签，也就是当前实现任务浏览器中用户已有的目标 Chat，并记录 URL 中的
    conversation id；只有身份含糊或需要用户选择现有 Chat 时才请求用户决定。
 4. 在任何项目写入和正式发送之前，核验该标签可读、URL 仍是绑定 Chat、页面主体确为
-   ChatGPT。网络错误或登录页不允许先开发二十分钟后才发现无法提交。
+   ChatGPT。网络错误或登录页不允许先开发二十分钟后才发现无法提交。既有 conversation 的
+   内容证据使用稳定消息结构（例如真实 `[data-message-author-role]`、`[data-message-id]` 或
+   conversation article 节点）和固定 URL；不得搜索“你说：”“ChatGPT 说：”等本地化快照文案。
+   composer 可用性必须读取实际 textbox/contenteditable 与发送控件的可交互/disabled 状态，
+   不得以 DOM snapshot 是否含 `[active]` 字符串判断。推理档位仍需在可见界面或无障碍按钮上
+   真实确认“极高”；仅对整个 DOM 做 `includes("极高")` 既不能证明也不能否定该档位。
 5. 用户亲眼确认该 Chat 当前显示所需推理模式。以 `in_app_browser` 记录确认；
    SuperLuna 不替用户切换。
 6. 运行只读能力预检：
@@ -322,6 +343,22 @@ automation id。平台更新成功后才允许结束提交 occurrence。若无�
 如果 `waiting-check` 返回 `waiting_check_busy`，不得读取 Chat，也不得轮换 token；必须保留
 返回的 token 和等待任务 ID，把同一个平台 heartbeat 更新为不早于 `retry_not_before` 的一次
 未来 `RDATE`。这仍然只是单次碰撞补跑，不得改成循环规则。
+
+若 state 仍记录已绑定等待任务，但协调任务通过平台自动任务工具按该精确 ID 查询并真实得到
+`not_found`，不得继续假装处于有效等待，也不得由实施任务自行声称任务不存在。取得用户明确
+授权后，由协调任务运行：
+
+```text
+python -B <skill-root>/scripts/lcrl.py retire-missing-wait \
+  --state <state-file> --automation-id <state中的精确等待任务ID> \
+  --platform-lookup-result not_found \
+  --authorization-id <当前用户授权的稳定身份/正文指纹>
+```
+
+它只接受等待态、仍激活且 ID 精确匹配的本地等待、已释放的读取 lease 和平台 `not_found`
+证据；随后清空 token/任务/claim 并进入 `external_blocked`，再按用户选择运行
+`reset-for-retest` 或既有恢复。平台任务仍存在、ID 不匹配、仅凭文字推断、普通实施任务自行
+调用或仍有执行权时都必须保持 state 字节不变。
 
 协调主线只观察多个实施任务时，可运行只读命令：
 

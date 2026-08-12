@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 58
-SKILL_REVISION = "2026-08-12.12"
+CONTROLLER_VERSION = 59
+SKILL_REVISION = "2026-08-12.13"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -2656,6 +2656,65 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def browser_startup_plan_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Choose the only legal fixed-Chat tab source before browser startup work."""
+    reviewer_thread_id = str(args.reviewer_thread_id or "").strip()
+    if reviewer_thread_id in {"", "none"} or len(reviewer_thread_id) > 240:
+        raise LCRLError("browser startup requires a stable reviewer Chat identity")
+    user_count = int(args.user_exact_url_count)
+    controlled_count = int(args.controlled_exact_url_count)
+    if user_count < 0 or controlled_count < 0:
+        raise LCRLError("browser startup tab counts cannot be negative")
+    expected_url = f"https://chatgpt.com/c/{reviewer_thread_id}"
+    selected_source = str(getattr(args, "selected_source", None) or "none").strip()
+    exact_url_open_authorized = bool(getattr(args, "exact_url_open_authorized", False))
+
+    if user_count > 1:
+        action = "startup_blocked"
+        reason_code = "multiple_user_exact_url_tabs"
+        required_source = "none"
+    elif user_count == 1:
+        action = "claim_user_exact_url"
+        reason_code = "none"
+        required_source = "user_open_tabs"
+    elif controlled_count > 1:
+        action = "startup_blocked"
+        reason_code = "multiple_controlled_exact_url_tabs"
+        required_source = "none"
+    elif controlled_count == 1:
+        action = "reuse_controlled_exact_url"
+        reason_code = "none"
+        required_source = "controlled_tabs"
+    elif exact_url_open_authorized:
+        action = "open_exact_url_once"
+        reason_code = "none"
+        required_source = "authorized_exact_url_open"
+    else:
+        action = "startup_blocked"
+        reason_code = "fixed_chat_tab_unavailable"
+        required_source = "none"
+
+    if selected_source != "none" and selected_source != required_source:
+        return {
+            "ok": False,
+            "action": "startup_blocked",
+            "reason_code": "selected_tab_source_conflict",
+            "expected_url": expected_url,
+            "required_source": required_source,
+            "selected_source": selected_source,
+            "new_tab_allowed": required_source == "authorized_exact_url_open",
+        }
+    return {
+        "ok": action != "startup_blocked",
+        "action": action,
+        "reason_code": reason_code,
+        "expected_url": expected_url,
+        "required_source": required_source,
+        "selected_source": selected_source,
+        "new_tab_allowed": required_source == "authorized_exact_url_open",
+    }
+
+
 def coordination_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
     """Compatibility alias for callers that also coordinate a read-only monitor."""
     return autonomous_preflight_command(args)
@@ -3567,6 +3626,57 @@ def deactivate_waiting_check(state: dict[str, Any]) -> str:
     if state["runtime"].get("action_lease_reason") == "waiting_review_poll":
         clear_action_lease(state)
     return automation_id
+
+
+def retire_missing_wait_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Retire a local wait only after the host proved its platform task absent."""
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    review = state["review"]
+    automation = state["automation"]
+    automation_id = str(args.automation_id or "").strip()
+    authorization_id = str(args.authorization_id or "").strip()
+    if args.platform_lookup_result != "not_found":
+        raise LCRLError("missing-wait retirement requires a platform not_found result")
+    if review.get("status") not in MONITOR_STATUSES:
+        raise LCRLError("missing-wait retirement requires an active waiting state")
+    if automation.get("waiting_check_active") is not True:
+        raise LCRLError("missing-wait retirement requires an active local wait")
+    if automation_id in {"", "none"}:
+        raise LCRLError("missing-wait retirement requires the exact platform task identity")
+    if automation.get("waiting_check_automation_id") != automation_id:
+        raise LCRLError("platform task identity does not match the local wait")
+    if authorization_id in {"", "none"} or len(authorization_id) > 256:
+        raise LCRLError("missing-wait retirement requires explicit user authorization")
+    if active_action_lease(state):
+        raise LCRLError("missing-wait retirement requires the waiting read lease to be released")
+
+    deactivate_waiting_check(state)
+    review.update({
+        "status": "external_blocked",
+        "recovery_action": "platform_wait_task_not_found",
+        "last_progress_at": utc_now(),
+    })
+    state.setdefault("review_history", []).append({
+        "event": "platform_wait_task_not_found",
+        "automation_id": automation_id,
+        "platform_lookup_result": "not_found",
+        "authorization_id": authorization_id,
+        "recorded_at": utc_now(),
+    })
+    state["review_history"] = state["review_history"][-20:]
+    record_resume_checkpoint(state)
+    save_state(path, state, expected_revision=revision)
+    return add_user_status_exit({
+        "ok": True,
+        "action": "missing_wait_retired",
+        "status": "external_blocked",
+        "retired_automation_id": automation_id,
+        "waiting_check_active": False,
+        "next_action": "reset_for_retest_or_user_authorized_recovery",
+        "revision": state["revision"],
+    })
 
 
 def register_binding_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -6280,6 +6390,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--one-shot-wait", required=True, choices=sorted(VALID_COORDINATION_CAPABILITIES),
     )
 
+    browser_startup_plan = sub.add_parser(
+        "browser-startup-plan",
+        help="只读决定固定 Chat 启动时必须认领现有标签还是受权打开一次",
+    )
+    browser_startup_plan.add_argument("--reviewer-thread-id", required=True)
+    browser_startup_plan.add_argument("--user-exact-url-count", required=True, type=int)
+    browser_startup_plan.add_argument("--controlled-exact-url-count", required=True, type=int)
+    browser_startup_plan.add_argument(
+        "--selected-source",
+        choices=("user_open_tabs", "controlled_tabs", "authorized_exact_url_open"),
+    )
+    browser_startup_plan.add_argument("--exact-url-open-authorized", action="store_true")
+
+    retire_missing_wait = sub.add_parser("retire-missing-wait")
+    retire_missing_wait.add_argument("--state", required=True)
+    retire_missing_wait.add_argument("--automation-id", required=True)
+    retire_missing_wait.add_argument(
+        "--platform-lookup-result", required=True, choices=("not_found",),
+    )
+    retire_missing_wait.add_argument("--authorization-id", required=True)
+
     network = sub.add_parser("record-network-error")
     network.add_argument("--state", required=True)
     network.add_argument("--message", required=True)
@@ -6581,6 +6712,10 @@ def main(argv: list[str] | None = None) -> int:
             result = autonomous_preflight_command(args)
         elif args.command == "startup-diagnostics":
             result = startup_diagnostics_command(args)
+        elif args.command == "browser-startup-plan":
+            result = browser_startup_plan_command(args)
+        elif args.command == "retire-missing-wait":
+            result = retire_missing_wait_command(args)
         elif args.command == "record-network-error":
             result = record_network_error_command(args)
         elif args.command == "set-monitor-mode":

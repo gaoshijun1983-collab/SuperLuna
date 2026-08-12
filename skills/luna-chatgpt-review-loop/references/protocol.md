@@ -47,6 +47,23 @@ identity, visibly confirmed Extreme mode, Chat read/send, one-shot waiting, and
 distinct implementation/reviewer identities. It never opens a browser, creates
 a Chat, initializes state, or repairs a missing capability.
 
+Before opening a fixed-Chat tab, `browser-startup-plan` deterministically
+prefers the unique exact-URL object from `user.openTabs()`, then an existing
+controlled exact-URL object. A new exact-URL tab is legal only when neither list
+contains a match and that one open is explicitly authorized. Selecting a new
+tab while a user exact-URL tab exists fails closed. Conversation evidence comes
+from stable message/article nodes and canonical identity, never localized
+snapshot phrases such as `你说：` or `ChatGPT 说：`. Composer readiness uses the
+actual interactive and disabled state; visible Extreme remains separate visual
+evidence rather than a whole-DOM substring test.
+
+If a bound local wait outlives its platform task, only a host automation lookup
+of that exact id returning `not_found`, plus current user authorization, may
+invoke `retire-missing-wait`. The command requires the matching active local
+wait and no read lease, clears every wait identity, and moves to
+`external_blocked`. A task's own assertion, an id mismatch, or any live platform
+task cannot retire the wait.
+
 For delegated tasks, `<codex_delegation>.source_thread_id` identifies the
 coordinator/source task, never the newly created implementation task. The
 creator must provide the exact `threadId` returned for the child task. Passing

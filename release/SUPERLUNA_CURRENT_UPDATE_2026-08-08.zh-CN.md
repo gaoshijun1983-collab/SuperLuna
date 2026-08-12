@@ -6,11 +6,23 @@
 - 版本：`0.2.0-alpha.49`（Python 元数据：`0.2.0a49`）
 - 当前源码控制器：57（Alpha 27 归档仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-12.12`
+- 当前源码 Skill 修订：`2026-08-12.13`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 本阶段主要更新
+
+### 0AAAA. 固定 Chat 启动认领与页面证据不再误判
+
+- Insight 使用“你说/ChatGPT 说”快照文字判断 conversation，Observation 在用户已有固定 Chat
+  时另开同 URL 标签并把新标签的禁用 composer 当成原 Chat 状态，均导致假阻塞。
+- 控制器 59 新增 `browser-startup-plan`：唯一用户精确 URL 标签优先，其次当前受控精确 URL；
+  只有两个列表都无匹配且明确授权时才可打开一次。选择来源与计划不一致时失败关闭。
+- conversation 改用真实消息/article 节点，composer 改用实际交互与 disabled 状态；“极高”
+  仍必须独立可见确认，不能用整页字符串包含或缺失代替。需真实 Mac 复测。
+- Observation 还暴露 state 保留等待任务 ID、平台任务实际已不存在的漂移。新增
+  `retire-missing-wait`：只有协调任务按精确 ID 查询得到 `not_found`、用户授权、零读取 lease
+  时才退休本地等待并进入外部阻塞；任务自己声称“不存在”不能清理。
 
 ### 0AAA. 已终止旧状态可以安全交接给复测任务
 
