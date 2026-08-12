@@ -16,7 +16,10 @@ Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 
 ## 当前源码状态
 
-当前源码候选是 `0.2.0-alpha.46`，最新归档仍为 Alpha 27。控制器 53 / Skill revision
+当前源码候选是 `0.2.0-alpha.47`，最新归档仍为 Alpha 27。控制器 54 / Skill revision
+`2026-08-12.8` 让 guard 在发放普通工作 lease 前就对缺失或跨任务的实施任务 identity 失败关闭，
+同时保留仅对同一任务的 `turn_entry` / `apply_result` 普通 lease 串行恢复；等待和浏览器重开 lease 仍不可抢占。
+控制器 53 / Skill revision
 `2026-08-12.7` 将精确 20 分钟卡住判定覆盖“正在开发”和“正在按 Chat 意见修改”，并明确上下文压缩后
 恢复门禁必须继续携带同一个稳定任务 identity。控制器 52 增加不改状态字节的多任务只读观察器；同时增加
 启动自检，对浏览器、Chat identity、可见“极高”、读写和单次等待能力只报告一个明确阻塞原因。

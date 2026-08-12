@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added controller 54 / Skill revision `2026-08-12.8` after continuation testing
+  found that a guard could grant a fresh work lease without validating the exact
+  implementation-task identity. Ordinary work entry and serial recovery now
+  both fail closed for missing or cross-task identities; waiting, browser-reopen,
+  and cross-task boundaries remain non-reclaimable.
 - Added controller 53 / Skill revision `2026-08-12.7` after the culture branch
   exposed a same-task continuation failure. Guard documentation now requires
   the stable implementation-task identity after context compaction, and the

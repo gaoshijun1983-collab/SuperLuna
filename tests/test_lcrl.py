@@ -265,6 +265,7 @@ class ControllerTests(unittest.TestCase):
             blocked = lcrl.guard_action(Namespace(
                 state=str(state_path), minutes=20,
                 reason="external_message_turn_entry", replace=False,
+                implementation_thread_id="implementation",
             ))
 
             self.assertEqual(blocked["action"], "waiting_turn_blocked")
@@ -287,6 +288,7 @@ class ControllerTests(unittest.TestCase):
             replace_cannot_bypass = lcrl.guard_action(Namespace(
                 state=str(state_path), minutes=20,
                 reason="external_message_turn_entry", replace=True,
+                implementation_thread_id="implementation",
             ))
             self.assertEqual(replace_cannot_bypass["action"], "waiting_turn_blocked")
             self.assertEqual(state_path.read_bytes(), before)
@@ -297,6 +299,7 @@ class ControllerTests(unittest.TestCase):
             entered = lcrl.guard_action(Namespace(
                 state=str(state_path), minutes=20,
                 reason="normal_turn_entry", replace=False,
+                implementation_thread_id="implementation",
             ))
             self.assertTrue(entered["ok"])
             self.assertEqual(entered["action"], "turn_entry_allowed")
@@ -304,6 +307,31 @@ class ControllerTests(unittest.TestCase):
             self.assertNotEqual(entered["lease_id"], "none")
             state = lcrl.load_state(state_path)
             self.assertEqual(state["runtime"]["action_lease_id"], entered["lease_id"])
+
+    def test_guard_requires_exact_task_identity_before_granting_work_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            before = state_path.read_bytes()
+            for identity, message in (
+                (None, "exact implementation task identity"),
+                ("different-task", "different implementation task"),
+            ):
+                values = {
+                    "state": str(state_path), "minutes": 20,
+                    "reason": "turn_entry", "replace": False,
+                }
+                if identity is not None:
+                    values["implementation_thread_id"] = identity
+                with self.assertRaisesRegex(lcrl.LCRLError, message):
+                    lcrl.guard_action(Namespace(**values))
+                self.assertEqual(state_path.read_bytes(), before)
+
+            allowed = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry",
+                replace=False, implementation_thread_id="implementation",
+            ))
+            self.assertTrue(allowed["execution_allowed"])
+            self.assertEqual(allowed["implementation_thread_id"], "implementation")
 
     def test_explicit_new_goal_reuses_completed_task_without_reusing_completion(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2415,6 +2443,7 @@ class ControllerTests(unittest.TestCase):
             entry = lcrl.guard_action(Namespace(
                 state=str(state_path), minutes=20,
                 reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
             ))
             self.assertNotEqual(entry["lease_id"], "none")
             confirmed = lcrl.confirm_review_submission_command(Namespace(
