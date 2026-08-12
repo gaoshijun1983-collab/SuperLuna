@@ -102,6 +102,11 @@ confirmation. It is not a recovery path for waiting or a generic "continue".
 view and evidence age from saved progress events, marks development as possibly
 stuck at the configured threshold (20 minutes by default), never marks waiting
 for Chat as stuck, and leaves the state bytes and revision unchanged.
+`observe-runs` accepts one or more `--state` arguments and returns the same
+projection for every state plus counts by all five user-facing statuses and the
+number possibly stuck. It validates every input before producing the overview;
+invalid input fails closed without writing any state, sending task messages,
+reading Chat, acquiring execution, or changing workflow state.
 
 ## 3. Submit exactly once
 

@@ -759,6 +759,48 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(result["possibly_stuck"])
             self.assertEqual(result["stall_reason"], "no_evidence_progress_event")
 
+    def test_readonly_runs_observer_aggregates_states_without_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = self.make_state(root / "first")
+            second = self.make_state(root / "second")
+            lcrl.record_progress_command(Namespace(
+                state=str(first), event_id="event-1", stage="build",
+                active_minutes=5, meaningful_step=True,
+                evidence_fingerprint="evidence-1", at="2026-08-12T00:00:00Z",
+            ))
+            before = {path: path.read_bytes() for path in (first, second)}
+            result = lcrl.readonly_runs_observer_command(Namespace(
+                states=[str(first), str(second)], threshold_minutes=20,
+                at="2026-08-12T00:20:00Z",
+            ))
+            self.assertEqual([row["state_file"] for row in result["runs"]], [
+                str(first.resolve()), str(second.resolve()),
+            ])
+            self.assertEqual(result["runs"][0]["user_status"], "正在开发")
+            self.assertEqual(result["runs"][0]["current_stage"], "initial")
+            self.assertTrue(result["runs"][0]["possibly_stuck"])
+            self.assertFalse(result["runs"][1]["possibly_stuck"])
+            self.assertEqual(result["summary"]["total"], 2)
+            self.assertEqual(result["summary"]["possibly_stuck"], 1)
+            self.assertEqual(
+                set(result["summary"]["by_user_status"]),
+                {"正在开发", "等待 Chat", "正在按 Chat 意见修改", "需要你决定", "已完成"},
+            )
+            self.assertEqual({path: path.read_bytes() for path in (first, second)}, before)
+
+    def test_readonly_runs_observer_fails_closed_for_any_invalid_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            valid = self.make_state(Path(directory) / "valid")
+            before = valid.read_bytes()
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.readonly_runs_observer_command(Namespace(
+                    states=[str(valid), str(Path(directory) / "missing.json")],
+                    threshold_minutes=20, at="2026-08-12T00:20:00Z",
+                ))
+            self.assertEqual(valid.read_bytes(), before)
+            self.assertFalse((Path(directory) / "missing.json").exists())
+
     def test_coordination_preflight_blocks_before_dispatch_without_app_chat(self):
         result = lcrl.coordination_preflight_command(Namespace(
             implementation_thread_id="implementation-task",

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added controller 54 / Skill revision `2026-08-12.8`: `observe-runs` now
+  provides a byte-for-byte read-only overview across multiple state files,
+  including per-task five-state status, stage, latest evidence age, the exact
+  20-minute stall boundary, and aggregate counts. Invalid input fails closed.
+
 - Added controller 53 / Skill revision `2026-08-12.7` after the culture branch
   exposed a same-task continuation failure. Guard documentation now requires
   the stable implementation-task identity after context compaction, and the

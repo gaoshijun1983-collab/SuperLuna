@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 53
-SKILL_REVISION = "2026-08-12.7"
+CONTROLLER_VERSION = 54
+SKILL_REVISION = "2026-08-12.8"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -1890,15 +1890,15 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
     return output
 
 
-def readonly_run_observer_command(args: argparse.Namespace) -> dict[str, Any]:
-    """Expose a read-only, evidence-based view of one implementation run."""
-    state = load_state(Path(args.state).expanduser().resolve())
-    threshold_minutes = int(getattr(args, "threshold_minutes", 20))
+def _readonly_run_observer_projection(
+    state_path: Path,
+    state: dict[str, Any],
+    threshold_minutes: int,
+    observed_at: str,
+) -> dict[str, Any]:
+    """Build one observer row from an already-loaded state without mutation."""
     if threshold_minutes < 1:
         raise LCRLError("threshold_minutes must be at least 1")
-    observed_at = getattr(args, "at", None) or utc_now()
-    if not is_timestamp(observed_at):
-        raise LCRLError("at must be an ISO-8601 timestamp")
 
     progress_events = state.get("model_policy", {}).get("progress", {}).get("events", [])
     evidence_events = [
@@ -1936,6 +1936,11 @@ def readonly_run_observer_command(args: argparse.Namespace) -> dict[str, Any]:
 
     return {
         "ok": True,
+        "state_file": str(state_path),
+        "automation_id": str(state.get("automation", {}).get("id", "none")),
+        "implementation_thread_id": str(
+            state.get("automation", {}).get("implementation_thread_id", "none")
+        ),
         "user_status": user_view["user_status"],
         "current_stage": state["review"].get("current_stage", "none"),
         "last_evidence_progress_at": latest_at,
@@ -1943,6 +1948,63 @@ def readonly_run_observer_command(args: argparse.Namespace) -> dict[str, Any]:
         "stall_threshold_minutes": threshold_minutes,
         "possibly_stuck": possible_stall,
         "stall_reason": stall_reason,
+    }
+
+
+def readonly_run_observer_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Expose a read-only, evidence-based view of one implementation run."""
+    state_path = Path(args.state).expanduser().resolve()
+    threshold_minutes = int(getattr(args, "threshold_minutes", 20))
+    observed_at = getattr(args, "at", None) or utc_now()
+    if threshold_minutes < 1:
+        raise LCRLError("threshold_minutes must be at least 1")
+    if not is_timestamp(observed_at):
+        raise LCRLError("at must be an ISO-8601 timestamp")
+    return _readonly_run_observer_projection(
+        state_path, load_state(state_path), threshold_minutes, observed_at
+    )
+
+
+def readonly_runs_observer_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Expose a read-only overview of multiple implementation state files."""
+    raw_paths = getattr(args, "states", None)
+    if raw_paths is None:
+        raw_paths = getattr(args, "state", None)
+    if not raw_paths:
+        raise LCRLError("at least one state file is required")
+    if isinstance(raw_paths, (str, Path)):
+        raw_paths = [raw_paths]
+    state_paths = [Path(value).expanduser().resolve() for value in raw_paths]
+    if len(set(state_paths)) != len(state_paths):
+        raise LCRLError("state files must be unique")
+
+    threshold_minutes = int(getattr(args, "threshold_minutes", 20))
+    observed_at = getattr(args, "at", None) or utc_now()
+    if threshold_minutes < 1:
+        raise LCRLError("threshold_minutes must be at least 1")
+    if not is_timestamp(observed_at):
+        raise LCRLError("at must be an ISO-8601 timestamp")
+
+    # Validate and load every input before projecting any row. The observer has
+    # no write path, and a malformed input fails the complete overview closed.
+    states = [(path, load_state(path)) for path in state_paths]
+    runs = [
+        _readonly_run_observer_projection(path, state, threshold_minutes, observed_at)
+        for path, state in states
+    ]
+    status_counts = {label: 0 for label in USER_STATUS_MESSAGES}
+    for run in runs:
+        status_counts[run["user_status"]] += 1
+    return {
+        "ok": True,
+        "observed_at": observed_at,
+        "stall_threshold_minutes": threshold_minutes,
+        "runs": runs,
+        "summary": {
+            "total": len(runs),
+            "by_user_status": status_counts,
+            "possibly_stuck": sum(1 for run in runs if run["possibly_stuck"]),
+        },
     }
 
 
@@ -5891,6 +5953,11 @@ def build_parser() -> argparse.ArgumentParser:
     observer.add_argument("--threshold-minutes", type=int, default=20)
     observer.add_argument("--at")
 
+    observers = sub.add_parser("observe-runs", aliases=["observe-overview"])
+    observers.add_argument("--state", dest="states", action="append", required=True)
+    observers.add_argument("--threshold-minutes", type=int, default=20)
+    observers.add_argument("--at")
+
     discover_reviewer = sub.add_parser("discover-reviewer-chat")
     discover_reviewer.add_argument("--before-snapshot", required=True)
     discover_reviewer.add_argument("--after-snapshot", required=True)
@@ -6273,6 +6340,8 @@ def main(argv: list[str] | None = None) -> int:
             result = progress_query_command(args)
         elif args.command == "observe-run":
             result = readonly_run_observer_command(args)
+        elif args.command in {"observe-runs", "observe-overview"}:
+            result = readonly_runs_observer_command(args)
         elif args.command == "discover-reviewer-chat":
             result = discover_reviewer_chat_command(args)
         elif args.command == "prepare-main-app-submission":

@@ -1,9 +1,9 @@
 {
   "product_name": "SuperLuna",
   "package_version": "0.2.0-alpha.46",
-  "controller_version": 53,
+  "controller_version": 54,
   "schema_version": 7,
-  "skill_revision": "2026-08-12.7",
+  "skill_revision": "2026-08-12.8",
   "source_contains_unreleased_hotfix": true,
   "dist_archive_matches_current_source": false,
   "compatibility_entrypoints": {
@@ -12,7 +12,7 @@
     "command": "lcrl"
   },
   "automated_evidence": {
-    "repository_tests": 204,
+    "repository_tests": 206,
     "controller_selftests": 15,
     "native_session_concurrent_start_serialized": true,
     "native_session_spawn_process_exclusion": true,
@@ -41,6 +41,7 @@
     "published_state_schema_progress_contract_matches_runtime": true,
     "completed_goal_explicit_restart_local_tested": true,
     "read_only_multi_run_observer_local_tested": true,
+    "read_only_multi_state_overview_local_tested": true,
     "startup_diagnostics_fail_closed_local_tested": true,
     "published_state_schema_policy_contract_matches_runtime": true,
     "published_state_schema_confirmation_trust_contract_matches_runtime": true,
