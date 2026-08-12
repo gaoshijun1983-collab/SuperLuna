@@ -1,5 +1,11 @@
 # Changelog
 
+- Unreleased Controller 61 / Skill revision `2026-08-12.15`: a real macOS
+  retest showed that the ChatGPT homepage could appear healthy while opening
+  conversation history still returned the account rate-limit notice. Clearing
+  the shared circuit now requires a `health_probe` lease plus explicit
+  `conversation_history_accessible` proof from an existing conversation or
+  history surface; homepage, login and empty-composer checks fail closed.
 - Unreleased Controller 60 / Skill revision `2026-08-12.14`: added a
   machine-wide two-slot ChatGPT account browser gate. A third local run queues
   before browser initialization; any real conversation-history rate-limit

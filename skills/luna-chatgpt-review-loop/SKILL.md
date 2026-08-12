@@ -35,7 +35,9 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 任何任务看到 ChatGPT 的“请求过于频繁 / 已暂时限制访问对话记录”等真实限流提示，必须用
 本次名额报告 `rate_limited`。控制器会清空所有本机名额并打开账户级熔断：首次 30 分钟，
 连续再次出现为 60 分钟。熔断期间所有任务禁止初始化、读取、刷新、发送或用其他 Chat 探测；
-到期后只允许一个 `health_probe` 做只读页面健康检查，成功后才恢复最多两个名额。该共享门
+到期后只允许一个 `health_probe` 做只读页面健康检查，成功后才恢复最多两个名额。健康探测
+必须真实打开一个既有固定对话或对话记录并证明其可读；ChatGPT 首页、空白新对话页、登录
+状态或 composer 可用都不能单独证明对话记录限流已经解除。该共享门
 只能协调本机任务，无法证明另一台电脑没有同时访问；跨设备同时运行仍由用户避免。
 
 自动模式活动期间不得输出三选一、任务成果卡片或把阶段性成功写成最终答复。绑定恢复、
@@ -146,7 +148,9 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
 `account_browser_rate_limit_backoff` 均不得初始化浏览器；等待 occurrence 必须释放其读取 lease，
 并把同一个单次等待项移到不早于 `retry_not_before`，普通启动/提交则保持原状态静默结束。
 网页动作结束后必须用匹配任务和 `lease_id` 运行 `release-account-browser-slot`；正常结束使用
-`--outcome completed`。到期后的唯一只读健康探测成功时使用 `--outcome healthy`。看到真实限流
+`--outcome completed`。到期后的唯一只读健康探测只有在既有固定对话/对话记录真实可读且未见
+限流提示时，才使用 `--outcome healthy --health-proof conversation_history_accessible`；健康
+探测不得创建新 Chat、发送消息或仅检查首页。看到真实限流
 提示时不再读取、点击或刷新，立即使用 `--outcome rate_limited`。
 
 2. 随后使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器

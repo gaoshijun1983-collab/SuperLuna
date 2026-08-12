@@ -193,6 +193,13 @@ do not send. The same waiting gate schedules one non-reloading probe after 15
 minutes; consecutive notices back off to 30 and then 60 minutes. A successful
 `loaded` observation resets this backoff.
 
+An account-level `health_probe` must read one already-existing fixed conversation
+or the conversation-history surface without creating a Chat or sending a message.
+The homepage alone is not health evidence, and neither are a visible account menu,
+an empty new-chat composer, or successful login. Release a probe as healthy only
+with `--health-proof conversation_history_accessible`; otherwise keep the circuit
+fail closed or report the real rate-limit notice.
+
 Do not reload a healthy page, do not reload while a response is visibly
 streaming, and do not retry blindly after a failed UI action. 不得切回 App Chat、
 不得新开 Chat、不得换标签页发送。A local state transition or mock proves only

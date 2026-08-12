@@ -306,6 +306,7 @@ class ControllerTests(unittest.TestCase):
             healthy = lcrl.release_account_browser_slot_command(Namespace(
                 implementation_thread_id="task-health", lease_id=probe["lease_id"],
                 outcome="healthy", registry=str(registry), at="2026-08-12T08:31:01Z",
+                health_proof="conversation_history_accessible",
             ))
             self.assertEqual(healthy["action"], "account_browser_health_confirmed")
             self.assertEqual(healthy["consecutive_rate_limits"], 0)
@@ -314,6 +315,45 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertFalse(status["cooldown_active"])
             self.assertEqual(status["active_count"], 0)
+
+    def test_account_health_probe_rejects_homepage_only_health_claim(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            probe = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-health", operation="health_probe",
+                registry=str(registry), at="2026-08-12T08:31:00Z",
+            ))
+
+            with self.assertRaisesRegex(
+                lcrl.LCRLError,
+                "conversation history is accessible",
+            ):
+                lcrl.release_account_browser_slot_command(Namespace(
+                    implementation_thread_id="task-health", lease_id=probe["lease_id"],
+                    outcome="healthy", registry=str(registry), at="2026-08-12T08:31:01Z",
+                    health_proof=None,
+                ))
+
+            gate = lcrl.load_account_browser_gate(registry)
+            self.assertEqual(gate["consecutive_rate_limits"], 0)
+            self.assertEqual(len(gate["slots"]), 1)
+
+    def test_account_healthy_outcome_rejects_non_probe_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            startup = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-startup", operation="startup",
+                registry=str(registry), at="2026-08-12T08:31:00Z",
+            ))
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "requires a health_probe lease"):
+                lcrl.release_account_browser_slot_command(Namespace(
+                    implementation_thread_id="task-startup", lease_id=startup["lease_id"],
+                    outcome="healthy", registry=str(registry), at="2026-08-12T08:31:01Z",
+                    health_proof="conversation_history_accessible",
+                ))
+
+            self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 1)
 
     def seed_terra_advice(self, state_path: Path, signal: str = "debugger_impasse"):
         state = lcrl.load_state(state_path)

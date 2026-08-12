@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 60
-SKILL_REVISION = "2026-08-12.14"
+CONTROLLER_VERSION = 61
+SKILL_REVISION = "2026-08-12.15"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -102,6 +102,7 @@ ACCOUNT_BROWSER_SLOT_SECONDS = 600
 ACCOUNT_BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 1800
 ACCOUNT_BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600
 VALID_ACCOUNT_BROWSER_OPERATIONS = {"startup", "submission", "waiting_read", "health_probe"}
+VALID_ACCOUNT_BROWSER_HEALTH_PROOFS = {"conversation_history_accessible"}
 VALID_ATTACHMENT_VERIFICATION = {"not_required", "unverified", "verified", "manual_confirmed", "unavailable"}
 VALID_PRO_STATUSES = {"tracking", "eligible", "confirmation_required", "in_review"}
 VALID_TERRA_STATUSES = {"idle", "requested", "approved"}
@@ -838,6 +839,13 @@ def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             gate["cooldown_until"] = retry_not_before
             action = "account_browser_circuit_opened"
         elif args.outcome == "healthy":
+            health_proof = str(getattr(args, "health_proof", "") or "").strip()
+            if matched["operation"] != "health_probe":
+                raise LCRLError("account browser healthy outcome requires a health_probe lease")
+            if health_proof not in VALID_ACCOUNT_BROWSER_HEALTH_PROOFS:
+                raise LCRLError(
+                    "account browser health requires proof that conversation history is accessible"
+                )
             cooldown_until = parse_time(gate.get("cooldown_until"))
             if cooldown_until and cooldown_until > now:
                 raise LCRLError("account browser health cannot clear an active cooldown")
@@ -6715,6 +6723,9 @@ def build_parser() -> argparse.ArgumentParser:
     release_account_browser_slot.add_argument("--lease-id", required=True)
     release_account_browser_slot.add_argument(
         "--outcome", required=True, choices=("completed", "healthy", "rate_limited"),
+    )
+    release_account_browser_slot.add_argument(
+        "--health-proof", choices=tuple(sorted(VALID_ACCOUNT_BROWSER_HEALTH_PROOFS)),
     )
     release_account_browser_slot.add_argument("--registry")
     release_account_browser_slot.add_argument("--at")

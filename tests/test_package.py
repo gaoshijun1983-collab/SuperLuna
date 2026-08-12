@@ -124,10 +124,12 @@ class PackageTests(unittest.TestCase):
             "第三个任务只排队",
             "--outcome rate_limited",
             "health_probe",
+            "conversation_history_accessible",
         ):
             self.assertIn(requirement, skill)
         self.assertIn("Every browser initialization", transport)
         self.assertIn("30-minute account", transport)
+        self.assertIn("homepage alone is not health evidence", transport)
 
     def test_published_state_schema_accepts_every_runtime_reasoning_source(self):
         schema = json.loads(
