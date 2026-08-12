@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0-alpha.49 - 2026-08-12
+
 - Added controller 56 / Skill revision `2026-08-12.10` after the Windows
   Python 3.13 CI job exposed a transient sharing violation during concurrent
   binding registration. All durable atomic replacements now retry only

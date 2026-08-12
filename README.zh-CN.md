@@ -1,5 +1,9 @@
 # SuperLuna
 
+[![CI](https://github.com/gaoshijun1983-collab/SuperLuna/actions/workflows/ci.yml/badge.svg)](https://github.com/gaoshijun1983-collab/SuperLuna/actions/workflows/ci.yml)
+[![许可证：MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![发布版本](https://img.shields.io/github/v/release/gaoshijun1983-collab/SuperLuna?include_prereleases)](https://github.com/gaoshijun1983-collab/SuperLuna/releases)
+
 SuperLuna 是一个让 Codex 与 ChatGPT 网页版安全协作的浏览器优先开发闭环插件：
 
 ```text
@@ -16,7 +20,8 @@ Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 
 ## 当前源码状态
 
-当前源码候选是 `0.2.0-alpha.49`，最新归档仍为 Alpha 27。控制器 56 / Skill revision
+首个公开开源版本是 `0.2.0-alpha.49`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。控制器 56 / Skill revision
 `2026-08-12.10` 为 Windows 原子持久化时短暂的文件共享拒绝增加有界重试；持续权限错误仍失败关闭。
 控制器 55 增加失败关闭、完全只读的多任务总览。控制器 54 让 guard 在发放普通工作 lease 前
 就对缺失或跨任务的实施任务 identity 失败关闭，
