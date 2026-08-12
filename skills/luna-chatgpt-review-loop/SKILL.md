@@ -134,15 +134,20 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 只读启动自检。该命令不打开浏览器、不创建或读取 Chat、不创建等待任务、不初始化 state；
 它只输出“可以开始”或一个按固定优先级排列的单点原因与用户下一步：
 
+若任务由 `<codex_delegation>` 创建，其中的 `source_thread_id` 是协调/来源任务，不是新实施
+任务自身 identity。创建方必须把创建结果返回的精确 `threadId` 提供给新任务；新任务不得从
+标题或 `source_thread_id` 猜测自身 identity。传入了委派来源时，自检必须同时核验二者不同：
+
 ```text
 python -B <skill-root>/scripts/lcrl.py startup-diagnostics \
   --implementation-thread-id <实施任务ID> --reviewer-thread-id <网页conversation-id> \
+  --delegation-source-thread-id <委派来源任务ID；无委派时省略> \
   --browser initialized --chat-login logged_in --chat-selection unique \
   --review-mode extreme --chat-read available --chat-send available \
   --one-shot-wait available
 ```
 
-空任务/Chat identity、浏览器未初始化、未登录、Chat 不唯一、无法真实确认“极高”、缺少读写
+空任务/Chat identity、实施 identity 复用委派来源、浏览器未初始化、未登录、Chat 不唯一、无法真实确认“极高”、缺少读写
 或单次等待能力都失败关闭。自检不得自行补造事实、切换模型、降级 App Chat 或改变 state；
 通过后才运行下面的 `autonomous-preflight`。
 
@@ -284,6 +289,18 @@ lease 与一次性授权 revision 原子写入 state；把返回的 `revision` �
 对任何 `schedule_once`、`keep_once` 或 `update_once`，控制器都会同时返回
 `platform_wait_rule=single_rdate` 与 `recurring_platform_rule_allowed=false`；平台调用必须原样服从，
 不得自行选择循环规则。
+
+首次创建时先把平台等待项安排到足够远的未来并取得真实 automation id，再立即用
+`bind-waiting-check` 绑定该 id。绑定成功后必须运行：
+
+```text
+python -B <skill-root>/scripts/lcrl.py render-waiting-check --state <state-file>
+```
+
+把该命令输出的**完整原文**更新为同一个平台等待项的 prompt，保留原单一 `RDATE`、任务 id
+和目标实施任务不变。禁止手写、概括或删减这个 prompt；它包含本轮精确 state、token 和
+automation id。平台更新成功后才允许结束提交 occurrence。若无法完成绑定、渲染或更新，必须
+删除刚创建的平台等待项并保持失败关闭，不能声称已经安排等待。
 如果 `waiting-check` 返回 `waiting_check_busy`，不得读取 Chat，也不得轮换 token；必须保留
 返回的 token 和等待任务 ID，把同一个平台 heartbeat 更新为不早于 `retry_not_before` 的一次
 未来 `RDATE`。这仍然只是单次碰撞补跑，不得改成循环规则。

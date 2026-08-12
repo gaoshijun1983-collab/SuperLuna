@@ -18,8 +18,13 @@ controller, not a standalone desktop application.
 ## Current source status
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 56 / Skill revision
-`2026-08-12.10` adds a bounded retry
+technical-testing Alpha, not a Public Beta. Current unreleased source is
+Controller 57 / Skill revision `2026-08-12.11`: a bound one-shot wait now has a
+controller-rendered occurrence prompt containing its exact state, token, and
+automation identity, so a hand-written prompt cannot silently omit the fields
+required to resume. Delegated startup also rejects a child task that reuses its
+coordinator's `source_thread_id` as its own implementation identity. Controller
+56 / Skill revision `2026-08-12.10` adds a bounded retry
 for transient Windows sharing violations during atomic durable-file replacement;
 permanent permission failures still fail closed. Controller 55 adds a fail-closed,
 read-only multi-run overview. Controller 54 makes the guard fail

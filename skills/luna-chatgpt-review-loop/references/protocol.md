@@ -47,6 +47,12 @@ identity, visibly confirmed Extreme mode, Chat read/send, one-shot waiting, and
 distinct implementation/reviewer identities. It never opens a browser, creates
 a Chat, initializes state, or repairs a missing capability.
 
+For delegated tasks, `<codex_delegation>.source_thread_id` identifies the
+coordinator/source task, never the newly created implementation task. The
+creator must provide the exact `threadId` returned for the child task. Passing
+`--delegation-source-thread-id` makes `startup-diagnostics` fail closed when
+that source identity is incorrectly reused as the implementation identity.
+
 `autonomous-preflight --transport in_app_browser` verifies distinct
 implementation/reviewer identities, browser binding/read/send capability, and
 one-shot waiting capability. Automatic initialization must use
@@ -191,6 +197,13 @@ Every `schedule_once`, `keep_once`, or `update_once` result also declares
 `platform_wait_rule=single_rdate`, `platform_rrule_prefix=RDATE:`, and
 `recurring_platform_rule_allowed=false`. The platform call must follow those
 machine fields and must not choose a recurring rule.
+After the first future platform task is created and its stable id is bound with
+`bind-waiting-check`, the caller must run `render-waiting-check` and replace the
+same task's prompt with the complete controller-rendered output. That exact
+prompt contains the current state path, token, and automation id. A hand-written,
+summarized, or partially copied occurrence prompt is invalid; failure to update
+the same future task requires deleting it and failing closed before the submit
+occurrence ends.
 When `waiting-check` returns `waiting_check_busy`, it has not consumed or
 authorized the occurrence. Do not read Chat or rotate its token; update the same
 platform heartbeat to one `RDATE` at or after `retry_not_before`, with the same

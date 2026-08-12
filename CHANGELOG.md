@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Added controller 57 / Skill revision `2026-08-12.11` after the first real
+  macOS wait occurrence was created with a hand-written prompt that omitted its
+  required token and automation id. The new `render-waiting-check` command only
+  renders for a bound active one-shot wait and emits the exact first command
+  with state, token, and platform identity. The Skill now requires updating the
+  same future `RDATE` task with that complete controller-rendered prompt before
+  the submitting turn may end. This is a local fix pending a fresh real macOS
+  retest and adds no Public Beta credit. Startup diagnostics now also reject a
+  delegated implementation task that reuses the coordinator's
+  `source_thread_id` as its own identity, preventing state and waiting work from
+  being routed back to the coordinator.
+
 ## 0.2.0-alpha.49 - 2026-08-12
 
 - Added controller 56 / Skill revision `2026-08-12.10` after the Windows

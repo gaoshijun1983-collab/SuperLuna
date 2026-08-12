@@ -659,6 +659,7 @@ class PackageTests(unittest.TestCase):
         for requirement in (
             "review_receipt_pending",
             "rearm-waiting-check",
+            "render-waiting-check",
         ):
             self.assertIn(requirement, skill)
             self.assertIn(requirement, protocol)

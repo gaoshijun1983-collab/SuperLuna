@@ -228,6 +228,41 @@ class ControllerTests(unittest.TestCase):
             self.assertNotIn('"status":', rendered)
             self.assertNotIn('"current_stage":', rendered)
 
+    def test_bound_one_shot_wait_renders_exact_token_and_automation_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="W-render",
+                fingerprint="waiting-render",
+            )
+            lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at=None))
+            submitted = lcrl.confirm_review_submission_command(Namespace(
+                state=str(state_path), reviewer_thread_id="review-chat",
+                request_turn_id="turn-render", request_message_id="message-render",
+                native_app_instance_id=None, attachment_name=None,
+                submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                browser_id=None, deleted_automation_id=None,
+            ))
+            token = submitted["waiting_check_token"]
+            with self.assertRaisesRegex(lcrl.LCRLError, "bound active wait"):
+                lcrl.render_waiting_check(state_path)
+
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id="wait-render-1",
+            ))
+            rendered = lcrl.render_waiting_check(state_path)
+            self.assertIn(f"--token {json.dumps(token)}", rendered)
+            self.assertIn('--automation-id "wait-render-1"', rendered)
+            self.assertIn(f"--state {json.dumps(str(state_path.resolve()))}", rendered)
+            self.assertIn("第一条可执行动作必须原样运行", rendered)
+            self.assertNotIn("--token TOKEN", rendered)
+            self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
+
+            metadata = json.loads(lcrl.render_waiting_check(state_path, validate_only=True))
+            self.assertTrue(metadata["token_present"])
+            self.assertEqual(metadata["automation_id"], "wait-render-1")
+            self.assertEqual(len(metadata["prompt_sha256"]), 64)
+
     def test_network_disconnect_is_counted_once_then_success_recovers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -931,6 +966,7 @@ class ControllerTests(unittest.TestCase):
         result = lcrl.startup_diagnostics_command(Namespace(
             implementation_thread_id="implementation-task",
             reviewer_thread_id="reviewer-chat",
+            delegation_source_thread_id="coordinator-task",
             browser="initialized", chat_login="logged_in",
             chat_selection="unique", review_mode="extreme",
             chat_read="available", chat_send="available",
@@ -956,6 +992,7 @@ class ControllerTests(unittest.TestCase):
             facts = {
                 "implementation_thread_id": "implementation-task",
                 "reviewer_thread_id": "reviewer-chat",
+                "delegation_source_thread_id": "coordinator-task",
                 "browser": "initialized", "chat_login": "logged_in",
                 "chat_selection": "unique", "review_mode": "extreme",
                 "chat_read": "available", "chat_send": "available",
@@ -979,6 +1016,23 @@ class ControllerTests(unittest.TestCase):
         ))
         self.assertFalse(result["ok"])
         self.assertEqual(result["reason_code"], "identity_conflict")
+
+    def test_startup_diagnostics_rejects_delegation_source_as_implementation_identity(self):
+        result = lcrl.startup_diagnostics_command(Namespace(
+            implementation_thread_id="coordinator-task",
+            reviewer_thread_id="reviewer-chat",
+            delegation_source_thread_id="coordinator-task",
+            browser="initialized", chat_login="logged_in",
+            chat_selection="unique", review_mode="extreme",
+            chat_read="available", chat_send="available",
+            one_shot_wait="available",
+        ))
+        self.assertFalse(result["ok"])
+        self.assertEqual(
+            result["reason_code"],
+            "implementation_identity_is_delegation_source",
+        )
+        self.assertNotEqual(result["action"], "startup_ready")
 
     def test_automatic_preflight_cannot_initialize_a_foreground_only_state(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 56
-SKILL_REVISION = "2026-08-12.10"
+CONTROLLER_VERSION = 57
+SKILL_REVISION = "2026-08-12.11"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -1618,6 +1618,53 @@ def render_heartbeat(state_path: str | Path, validate_only: bool = False) -> str
     return result
 
 
+def render_waiting_check(state_path: str | Path, validate_only: bool = False) -> str:
+    """Render the exact prompt for the currently bound one-shot wait occurrence."""
+    path = Path(state_path).expanduser().resolve()
+    state = load_state(path)
+    automation = state["automation"]
+    token = automation.get("waiting_check_token", "none")
+    automation_id = automation.get("waiting_check_automation_id", "none")
+    if (
+        state["review"]["status"] not in MONITOR_STATUSES
+        or automation.get("heartbeat_mode") != "waiting_only"
+        or automation.get("waiting_check_active") is not True
+        or token == "none"
+        or automation_id == "none"
+    ):
+        raise LCRLError("an exact waiting-check prompt requires a bound active wait")
+
+    cli = str(Path(__file__).resolve())
+    command = (
+        f"python -B {json.dumps(cli)} waiting-check "
+        f"--state {json.dumps(str(path))} --token {json.dumps(str(token))} "
+        f"--automation-id {json.dumps(str(automation_id))}"
+    )
+    prompt = (
+        "SuperLuna 单次等待检查。第一条可执行动作必须原样运行：\n"
+        f"{command}\n"
+        "只有保存返回且 action 为 review_poll 或 receipt_reconcile，才可运行 "
+        "authorize-waiting-chat-read，并使用同一 token、automation id 和返回的 lease_id。"
+        "获得 browser_read_authorized 前禁止初始化或访问浏览器。只读取已绑定固定 Chat，"
+        "完成真实请求/回复身份配对；消费回复前先删除本 automation，随后 resume-from-reply，"
+        "并在同一实施任务继续。其他 action 静默结束。不得创建循环规则或替代 Chat。"
+    )
+    size = len(prompt.encode("utf-8"))
+    if size > MAX_HEARTBEAT_BYTES:
+        raise LCRLError(
+            f"waiting-check prompt is {size} bytes, over the {MAX_HEARTBEAT_BYTES}-byte limit"
+        )
+    if validate_only:
+        return canonical_json({
+            "ok": True,
+            "bytes": size,
+            "automation_id": automation_id,
+            "token_present": True,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+        })
+    return prompt
+
+
 def runtime_log_path(state: dict[str, Any]) -> Path | None:
     configured = state["runtime"].get("session_log", "auto")
     if configured != "auto":
@@ -2505,6 +2552,9 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
     """Diagnose startup from caller-provided facts without touching state."""
     implementation_thread_id = str(args.implementation_thread_id or "").strip()
     reviewer_thread_id = str(args.reviewer_thread_id or "").strip()
+    delegation_source_thread_id = str(
+        getattr(args, "delegation_source_thread_id", None) or ""
+    ).strip()
     facts = {
         "browser": args.browser,
         "chat_login": args.chat_login,
@@ -2515,6 +2565,7 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
         "one_shot_wait": args.one_shot_wait,
         "implementation_thread_id": implementation_thread_id,
         "reviewer_thread_id": reviewer_thread_id,
+        "delegation_source_thread_id": delegation_source_thread_id or "none",
     }
     checks = (
         (
@@ -2522,6 +2573,13 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
             "implementation_identity_missing",
             "当前实施任务没有稳定 identity。",
             "请先取得当前实施任务的稳定 identity，再重新运行启动自检。",
+        ),
+        (
+            bool(delegation_source_thread_id)
+            and implementation_thread_id == delegation_source_thread_id,
+            "implementation_identity_is_delegation_source",
+            "当前实施任务 identity 错误复用了协调任务的 source_thread_id。",
+            "请取得新建实施任务自身的精确 threadId；不得使用委派包装里的 source_thread_id。",
         ),
         (
             args.browser != "initialized",
@@ -5887,6 +5945,10 @@ def build_parser() -> argparse.ArgumentParser:
     heartbeat.add_argument("--state", required=True)
     heartbeat.add_argument("--validate-only", action="store_true")
 
+    waiting_prompt = sub.add_parser("render-waiting-check")
+    waiting_prompt.add_argument("--state", required=True)
+    waiting_prompt.add_argument("--validate-only", action="store_true")
+
     tick_parser = sub.add_parser("tick")
     tick_parser.add_argument("--state", required=True)
     tick_parser.add_argument("--source", choices=("heartbeat", "foreground"), default="foreground")
@@ -6072,6 +6134,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     startup_diagnostics.add_argument("--implementation-thread-id", required=True)
     startup_diagnostics.add_argument("--reviewer-thread-id", required=True)
+    startup_diagnostics.add_argument("--delegation-source-thread-id")
     startup_diagnostics.add_argument(
         "--browser", required=True, choices=sorted(VALID_STARTUP_BROWSER_STATES),
     )
@@ -6337,6 +6400,8 @@ def main(argv: list[str] | None = None) -> int:
             result = migrate_v6(args)
         elif args.command == "render-heartbeat":
             result = render_heartbeat(args.state, args.validate_only)
+        elif args.command == "render-waiting-check":
+            result = render_waiting_check(args.state, args.validate_only)
         elif args.command == "tick":
             result = tick(args.state, source=args.source)
         elif args.command == "waiting-check":
