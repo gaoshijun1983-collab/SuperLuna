@@ -139,8 +139,9 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 并强制重新目视确认评审 Chat 的推理档位；返回后必须在同一 turn 继续新目标。普通“继续”、
 状态询问、调度补跑、Chat 回复或没有稳定授权身份的外部消息不得调用它。
 
-1. 在读取浏览器 Skill 后、调用其运行时连接/说明/标签/页面等任何工具之前，先取得机器级共享
-   名额。浏览器运行时连接本身也属于初始化，不得用“尚未打开网页”绕过：
+1. **先只读取本 SuperLuna Skill，不得提前读取或启用浏览器 Skill。** 取得并校验当前任务的
+   精确 identity 后，立即取得机器级共享名额；浏览器 Skill 的读取、运行时连接、说明、标签、
+   页面和截图都属于受控浏览器启动，不得用“尚未打开网页”绕过：
 
 ```text
 python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
@@ -148,7 +149,9 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
   --operation startup|submission|waiting_read|health_probe
 ```
 
-只有 `slot_acquired=true` 才可继续。`account_browser_access_queued`、
+只有同时得到 `slot_acquired=true`、`browser_skill_read_allowed=true` 和
+`browser_runtime_initialization_allowed=true`，才可读取 `browser:control-in-app-browser` 的
+`SKILL.md` 并调用第一条浏览器工具。`account_browser_access_queued`、
 `account_browser_handoff_quiet_period` 或 `account_browser_rate_limit_backoff` 均不得初始化浏览器。
 等待 occurrence 遇到 `waiting_reschedule_allowed=true` 时必须释放读取 lease，并把同一个单次等待
 项移到不早于 `retry_not_before`。普通 `startup`/`submission` 遇到
@@ -161,7 +164,7 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
 探测不得创建新 Chat、发送消息或仅检查首页。看到真实限流
 提示时不再读取、点击或刷新，立即使用 `--outcome rate_limited`。
 
-2. 随后使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器
+2. 随后才读取并使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器
    binding；不得因为尚未调用该浏览器 Skill、当前标签列表为空或协调任务曾经打开过网页，
    就声称 Codex 没有浏览器能力。若没有旧状态，先在这个实现任务自己的内置浏览器打开
    `https://chatgpt.com/` 并检查登录状态；这一步不发送消息、不创建 Chat、不改模型。
@@ -219,12 +222,13 @@ python -B <skill-root>/scripts/lcrl.py browser-startup-plan \
 python -B <skill-root>/scripts/lcrl.py startup-diagnostics \
   --implementation-thread-id <实施任务ID> --reviewer-thread-id <网页conversation-id> \
   --delegation-source-thread-id <委派来源任务ID；无委派时省略> \
+  --account-slot acquired_before_browser \
   --browser initialized --chat-login logged_in --chat-selection unique \
   --review-mode extreme --chat-read available --chat-send available \
   --one-shot-wait available
 ```
 
-空任务/Chat identity、实施 identity 复用委派来源、浏览器未初始化、未登录、Chat 不唯一、无法真实确认“极高”、缺少读写
+空任务/Chat identity、实施 identity 复用委派来源、账户名额未在浏览器 Skill/运行时之前取得、浏览器未初始化、未登录、Chat 不唯一、无法真实确认“极高”、缺少读写
 或单次等待能力都失败关闭。自检不得自行补造事实、切换模型、降级 App Chat 或改变 state；
 通过后才运行下面的 `autonomous-preflight`。
 

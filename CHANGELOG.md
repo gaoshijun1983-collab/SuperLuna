@@ -1,5 +1,13 @@
 # Changelog
 
+- Unreleased Controller 69 / Skill revision `2026-08-12.23`: a real projectless
+  Mac C2 task proved that merely saying “slot before browser” was insufficient:
+  reading the browser Skill first caused runtime initialization before the
+  account gate. Startup now reads only SuperLuna first. A successful slot lease
+  explicitly authorizes reading the browser Skill and initializing its runtime;
+  blocked acquisitions explicitly deny both. Startup diagnostics also fail
+  closed unless the slot was acquired before browser activation.
+
 - Unreleased Controller 68 / Skill revision `2026-08-12.22`: extending the
   sharing-denial retry budget was not stable on Windows Python 3.13. Existing
   durable files now use the native Win32 `ReplaceFileW` single-operation API;

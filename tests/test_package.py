@@ -133,6 +133,14 @@ class PackageTests(unittest.TestCase):
         self.assertIn("30-minute account", transport)
         self.assertIn("homepage alone is not health evidence", transport)
 
+    def test_account_slot_precedes_browser_skill_and_runtime(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        slot_step = skill.index("acquire-account-browser-slot")
+        browser_step = skill.index("随后才读取并使用 `browser:control-in-app-browser`")
+        self.assertLess(slot_step, browser_step)
+        self.assertIn("browser_skill_read_allowed=true", skill)
+        self.assertIn("browser_runtime_initialization_allowed=true", skill)
+
     def test_published_state_schema_accepts_every_runtime_reasoning_source(self):
         schema = json.loads(
             (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(encoding="utf-8")

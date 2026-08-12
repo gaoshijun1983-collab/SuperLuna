@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 68
-SKILL_REVISION = "2026-08-12.22"
+CONTROLLER_VERSION = 69
+SKILL_REVISION = "2026-08-12.23"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -86,6 +86,7 @@ VALID_ATTACHMENT_CAPABILITIES = {"native", "manual", "unavailable"}
 VALID_FILESYSTEM_CAPABILITIES = {"inline", "mcp_verified", "unavailable"}
 VALID_COORDINATION_CAPABILITIES = {"available", "unavailable", "unknown"}
 VALID_STARTUP_BROWSER_STATES = {"initialized", "uninitialized"}
+VALID_STARTUP_ACCOUNT_SLOT_STATES = {"acquired_before_browser", "missing", "acquired_after_browser"}
 VALID_STARTUP_CHAT_LOGIN_STATES = {"logged_in", "not_logged_in"}
 VALID_STARTUP_CHAT_SELECTION_STATES = {"unique", "not_unique"}
 VALID_STARTUP_REVIEW_MODES = {"extreme", "unconfirmed"}
@@ -791,6 +792,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "ok": True,
                 "action": "account_browser_rate_limit_backoff",
                 "slot_acquired": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
                 "active_count": len(gate["slots"]),
                 "retry_not_before": gate["cooldown_until"],
@@ -802,6 +805,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "ok": True,
                 "action": "account_browser_health_probe_required",
                 "slot_acquired": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
                 "active_count": len(gate["slots"]),
                 "retry_not_before": "now",
@@ -815,6 +820,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "ok": True,
                 "action": "account_browser_slot_reused",
                 "slot_acquired": True,
+                "browser_skill_read_allowed": True,
+                "browser_runtime_initialization_allowed": True,
                 "lease_id": existing["lease_id"],
                 "expires_at": existing["expires_at"],
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
@@ -838,6 +845,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "ok": True,
                 "action": "account_browser_handoff_quiet_period",
                 "slot_acquired": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
                 "same_turn_wait_required": args.operation in {"startup", "submission"},
                 "waiting_reschedule_allowed": args.operation == "waiting_read",
                 "new_automation_allowed": False,
@@ -852,6 +861,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "ok": True,
                 "action": "account_browser_access_queued",
                 "slot_acquired": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
                 "active_count": len(gate["slots"]),
                 "retry_not_before": min(slot["expires_at"] for slot in gate["slots"]),
@@ -864,6 +875,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "ok": True,
                 "action": "account_browser_access_queued",
                 "slot_acquired": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
                 "active_count": len(gate["slots"]),
                 "retry_not_before": retry_not_before,
@@ -889,6 +902,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             "ok": True,
             "action": "account_browser_slot_acquired",
             "slot_acquired": True,
+            "browser_skill_read_allowed": True,
+            "browser_runtime_initialization_allowed": True,
             "lease_id": lease_id,
             "expires_at": expires_at,
             "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
@@ -2972,6 +2987,7 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
         getattr(args, "delegation_source_thread_id", None) or ""
     ).strip()
     facts = {
+        "account_slot": args.account_slot,
         "browser": args.browser,
         "chat_login": args.chat_login,
         "chat_selection": args.chat_selection,
@@ -2996,6 +3012,12 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
             "implementation_identity_is_delegation_source",
             "当前实施任务 identity 错误复用了协调任务的 source_thread_id。",
             "请取得新建实施任务自身的精确 threadId；不得使用委派包装里的 source_thread_id。",
+        ),
+        (
+            args.account_slot != "acquired_before_browser",
+            "account_slot_sequence_invalid",
+            "浏览器技能或运行时没有在取得账户名额之后启动。",
+            "请先取得账户浏览器名额；只有控制器明确允许后，才读取浏览器 Skill 并初始化运行时。",
         ),
         (
             args.browser != "initialized",
@@ -6784,6 +6806,9 @@ def build_parser() -> argparse.ArgumentParser:
     startup_diagnostics.add_argument("--implementation-thread-id", required=True)
     startup_diagnostics.add_argument("--reviewer-thread-id", required=True)
     startup_diagnostics.add_argument("--delegation-source-thread-id")
+    startup_diagnostics.add_argument(
+        "--account-slot", required=True, choices=sorted(VALID_STARTUP_ACCOUNT_SLOT_STATES),
+    )
     startup_diagnostics.add_argument(
         "--browser", required=True, choices=sorted(VALID_STARTUP_BROWSER_STATES),
     )

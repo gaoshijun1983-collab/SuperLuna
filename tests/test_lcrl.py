@@ -223,7 +223,11 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(first["action"], "account_browser_slot_acquired")
             self.assertEqual(second["action"], "account_browser_slot_acquired")
             self.assertEqual(third["action"], "account_browser_access_queued")
+            self.assertTrue(first["browser_skill_read_allowed"])
+            self.assertTrue(first["browser_runtime_initialization_allowed"])
             self.assertFalse(third["slot_acquired"])
+            self.assertFalse(third["browser_skill_read_allowed"])
+            self.assertFalse(third["browser_runtime_initialization_allowed"])
             self.assertEqual(third["max_active"], 2)
             self.assertEqual(third["active_count"], 2)
             gate = lcrl.load_account_browser_gate(registry)
@@ -458,6 +462,8 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(limited["retry_not_before"], "2026-08-12T08:31:00Z")
             self.assertEqual(blocked["action"], "account_browser_rate_limit_backoff")
             self.assertFalse(blocked["slot_acquired"])
+            self.assertFalse(blocked["browser_skill_read_allowed"])
+            self.assertFalse(blocked["browser_runtime_initialization_allowed"])
             gate = lcrl.load_account_browser_gate(registry)
             self.assertEqual(gate["slots"], [])
             self.assertEqual(gate["consecutive_rate_limits"], 1)
@@ -1451,6 +1457,7 @@ class ControllerTests(unittest.TestCase):
             implementation_thread_id="implementation-task",
             reviewer_thread_id="reviewer-chat",
             delegation_source_thread_id="coordinator-task",
+            account_slot="acquired_before_browser",
             browser="initialized", chat_login="logged_in",
             chat_selection="unique", review_mode="extreme",
             chat_read="available", chat_send="available",
@@ -1463,6 +1470,7 @@ class ControllerTests(unittest.TestCase):
     def test_startup_diagnostics_returns_only_the_first_failure(self):
         cases = (
             ("implementation_thread_id", "", "implementation_identity_missing"),
+            ("account_slot", "missing", "account_slot_sequence_invalid"),
             ("browser", "uninitialized", "browser_not_initialized"),
             ("chat_login", "not_logged_in", "chat_not_logged_in"),
             ("chat_selection", "not_unique", "chat_not_unique"),
@@ -1477,6 +1485,7 @@ class ControllerTests(unittest.TestCase):
                 "implementation_thread_id": "implementation-task",
                 "reviewer_thread_id": "reviewer-chat",
                 "delegation_source_thread_id": "coordinator-task",
+                "account_slot": "acquired_before_browser",
                 "browser": "initialized", "chat_login": "logged_in",
                 "chat_selection": "unique", "review_mode": "extreme",
                 "chat_read": "available", "chat_send": "available",
@@ -1493,6 +1502,7 @@ class ControllerTests(unittest.TestCase):
         result = lcrl.startup_diagnostics_command(Namespace(
             implementation_thread_id="same-stable-id",
             reviewer_thread_id="same-stable-id",
+            account_slot="acquired_before_browser",
             browser="initialized", chat_login="logged_in",
             chat_selection="unique", review_mode="extreme",
             chat_read="available", chat_send="available",
@@ -1506,6 +1516,7 @@ class ControllerTests(unittest.TestCase):
             implementation_thread_id="coordinator-task",
             reviewer_thread_id="reviewer-chat",
             delegation_source_thread_id="coordinator-task",
+            account_slot="acquired_before_browser",
             browser="initialized", chat_login="logged_in",
             chat_selection="unique", review_mode="extreme",
             chat_read="available", chat_send="available",
