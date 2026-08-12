@@ -26,9 +26,10 @@ inspect, read, send, or refresh web Chat at the same time. A third task queues
 before browser initialization. Slots are short-lived and never remain held
 while Codex implements locally or waits for the reviewer.
 When one task releases a slot, another task waits through a 180-second quiet
-handoff before touching ChatGPT. Only the same task's first `startup` immediately
-after a proven healthy probe may bypass the interval, and that bypass is consumed
-on acquisition. This pacing is separate from the two-task cap.
+handoff before touching ChatGPT. Only the same task's first `startup` or
+`waiting_read` immediately after a proven healthy probe may bypass the interval,
+and that bypass is consumed on acquisition. This pacing is separate from the
+two-task cap.
 
 ## Long reviewer reasoning
 

@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 62
-SKILL_REVISION = "2026-08-12.16"
+CONTROLLER_VERSION = 63
+SKILL_REVISION = "2026-08-12.17"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -638,7 +638,7 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
     if not isinstance(handoff_bypass_task_id, str) or not handoff_bypass_task_id.strip():
         errors.append("account browser handoff_bypass_task_id must be none or a task identity")
     handoff_bypass_operation = value.get("handoff_bypass_operation", "none")
-    if handoff_bypass_operation not in VALID_ACCOUNT_BROWSER_OPERATIONS | {"none"}:
+    if handoff_bypass_operation not in VALID_ACCOUNT_BROWSER_OPERATIONS | {"none", "health_followup"}:
         errors.append("account browser handoff_bypass_operation is invalid")
     slots = value.get("slots")
     if not isinstance(slots, list):
@@ -783,7 +783,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
         last_released_task_id = str(gate.get("last_released_task_id", "none"))
         handoff_bypass_allowed = (
             gate.get("handoff_bypass_task_id") == task_id
-            and gate.get("handoff_bypass_operation") == args.operation
+            and gate.get("handoff_bypass_operation") == "health_followup"
+            and args.operation in {"startup", "waiting_read"}
         )
         if (
             not recovery_probe_required
@@ -903,7 +904,7 @@ def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             gate["consecutive_rate_limits"] = 0
             gate["last_released_task_id"] = task_id
             gate["handoff_bypass_task_id"] = task_id
-            gate["handoff_bypass_operation"] = "startup"
+            gate["handoff_bypass_operation"] = "health_followup"
             gate["handoff_not_before"] = (
                 now + timedelta(seconds=ACCOUNT_BROWSER_CROSS_TASK_QUIET_SECONDS)
             ).replace(microsecond=0).isoformat().replace("+00:00", "Z")

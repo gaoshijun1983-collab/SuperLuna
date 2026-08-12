@@ -1,5 +1,11 @@
 # Changelog
 
+- Unreleased Controller 63 / Skill revision `2026-08-12.17`: the first real A2
+  post-cooldown waiting occurrence proved that a healthy probe may need to
+  continue directly into `waiting_read`, not only `startup`. The single-use
+  health follow-up now admits either operation for the same task and is consumed
+  by the first acquisition. A new regression covers the waiting recovery path.
+
 - Unreleased Controller 62 / Skill revision `2026-08-12.16`: a real macOS
   two-task retest proved that the two-slot ceiling alone does not prevent rapid
   cross-task conversation-history requests from retriggering ChatGPT's account

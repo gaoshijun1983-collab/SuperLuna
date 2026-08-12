@@ -17,9 +17,9 @@ read-only health probe may run, and a healthy result is required to restore the
 two-slot limit. Slots never span local implementation or reviewer waiting.
 After a slot is released, a different task must observe a 180-second account-level
 quiet handoff before acquiring browser access. The only immediate bypass is one
-same-task `startup` acquisition directly after a proven healthy `health_probe`;
-acquiring it consumes the bypass. This keeps the two-task product limit without
-letting one task starve another through repeated polling.
+same-task `startup` or `waiting_read` acquisition directly after a proven healthy
+`health_probe`; either acquisition consumes the bypass. This keeps the two-task
+product limit without letting one task starve another through repeated polling.
 
 The registry defaults to
 `~/.codex/superluna/account-browser-gate.json` (or the configured Codex home),

@@ -299,6 +299,36 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(gate["handoff_bypass_task_id"], "none")
             self.assertEqual(gate["handoff_bypass_operation"], "none")
 
+    def test_account_health_probe_allows_one_immediate_same_task_waiting_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            probe = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="health_probe",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=probe["lease_id"],
+                outcome="healthy", registry=str(registry), at="2026-08-12T08:00:10Z",
+                health_proof="conversation_history_accessible",
+            ))
+
+            waiting_read = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="waiting_read",
+                registry=str(registry), at="2026-08-12T08:00:11Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=waiting_read["lease_id"],
+                outcome="completed", registry=str(registry), at="2026-08-12T08:00:12Z",
+                health_proof=None,
+            ))
+            repeated = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="submission",
+                registry=str(registry), at="2026-08-12T08:00:13Z",
+            ))
+
+            self.assertEqual(waiting_read["action"], "account_browser_slot_acquired")
+            self.assertEqual(repeated["action"], "account_browser_handoff_quiet_period")
+
     def test_account_browser_gate_allows_other_task_after_handoff_quiet_period(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "account-browser-gate.json"
