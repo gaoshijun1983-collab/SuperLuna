@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added controller 52 / Skill revision `2026-08-12.6` with two visible-branch
+  features after mainline review. `observe-run` provides a byte-for-byte
+  read-only multi-run view and treats exactly 20 minutes without new evidence as
+  the stall boundary while excluding `等待 Chat`. `startup-diagnostics` reports
+  one fail-closed startup cause, including blank identities and an unavailable
+  visible Extreme mode, without opening Chat, creating state, or changing the
+  workflow.
 - Added controller 51 / Skill revision `2026-08-12.5` after a real ecosystem
   task reused a state whose previous goal was already completed. The new
   `begin-new-goal` command requires the same implementation task's live

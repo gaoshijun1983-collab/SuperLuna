@@ -40,6 +40,13 @@ same claimed tab is readable, its URL still identifies the bound conversation,
 and its page is ChatGPT. A network error, login boundary, ambiguous tab, or
 changed conversation fails closed before local work begins.
 
+Before formal preflight, `startup-diagnostics` reports exactly one first
+failure from caller-observed facts: stable implementation identity, initialized
+task-local browser, authenticated ChatGPT, one reviewer Chat with stable
+identity, visibly confirmed Extreme mode, Chat read/send, one-shot waiting, and
+distinct implementation/reviewer identities. It never opens a browser, creates
+a Chat, initializes state, or repairs a missing capability.
+
 `autonomous-preflight --transport in_app_browser` verifies distinct
 implementation/reviewer identities, browser binding/read/send capability, and
 one-shot waiting capability. Automatic initialization must use
@@ -84,6 +91,11 @@ current user-message/delegation identity. The command fails closed if any
 waiting check survives, archives the authorization fact, clears the previous
 completion and operation package, and requires fresh visible reasoning-mode
 confirmation. It is not a recovery path for waiting or a generic "continue".
+
+`observe-run` is a read-only monitoring projection. It derives the five-state
+view and evidence age from saved progress events, marks development as possibly
+stuck at the configured threshold (20 minutes by default), never marks waiting
+for Chat as stuck, and leaves the state bytes and revision unchanged.
 
 ## 3. Submit exactly once
 

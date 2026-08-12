@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 51
-SKILL_REVISION = "2026-08-12.5"
+CONTROLLER_VERSION = 52
+SKILL_REVISION = "2026-08-12.6"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -85,6 +85,10 @@ VALID_PAYLOAD_MODES = {"inline_packet", "app_attachment", "mcp_readonly"}
 VALID_ATTACHMENT_CAPABILITIES = {"native", "manual", "unavailable"}
 VALID_FILESYSTEM_CAPABILITIES = {"inline", "mcp_verified", "unavailable"}
 VALID_COORDINATION_CAPABILITIES = {"available", "unavailable", "unknown"}
+VALID_STARTUP_BROWSER_STATES = {"initialized", "uninitialized"}
+VALID_STARTUP_CHAT_LOGIN_STATES = {"logged_in", "not_logged_in"}
+VALID_STARTUP_CHAT_SELECTION_STATES = {"unique", "not_unique"}
+VALID_STARTUP_REVIEW_MODES = {"extreme", "unconfirmed"}
 VALID_COORDINATION_MODES = {"foreground", "automatic"}
 VALID_GOAL_MODES = {"continuous", "single_stage"}
 VALID_COORDINATION_REVIEW_MODES = {"unconfirmed", "extreme", "pro"}
@@ -1886,6 +1890,62 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
     return output
 
 
+def readonly_run_observer_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Expose a read-only, evidence-based view of one implementation run."""
+    state = load_state(Path(args.state).expanduser().resolve())
+    threshold_minutes = int(getattr(args, "threshold_minutes", 20))
+    if threshold_minutes < 1:
+        raise LCRLError("threshold_minutes must be at least 1")
+    observed_at = getattr(args, "at", None) or utc_now()
+    if not is_timestamp(observed_at):
+        raise LCRLError("at must be an ISO-8601 timestamp")
+
+    progress_events = state.get("model_policy", {}).get("progress", {}).get("events", [])
+    evidence_events = [
+        event for event in progress_events
+        if event.get("meaningful_step") is True
+        and event.get("evidence_fingerprint") not in (None, "", "none")
+    ]
+    latest = (
+        max(evidence_events, key=lambda event: parse_time(event["recorded_at"]))
+        if evidence_events else None
+    )
+    latest_at = latest["recorded_at"] if latest else "none"
+    elapsed_minutes: int | None = None
+    if latest:
+        elapsed_minutes = max(
+            0,
+            int((parse_time(observed_at) - parse_time(latest_at)).total_seconds() // 60),
+        )
+
+    user_view = user_status_exit(state["review"]["status"])
+    waiting = user_view["user_status"] == "等待 Chat"
+    developing = user_view["user_status"] == "正在开发"
+    if waiting:
+        possible_stall = False
+        stall_reason = "waiting_chat_is_not_stalled"
+    elif latest is None:
+        possible_stall = False
+        stall_reason = "no_evidence_progress_event"
+    elif not developing:
+        possible_stall = False
+        stall_reason = "not_in_development_state"
+    else:
+        possible_stall = elapsed_minutes >= threshold_minutes
+        stall_reason = "reached_threshold" if possible_stall else "within_threshold"
+
+    return {
+        "ok": True,
+        "user_status": user_view["user_status"],
+        "current_stage": state["review"].get("current_stage", "none"),
+        "last_evidence_progress_at": latest_at,
+        "minutes_since_last_evidence_progress": elapsed_minutes,
+        "stall_threshold_minutes": threshold_minutes,
+        "possibly_stuck": possible_stall,
+        "stall_reason": stall_reason,
+    }
+
+
 def _load_app_thread_snapshot(path_value: str | Path) -> dict[str, Any]:
     path = Path(path_value).expanduser().resolve()
     try:
@@ -2359,6 +2419,103 @@ def autonomous_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
         "user_status": "正在开发",
         "user_message": "启动前条件已经确认，可以开始执行。",
         "user_next_choice": "无需操作。",
+    }
+
+
+def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Diagnose startup from caller-provided facts without touching state."""
+    implementation_thread_id = str(args.implementation_thread_id or "").strip()
+    reviewer_thread_id = str(args.reviewer_thread_id or "").strip()
+    facts = {
+        "browser": args.browser,
+        "chat_login": args.chat_login,
+        "chat_selection": args.chat_selection,
+        "review_mode": args.review_mode,
+        "chat_read": args.chat_read,
+        "chat_send": args.chat_send,
+        "one_shot_wait": args.one_shot_wait,
+        "implementation_thread_id": implementation_thread_id,
+        "reviewer_thread_id": reviewer_thread_id,
+    }
+    checks = (
+        (
+            not implementation_thread_id,
+            "implementation_identity_missing",
+            "当前实施任务没有稳定 identity。",
+            "请先取得当前实施任务的稳定 identity，再重新运行启动自检。",
+        ),
+        (
+            args.browser != "initialized",
+            "browser_not_initialized",
+            "当前实施任务的内置浏览器尚未初始化。",
+            "请先初始化当前实施任务自己的内置浏览器，再重新运行启动自检。",
+        ),
+        (
+            args.chat_login != "logged_in",
+            "chat_not_logged_in",
+            "固定 Chat 页面尚未确认登录。",
+            "请在当前实施任务的内置浏览器登录 ChatGPT，并重新运行启动自检。",
+        ),
+        (
+            args.chat_selection != "unique" or not reviewer_thread_id,
+            "chat_not_unique",
+            "当前没有唯一且具有稳定 identity 的 reviewer Chat。",
+            "请只选择一个固定的 reviewer Chat，再重新运行启动自检。",
+        ),
+        (
+            args.review_mode != "extreme",
+            "review_mode_unconfirmed",
+            "当前 reviewer Chat 没有可核验的极高推理档位。",
+            "请在这个唯一 Chat 的可见界面确认极高；若账号或页面不提供该档位，本次自动闭环不能启动。",
+        ),
+        (
+            args.chat_read != "available",
+            "chat_read_unavailable",
+            "当前不具备读取 reviewer Chat 的能力。",
+            "请恢复当前实施任务的 Chat 读取能力，再重新运行启动自检。",
+        ),
+        (
+            args.chat_send != "available",
+            "chat_send_unavailable",
+            "当前不具备向 reviewer Chat 发送的能力。",
+            "请恢复当前实施任务的 Chat 发送能力，再重新运行启动自检。",
+        ),
+        (
+            args.one_shot_wait != "available",
+            "one_shot_wait_unavailable",
+            "当前不具备单次等待任务能力。",
+            "请提供一个可绑定且不重复执行的单次等待任务能力，再重新运行启动自检。",
+        ),
+        (
+            implementation_thread_id == reviewer_thread_id,
+            "identity_conflict",
+            "实施任务 identity 与 reviewer Chat identity 相同，角色发生冲突。",
+            "请为实施任务和 reviewer Chat 提供两个不同的稳定 identity，再重新运行启动自检。",
+        ),
+    )
+    for blocked, code, reason, next_step in checks:
+        if blocked:
+            return {
+                "ok": False,
+                "action": "startup_blocked",
+                "ready": False,
+                "reason_code": code,
+                "reason": reason,
+                "user_status": "需要你决定",
+                "user_message": reason,
+                "user_next_choice": next_step,
+                "facts": facts,
+            }
+
+    return {
+        "ok": True,
+        "action": "startup_ready",
+        "ready": True,
+        "reason": "可以开始",
+        "user_status": "正在开发",
+        "user_message": "可以开始",
+        "user_next_choice": "无需操作。",
+        "facts": facts,
     }
 
 
@@ -5729,6 +5886,11 @@ def build_parser() -> argparse.ArgumentParser:
     progress_query = sub.add_parser("show-status")
     progress_query.add_argument("--state", required=True)
 
+    observer = sub.add_parser("observe-run")
+    observer.add_argument("--state", required=True)
+    observer.add_argument("--threshold-minutes", type=int, default=20)
+    observer.add_argument("--at")
+
     discover_reviewer = sub.add_parser("discover-reviewer-chat")
     discover_reviewer.add_argument("--before-snapshot", required=True)
     discover_reviewer.add_argument("--after-snapshot", required=True)
@@ -5806,6 +5968,34 @@ def build_parser() -> argparse.ArgumentParser:
     autonomous_preflight.add_argument(
         "--transport", choices=sorted(VALID_REVIEW_TRANSPORTS),
         default="in_app_browser",
+    )
+
+    startup_diagnostics = sub.add_parser(
+        "startup-diagnostics",
+        help="只读检查新实施任务初始化前的宿主能力事实",
+    )
+    startup_diagnostics.add_argument("--implementation-thread-id", required=True)
+    startup_diagnostics.add_argument("--reviewer-thread-id", required=True)
+    startup_diagnostics.add_argument(
+        "--browser", required=True, choices=sorted(VALID_STARTUP_BROWSER_STATES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-login", required=True, choices=sorted(VALID_STARTUP_CHAT_LOGIN_STATES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-selection", required=True, choices=sorted(VALID_STARTUP_CHAT_SELECTION_STATES),
+    )
+    startup_diagnostics.add_argument(
+        "--review-mode", required=True, choices=sorted(VALID_STARTUP_REVIEW_MODES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-read", required=True, choices=sorted(VALID_COORDINATION_CAPABILITIES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-send", required=True, choices=sorted(VALID_COORDINATION_CAPABILITIES),
+    )
+    startup_diagnostics.add_argument(
+        "--one-shot-wait", required=True, choices=sorted(VALID_COORDINATION_CAPABILITIES),
     )
 
     network = sub.add_parser("record-network-error")
@@ -6081,6 +6271,8 @@ def main(argv: list[str] | None = None) -> int:
             result = resume_command(args)
         elif args.command == "show-status":
             result = progress_query_command(args)
+        elif args.command == "observe-run":
+            result = readonly_run_observer_command(args)
         elif args.command == "discover-reviewer-chat":
             result = discover_reviewer_chat_command(args)
         elif args.command == "prepare-main-app-submission":
@@ -6091,6 +6283,8 @@ def main(argv: list[str] | None = None) -> int:
             result = coordination_preflight_command(args)
         elif args.command == "autonomous-preflight":
             result = autonomous_preflight_command(args)
+        elif args.command == "startup-diagnostics":
+            result = startup_diagnostics_command(args)
         elif args.command == "record-network-error":
             result = record_network_error_command(args)
         elif args.command == "set-monitor-mode":

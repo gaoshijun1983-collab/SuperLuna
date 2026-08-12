@@ -646,6 +646,83 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(result["next_step"])
             self.assertNotIn("lease", " ".join(str(value).lower() for value in result.values()))
 
+    def test_readonly_observer_marks_development_at_threshold_without_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            lcrl.record_progress_command(Namespace(
+                state=str(state_path), event_id="event-1", stage="initial",
+                active_minutes=5, meaningful_step=True,
+                evidence_fingerprint="evidence-1", at="2026-08-12T00:00:00Z",
+            ))
+            before = state_path.read_bytes()
+            revision = lcrl.load_state(state_path)["revision"]
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T00:20:00Z",
+            ))
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertEqual(lcrl.load_state(state_path)["revision"], revision)
+            self.assertEqual(result["user_status"], "正在开发")
+            self.assertEqual(result["minutes_since_last_evidence_progress"], 20)
+            self.assertTrue(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "reached_threshold")
+
+    def test_readonly_observer_keeps_development_under_threshold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            lcrl.record_progress_command(Namespace(
+                state=str(state_path), event_id="event-1", stage="initial",
+                active_minutes=5, meaningful_step=True,
+                evidence_fingerprint="evidence-1", at="2026-08-12T00:00:00Z",
+            ))
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T00:19:00Z",
+            ))
+            self.assertFalse(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "within_threshold")
+
+    def test_readonly_observer_never_marks_waiting_chat_as_stuck(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="initial",
+                fingerprint="submission-1",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at="2026-08-12T00:00:00Z",
+            ))
+            self.transition(
+                state_path, "review_waiting", stage="initial",
+                waiting_since="2026-08-12T00:00:00Z",
+                request_stage="initial", request_turn_id="turn-1",
+                request_message_id="message-1",
+                request_persisted_at="2026-08-12T00:00:00Z",
+            )
+            before = state_path.read_bytes()
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T01:00:00Z",
+            ))
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertEqual(result["user_status"], "等待 Chat")
+            self.assertFalse(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "waiting_chat_is_not_stalled")
+
+    def test_readonly_observer_reports_missing_progress_evidence_without_guessing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            before = state_path.read_bytes()
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T01:00:00Z",
+            ))
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertEqual(result["last_evidence_progress_at"], "none")
+            self.assertIsNone(result["minutes_since_last_evidence_progress"])
+            self.assertFalse(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "no_evidence_progress_event")
+
     def test_coordination_preflight_blocks_before_dispatch_without_app_chat(self):
         result = lcrl.coordination_preflight_command(Namespace(
             implementation_thread_id="implementation-task",
@@ -705,6 +782,59 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result["reply_reader"], "implementation_task")
         self.assertEqual(result["continuation_owner"], "implementation_task")
         self.assertEqual(result["coordinator_role"], "exception_only")
+
+    def test_startup_diagnostics_reports_ready_when_all_facts_are_present(self):
+        result = lcrl.startup_diagnostics_command(Namespace(
+            implementation_thread_id="implementation-task",
+            reviewer_thread_id="reviewer-chat",
+            browser="initialized", chat_login="logged_in",
+            chat_selection="unique", review_mode="extreme",
+            chat_read="available", chat_send="available",
+            one_shot_wait="available",
+        ))
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["reason"], "可以开始")
+
+    def test_startup_diagnostics_returns_only_the_first_failure(self):
+        cases = (
+            ("implementation_thread_id", "", "implementation_identity_missing"),
+            ("browser", "uninitialized", "browser_not_initialized"),
+            ("chat_login", "not_logged_in", "chat_not_logged_in"),
+            ("chat_selection", "not_unique", "chat_not_unique"),
+            ("reviewer_thread_id", "", "chat_not_unique"),
+            ("review_mode", "unconfirmed", "review_mode_unconfirmed"),
+            ("chat_read", "unavailable", "chat_read_unavailable"),
+            ("chat_send", "unavailable", "chat_send_unavailable"),
+            ("one_shot_wait", "unavailable", "one_shot_wait_unavailable"),
+        )
+        for field, value, expected_code in cases:
+            facts = {
+                "implementation_thread_id": "implementation-task",
+                "reviewer_thread_id": "reviewer-chat",
+                "browser": "initialized", "chat_login": "logged_in",
+                "chat_selection": "unique", "review_mode": "extreme",
+                "chat_read": "available", "chat_send": "available",
+                "one_shot_wait": "available",
+            }
+            facts[field] = value
+            with self.subTest(field=field):
+                result = lcrl.startup_diagnostics_command(Namespace(**facts))
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["reason_code"], expected_code)
+                self.assertTrue(result["user_next_choice"])
+
+    def test_startup_diagnostics_blocks_identity_conflict_without_raising(self):
+        result = lcrl.startup_diagnostics_command(Namespace(
+            implementation_thread_id="same-stable-id",
+            reviewer_thread_id="same-stable-id",
+            browser="initialized", chat_login="logged_in",
+            chat_selection="unique", review_mode="extreme",
+            chat_read="available", chat_send="available",
+            one_shot_wait="available",
+        ))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason_code"], "identity_conflict")
 
     def test_automatic_preflight_cannot_initialize_a_foreground_only_state(self):
         with tempfile.TemporaryDirectory() as directory:

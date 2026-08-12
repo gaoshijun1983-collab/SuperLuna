@@ -13,8 +13,12 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.44`; the latest archive remains
-Alpha 27. Controller 51 / Skill revision `2026-08-12.5` adds an explicit,
+The current source candidate is `0.2.0-alpha.45`; the latest archive remains
+Alpha 27. Controller 52 / Skill revision `2026-08-12.6` adds a byte-for-byte
+read-only multi-run observer with the user's exact 20-minute stall boundary,
+plus fail-closed startup diagnostics for browser, Chat identity, visible
+Extreme mode, read/send, and one-shot waiting capability. Controller 51 / Skill
+revision `2026-08-12.5` adds an explicit,
 lease-bound way for the same visible implementation task to begin a genuinely
 new user-authorized goal after its previous goal completed; ordinary wakeups
 still cannot reopen completed work, and the bound Chat must be visibly

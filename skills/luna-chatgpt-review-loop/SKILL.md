@@ -130,6 +130,22 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
    SuperLuna 不替用户切换。
 6. 运行只读能力预检：
 
+新实施任务在真正初始化 SuperLuna 之前，先由调用方提供已经观察到的事实并运行一次独立
+只读启动自检。该命令不打开浏览器、不创建或读取 Chat、不创建等待任务、不初始化 state；
+它只输出“可以开始”或一个按固定优先级排列的单点原因与用户下一步：
+
+```text
+python -B <skill-root>/scripts/lcrl.py startup-diagnostics \
+  --implementation-thread-id <实施任务ID> --reviewer-thread-id <网页conversation-id> \
+  --browser initialized --chat-login logged_in --chat-selection unique \
+  --review-mode extreme --chat-read available --chat-send available \
+  --one-shot-wait available
+```
+
+空任务/Chat identity、浏览器未初始化、未登录、Chat 不唯一、无法真实确认“极高”、缺少读写
+或单次等待能力都失败关闭。自检不得自行补造事实、切换模型、降级 App Chat 或改变 state；
+通过后才运行下面的 `autonomous-preflight`。
+
 ```text
 python -B <skill-root>/scripts/lcrl.py autonomous-preflight \
   --implementation-thread-id <实施任务ID> --reviewer-thread-id <网页conversation-id> \
@@ -271,6 +287,18 @@ lease 与一次性授权 revision 原子写入 state；把返回的 `revision` �
 如果 `waiting-check` 返回 `waiting_check_busy`，不得读取 Chat，也不得轮换 token；必须保留
 返回的 token 和等待任务 ID，把同一个平台 heartbeat 更新为不早于 `retry_not_before` 的一次
 未来 `RDATE`。这仍然只是单次碰撞补跑，不得改成循环规则。
+
+协调主线只观察多个实施任务时，可运行只读命令：
+
+```text
+python -B <skill-root>/scripts/lcrl.py observe-run \
+  --state <state-file> --threshold-minutes 20
+```
+
+它只根据已记录的实质进展事件返回五种用户状态、阶段、距上次证据的分钟数和
+`possibly_stuck`；状态文件字节与 revision 必须不变。达到 20 分钟即标记可能卡住，但
+`等待 Chat` 永不因等待时长被判卡；没有进度事件时明确报告“无证据”，不虚构时间。该命令
+不得发送消息、取得 lease、读取 Chat、写项目或改变状态。
 
 到期检查顺序：
 
