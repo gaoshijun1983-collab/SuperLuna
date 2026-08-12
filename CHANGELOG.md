@@ -1,5 +1,132 @@
 # Changelog
 
+- Unreleased Controller 98 / Skill revision `2026-08-13.53`: C26 completed one
+  real send, gated read, reply staging, slot release, and platform-wait deletion,
+  but the generated waiting prompt abbreviated the final step as `resume`. The
+  task therefore called the wrong CLI subcommand and correctly failed closed in
+  `review_waiting`. The rendered prompt now requires the exact
+  `resume-from-reply` subcommand plus result file, waiting source, and deleted
+  automation proof, and explicitly forbids substituting `resume`.
+  Clean C27 then completed three real isolated macOS web-review rounds without
+  coordinator follow-up: three unique sends, three gated reads, three staged
+  identities, three deleted one-shot waits, and three single consumptions. It
+  finished `completed` with no active wait; this remains isolated Alpha evidence
+  and does not count as a real-project Beta cycle.
+- Controller 97 / Skill revision `2026-08-13.52`: C25 completed its
+  first real one-shot wait, staged and consumed the unique Chat reply, deleted
+  the wait, and released the browser slot, but the surviving `review_poll` lease
+  made the mandatory same-task turn-entry fail before round 2. A validated
+  scheduled reply now hands that same lease to `apply_result`; unrelated active
+  leases remain non-preemptible. The exact wait/read/release/resume/guard path is
+  covered by regression.
+- Controller 96 / Skill revision `2026-08-13.51`: C24 sent exactly
+  once and obtained a real request identity, but the mandatory same-task guard
+  before receipt confirmation rotated the ordinary action lease and erased its
+  fresh send authorization. The guard now preserves that exact authorized lease
+  without extending or mutating it until confirmation; ordinary orphan recovery
+  and cross-task exclusion remain unchanged. A regression reproduces authorize →
+  same-task guard → confirm and proves one durable request enters waiting.
+- Controller 95 / Skill revision `2026-08-13.50`: the clean C23 real
+  wait fired, read, released its browser slot, and deleted itself correctly, but
+  the safe reviewer boundary “do not approve release/delete/resume from this
+  evidence” was still interpreted as the current high-impact action. That exact
+  real reply shape is now a regression and auto-continues; an affirmative release
+  and fixture deletion remains blocked.
+- Controller 94 / Skill revision `2026-08-13.49`: C22 exposed a second
+  autonomy blocker after its reply was read successfully: acceptance text proving
+  `added=[]`, `removed=[]`, and no other file deletion was misread as an instruction
+  to delete, so a safe unique `REVISE` stopped for user confirmation. The high-impact
+  gate now removes only narrowly matched absence/"not proven" evidence clauses before
+  classification, while a real delete remains blocked. A waiting-resume regression
+  preserves the exact C22 response shape and proves automatic `apply_result` handoff.
+- Controller 93 / Skill revision `2026-08-13.48`: a real C22 wait was
+  correctly bound while `observe-run` misleadingly returned `automation_id=none`
+  from the retired legacy scheduler field. The observer now exposes the active
+  one-shot wait as its effective automation id and preserves explicit controller/
+  waiting ids plus the active flag, with a waiting-state regression.
+- Unreleased Controller 92 / Skill revision `2026-08-13.47`: C21 reused a
+  canonical reviewer Chat whose older context still declared Controller 89;
+  without a current-run identity block, the reviewer incorrectly treated the
+  new Controller 90 state as an identity conflict. Every new state now owns a
+  unique trusted review-run binding recording its Controller, Skill, schema,
+  implementation task, and fixed Chat. The controller renders that exact block
+  for the start of every formal payload, and the pre-send gate requires the same
+  run id. Old Chat history is explicitly background-only and cannot rename,
+  count, or bind the current state-local run. Legacy states are marked
+  unrecorded rather than assigned invented source versions.
+
+- Unreleased Controller 91 / Skill revision `2026-08-13.46`: the clean C21
+  platform wait was created, bound, and fired automatically, then exposed a
+  cross-operation account-slot bug. A still-live `submission` slot for the same
+  task was returned as reusable during `waiting_read`; the second authorization
+  correctly rejected it. Account slots may now be reused only for the exact
+  operation that acquired them. A different operation fails closed, identifies
+  the same task's stale lease for explicit release, and permits the waiting
+  occurrence to rearm without initializing the browser. The rendered wait
+  prompt also carries this recovery rule and requires both read leases.
+
+- Unreleased Controller 90 / Skill revision `2026-08-13.45`: C19 proved one
+  exact Extreme Chat submission but the host turn ended before creating its
+  single-RDATE waiting task. Submission confirmation now returns a machine-
+  readable `codex_app__automation_update` barrier, inert bootstrap prompt, and
+  mandatory create/bind/render/update sequence. An exact-task ordinary wakeup
+  may recover only this unbound platform wait, with project and browser access
+  still denied; an expired never-bound RDATE is atomically replaced with a fresh
+  token and future RDATE. Once bound, ordinary wakeups remain blocked as before.
+
+- Unreleased Controller 89 / Skill revision `2026-08-13.44`: the five-minute
+  waiting-read lease now covers a real browser reopen and DOM pairing cycle.
+  `rearm-waiting-check --lease-id` atomically releases the claimed read and
+  rotates state before the host may update the platform RDATE. Reviewer verdicts
+  are explicitly limited to pre-response evidence, while the controller still
+  requires post-response staging, slot release, wait deletion, and resume.
+  GitHub Actions also cancels obsolete runs on the same ref to reduce redundant
+  validation mail.
+
+- Unreleased Controller 88 / Skill revision `2026-08-13.43`: the controller now
+  emits the exact 180-second `platform_rdate`, forbids rounding, and requires the
+  platform-returned RDATE when binding a waiting check. A half-hour-rounded wait
+  therefore fails closed instead of silently creating a 20+ minute progress gap.
+
+- Unreleased Controller 87 / Skill revision `2026-08-13.42`: a newly created
+  implementation task may resolve its own exact identity from the host-injected
+  `CODEX_THREAD_ID` during `startup-diagnostics`. This removes the impossible
+  bootstrap dependency on a coordinator's second message while continuing to
+  reject missing identity and delegation `source_thread_id` reuse.
+
+- Unreleased Controller 86 / Skill revision `2026-08-13.41`: C14 proved that
+  Controller 85 continues one clear isolated natural-language FAIL, then exposed
+  two host-contract gaps. The waiting occurrence read the complete second reply
+  and its DOM identity but saved only the body before releasing the account slot
+  and deleting the one-shot, leaving no safe identity for resume. It also counted
+  an older request from the reused Chat as a current-run round. Browser replies
+  must now pass `stage-browser-reply` while both read authorizations remain live;
+  the controller durably binds response identity and body hash before permitting
+  release/delete/resume. Unstaged replies fail closed while the same wait remains
+  recoverable. Round numbers come only from the current state, never Chat history
+  or page prose. `external_blocked` also retires an ordinary `review_poll` lease.
+
+- Unreleased Controller 85 / Skill revision `2026-08-13.40`: C13 completed a
+  real wait-bound reply read with the required release-before-delete-before-
+  resume order, but a low-risk FAIL next step was quarantined because its
+  explicit prohibition mentioned production, deployment, and permissions.
+  The high-impact gate now removes standalone negated boundary clauses before
+  classification while preserving mixed clauses that turn into a real
+  high-impact instruction. A scheduled natural-language FAIL with one clear
+  isolated next step now continues as `apply_result`; vague, ambiguous, and
+  genuinely high-impact instructions still require the user.
+
+- Unreleased Controller 84 / Skill revision `2026-08-13.39`: an implementation
+  that failed closed during C12 left its ordinary `turn_entry` action lease live
+  until timeout, delaying an otherwise clean user-authorized retest. Entering
+  `external_blocked` now retires only foreground `turn_entry` / `apply_result`
+  leases and their pending send authorization. Existing wait deactivation
+  already retires waiting-read leases, while browser-reopen leases remain
+  non-preemptible. The account-gate wording now
+  also matches runtime: every new browser acquisition after a normal release,
+  including the same task's next operation, observes the 180-second quiet
+  interval unless the one-shot proven-health bypass applies.
+
 - Unreleased Controller 83 / Skill revision `2026-08-13.38`: C12 exposed an
   incorrect browser-runtime path expansion by treating the Browser Skill folder
   as the plugin root. The SuperLuna startup contract now defines the plugin root

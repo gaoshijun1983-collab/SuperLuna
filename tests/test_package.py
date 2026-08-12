@@ -95,8 +95,41 @@ class PackageTests(unittest.TestCase):
             '"execution_allowed": False',
             '"project_write_allowed": False',
             '"browser_access_allowed": False',
+            '"action": "waiting_binding_recovery_required"',
+            '"platform_wait_binding_allowed": True',
         ):
             self.assertIn(requirement, source)
+
+    def test_submission_wait_binding_is_a_platform_tool_barrier(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+        for requirement in (
+            "mandatory_next_tool",
+            "codex_app__automation_update",
+            "platform_wait_creation_before_turn_end",
+            "create_platform_wait_with_bootstrap_prompt",
+        ):
+            self.assertIn(requirement, source)
+        self.assertIn("waiting_binding_recovery_required", skill)
+        self.assertIn("waiting_binding_recovery_required", protocol)
+
+    def test_readonly_observer_distinguishes_active_wait_from_legacy_scheduler(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        source = LCRL_SCRIPT.read_text(encoding="utf-8")
+        for field in (
+            "controller_automation_id",
+            "waiting_check_automation_id",
+            "waiting_check_active",
+        ):
+            self.assertIn(field, skill)
+            self.assertIn(field, protocol)
+            self.assertIn(f'"{field}"', source)
 
     def test_controller_registry_matches_source_revision(self):
         registry = json.loads((SKILL_ROOT / "references" / "controller.json").read_text(encoding="utf-8"))
@@ -310,7 +343,7 @@ class PackageTests(unittest.TestCase):
         runtime_sections = {
             "schema_version", "revision", "created_at", "updated_at", "automation",
             "policy", "confirmation", "capabilities", "review", "review_history",
-            "browser_binding", "binding", "attachment", "capability_probes",
+            "browser_reply_observation", "browser_binding", "binding", "attachment", "capability_probes",
             "next_operation", "model_policy", "recovery", "alternative", "runtime",
         }
 
@@ -695,6 +728,7 @@ class PackageTests(unittest.TestCase):
             "waiting_check_token",
             "waiting_check_automation_id",
             "waiting_check_claimed_id",
+            "waiting_check_expected_rdate",
         ):
             self.assertEqual(inactive[field]["const"], "none")
 
@@ -734,12 +768,62 @@ class PackageTests(unittest.TestCase):
             self.assertIn(requirement, packet)
         self.assertIn("本地文件路径不是 Chat 能看到的证据", packet)
 
+    def test_formal_review_packet_requires_one_trusted_state_local_run_identity(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        packet = (SKILL_ROOT / "references" / "review_packet.md").read_text(
+            encoding="utf-8"
+        )
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        source = LCRL_SCRIPT.read_text(encoding="utf-8")
+        schema = json.loads(
+            (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertIn("run_binding", schema["properties"]["review"]["required"])
+        self.assertIn(
+            "browser_submission_send_authorized_review_run_binding_id",
+            schema["properties"]["runtime"]["required"],
+        )
+        for text in (skill, packet, protocol):
+            self.assertIn("SUPERLUNA_REVIEW_RUN", text)
+        self.assertIn("render-review-run-binding", skill)
+        self.assertIn("--review-run-binding-id", skill)
+        self.assertIn("review_run_binding_required_in_payload", source)
+        self.assertIn("earlier Chat messages are background only", source)
+
     def test_review_packet_cannot_request_pass_for_future_evidence(self):
         packet = (SKILL_ROOT / "references" / "review_packet.md").read_text(encoding="utf-8")
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("提交前已经发生", packet)
         self.assertIn("未来计划不能作为 PASS 证据", packet)
         self.assertIn("只审查提交前已经发生的证据", skill)
+
+    def test_reviewer_verdict_excludes_current_response_post_closure(self):
+        packet = (SKILL_ROOT / "references" / "review_packet.md").read_text(
+            encoding="utf-8"
+        )
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("评审证据截止点是本次请求提交时", packet)
+        self.assertIn("不得成为本次 verdict 的 PASS 前置条件", packet)
+        self.assertIn("causal evidence cutoff at request submission", protocol)
+        self.assertIn("controller-owned post-response closure", protocol)
+        self.assertIn("不在本次 reviewer verdict 的证据范围内", skill)
+
+    def test_ci_cancels_obsolete_runs_on_the_same_ref(self):
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("concurrency:", workflow)
+        self.assertIn("github.workflow", workflow)
+        self.assertIn("github.ref", workflow)
+        self.assertIn("cancel-in-progress: true", workflow)
 
     def test_skill_binds_one_user_selected_web_chat_without_creating_it(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -961,6 +1045,35 @@ class PackageTests(unittest.TestCase):
             self.assertIn(requirement, skill)
         self.assertIn("must not consume a reply in that same occurrence", transport)
         self.assertIn("even if the assistant reply is already complete", protocol)
+
+    def test_browser_reply_identity_is_staged_before_wait_deletion(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+        for requirement in (
+            "stage-browser-reply",
+            "browser_reply_staged",
+            "不得删除等待任务",
+            "state_review_round_number",
+            "固定 Chat 中旧任务、旧 state",
+        ):
+            self.assertIn(requirement, skill)
+        for requirement in (
+            "stage-browser-reply",
+            "browser_reply_staged",
+            "state_review_round_number",
+            "Round accounting is state-local",
+        ):
+            self.assertIn(requirement, transport)
+        for requirement in (
+            "stage_browser_reply_observation_command",
+            '"browser_reply_staged"',
+            "scheduled browser reply resume requires a staged reply identity",
+            '"review_round_authority": "current_state_only"',
+        ):
+            self.assertIn(requirement, source)
 
     def test_browser_submission_visual_evidence_never_captures_reply_viewport(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")

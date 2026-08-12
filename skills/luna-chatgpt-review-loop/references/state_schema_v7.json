@@ -13,6 +13,7 @@
     "capabilities",
     "review",
     "review_history",
+    "browser_reply_observation",
     "browser_binding",
     "binding",
     "attachment",
@@ -41,7 +42,8 @@
         "waiting_check_token",
         "waiting_check_active",
         "waiting_check_automation_id",
-        "waiting_check_claimed_id"
+        "waiting_check_claimed_id",
+        "waiting_check_expected_rdate"
       ],
       "properties": {
         "id": {"type": "string"},
@@ -67,6 +69,10 @@
           "maxLength": 64,
           "pattern": "^[^\\r\\n\\t]+$",
           "description": "Platform heartbeat identity claimed by the current occurrence; cleared only by an authorized rearm or phase exit."
+        },
+        "waiting_check_expected_rdate": {
+          "type": "string",
+          "description": "Exact controller-generated single RDATE that the platform waiting task must use without rounding."
         }
       },
       "allOf": [
@@ -177,7 +183,8 @@
         "response_envelope_hash",
         "response_stage",
         "response_valid_for_apply",
-        "response_quarantined_reason"
+        "response_quarantined_reason",
+        "run_binding"
       ],
       "properties": {
         "transport": {"enum": ["app_chat_review", "in_app_browser"]},
@@ -200,7 +207,28 @@
         "request_reasoning_mode": {"enum": ["none", "extreme", "unconfirmed", "legacy"]},
         "request_native_app_instance_id": {"type": "string"},
         "response_complete": {"type": "boolean"},
-        "response_valid_for_apply": {"type": "boolean"}
+        "response_valid_for_apply": {"type": "boolean"},
+        "run_binding": {
+          "type": "object",
+          "required": [
+            "status",
+            "id",
+            "controller_version",
+            "skill_revision",
+            "state_schema_version",
+            "implementation_thread_id",
+            "reviewer_thread_id",
+            "created_at"
+          ],
+          "properties": {
+            "status": {"enum": ["trusted", "legacy_unrecorded"]},
+            "id": {"type": "string", "pattern": "^review-run-(legacy-)?[0-9a-f]{16}$"},
+            "state_schema_version": {"type": "integer"},
+            "implementation_thread_id": {"type": "string"},
+            "reviewer_thread_id": {"type": "string"},
+            "created_at": {"type": "string"}
+          }
+        }
       },
       "allOf": [
         {
@@ -239,6 +267,37 @@
       "type": "array",
       "maxItems": 20,
       "items": {"type": "object"}
+    },
+    "browser_reply_observation": {
+      "type": "object",
+      "required": [
+        "status",
+        "cycle_id",
+        "request_message_id",
+        "response_turn_id",
+        "response_message_id",
+        "response_completed_at",
+        "result_file",
+        "result_sha256",
+        "waiting_check_automation_id",
+        "waiting_read_lease_id",
+        "account_slot_lease_id",
+        "staged_at"
+      ],
+      "properties": {
+        "status": {"enum": ["none", "staged"]},
+        "cycle_id": {"type": "string"},
+        "request_message_id": {"type": "string"},
+        "response_turn_id": {"type": "string"},
+        "response_message_id": {"type": "string"},
+        "response_completed_at": {"type": "string"},
+        "result_file": {"type": "string"},
+        "result_sha256": {"type": "string"},
+        "waiting_check_automation_id": {"type": "string"},
+        "waiting_read_lease_id": {"type": "string"},
+        "account_slot_lease_id": {"type": "string"},
+        "staged_at": {"type": "string"}
+      }
     },
     "browser_binding": {
       "type": "object",
@@ -417,6 +476,7 @@
         "browser_submission_send_authorized_account_slot_lease_id",
         "browser_submission_send_authorized_browser_id",
         "browser_submission_send_authorized_fingerprint",
+        "browser_submission_send_authorized_review_run_binding_id",
         "browser_submission_send_authorized_revision"
       ],
       "properties": {
@@ -441,6 +501,10 @@
         "browser_submission_send_authorized_fingerprint": {
           "type": "string",
           "description": "Exact current submission fingerprint proven by the fresh pre-send gate."
+        },
+        "browser_submission_send_authorized_review_run_binding_id": {
+          "type": "string",
+          "description": "Exact state-local review run identity rendered into the authorized payload."
         },
         "browser_submission_send_authorized_revision": {
           "type": "integer",
@@ -706,7 +770,8 @@
           "automation": {
             "properties": {
               "waiting_check_active": {"const": true},
-              "waiting_check_token": {"not": {"const": "none"}}
+              "waiting_check_token": {"not": {"const": "none"}},
+              "waiting_check_expected_rdate": {"not": {"const": "none"}}
             }
           }
         }
@@ -718,7 +783,8 @@
               "waiting_check_active": {"const": false},
               "waiting_check_token": {"const": "none"},
               "waiting_check_automation_id": {"const": "none"},
-              "waiting_check_claimed_id": {"const": "none"}
+              "waiting_check_claimed_id": {"const": "none"},
+              "waiting_check_expected_rdate": {"const": "none"}
             }
           }
         }

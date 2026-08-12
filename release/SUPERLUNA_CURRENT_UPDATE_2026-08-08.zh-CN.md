@@ -4,9 +4,9 @@
 
 - 产品：SuperLuna
 - 版本：`0.2.0-alpha.49`（Python 元数据：`0.2.0a49`）
-- 当前源码控制器：83（Alpha 49 公开包仍为旧源码）
+- 当前源码控制器：98（Alpha 49 公开包仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-13.38`
+- 当前源码 Skill 修订：`2026-08-13.53`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
@@ -14,6 +14,88 @@
 
 ### 0AAAAA. 同一账户网页访问最多两个并加入全局熔断
 
+- Controller 92 修复 C21 复用固定 Chat 时的跨运行身份冲突：该 Chat 历史仍声明 Controller 89，
+  而 C21 新 state 运行 Controller 90；第 1 轮审阅包没有控制器生成的本轮身份区块，Reviewer 因此
+  错把旧身份当成当前绑定并返回 BLOCKED。现在每个新 state 都生成唯一可信 `review.run_binding`，
+  固定记录 Controller、Skill、schema、实施任务和 reviewer Chat；每轮正式审阅必须把
+  `render-review-run-binding` 完整原文放在正文最前，并向发送授权交回同一个 RUN_ID。旧 Chat
+  历史只能作为背景，不能改名、计数或绑定当前 state。旧状态不会被伪造新版本，而是明确标为
+  `legacy_unrecorded`。当前本地覆盖为 282 项。
+- Controller 98 修复 C26 的等待提示歧义：真实回复已登记、读取名额已释放、平台等待已删除后，
+  生成提示却把最终命令简写为 `resume`，任务因此调用了错误子命令并安全停留在等待状态。现在提示
+  明确要求 `resume-from-reply` 及结果文件、waiting_check 来源、已删除任务 ID，且禁止误用 `resume`。
+- C27 已在 Controller 98 上完成三轮连续真实 macOS 网页闭环：每轮各一次提交、授权读取、身份登记、
+  单次等待删除与回复消费，原任务无需协调者追加消息即可进入下一轮；第 3 轮按 Reviewer 意见补齐
+  `id` 字段级 diff 后进入 `completed`，最终无活动等待项。该结果属于隔离 fixture 的 Alpha 传输证据，
+  不冒充真实项目 10/10 Beta 门槛。
+- Controller 97 修复 C25 第 1 轮真实等待回复消费后的续接阻塞：单次等待完成读取、身份登记、
+  名额释放和删除后，原 `review_poll` 租约过去仍存活，导致同一任务随后的强制入口门控被当成
+  并发操作拒绝。现在只在回复已验证且操作包已持久化的 `result_received` 边界，将原租约原子
+  交接为 `apply_result`；同一任务可直接实施第 2 轮，其他活动租约仍不可抢占。
+- Controller 96 修复 C24 的真实发送回执阻塞：同一任务在消息发送后再次执行必需的入口门控时，
+  不再轮换并清空已经授权的单次发送租约，而是原样保留到真实 request identity 登记完成；普通孤儿
+  租约仍轮换，其他任务仍不能接管。
+- Controller 95 补齐 C23 的真实反例：单次等待已自动读取并删除，但“不能据此批准
+  release/delete/resume”仍被误识别为当前动作。该类明确不批准的边界现在不会阻塞自动续接，
+  真正批准发布或删除仍会停止等待用户决定。
+- Controller 94 修复 C22 回复成功读取后的自动续接误拦截：当 Chat 用 `added=[]`、`removed=[]`
+  或“没有新增、删除其他路径”描述负面证据时，不再把它误判成真实删除指令；真正删除项目文件、
+  发布、部署等高影响动作仍进入用户决定。新增等待回复端到端回归，证明该类安全 `REVISE` 会直接
+  进入 `apply_result`。
+- Controller 93 修复 C22 暴露的只读观察误报：真实一次性等待已绑定时，`observe-run` 过去仍从
+  退役的总调度字段读取 `automation_id=none`。现在观察器以当前活动的
+  `waiting_check_automation_id` 作为有效任务身份，同时单列旧控制器任务身份、等待任务身份和
+  活动标记；该变更不触碰等待调度或浏览器执行。
+- Controller 91 修复 C21 首次自动等待唤醒暴露的跨操作名额复用：C21 已在无协调者补指令下
+  完成第 1 轮唯一提交、创建并绑定精确单一 RDATE 等待项，平台也按时自动唤醒原任务；但上一轮
+  未释放的 `submission` 名额被共享门以 `account_browser_slot_reused` 返回给 `waiting_read`，
+  二次读取授权因此正确拒绝且没有初始化浏览器。现在同一任务只有在 operation 完全相同时才能
+  复用名额；不同 operation 会失败关闭，返回需要释放的旧 lease 和安全重排标志。等待提示同步
+  要求先释放旧 operation 名额，再原子 rearm 同一等待项，并明确同时传递 waiting-check 与账户
+  两份 read lease。新增同型回归，当前本地仓库覆盖为 275 项。
+- Controller 90 修复 C19 的“提交成功但平台等待项未创建”断点：C19 已真实创建并确认一个
+  “极高” reviewer Chat，完成第 1 轮唯一提交且未发生限流，但宿主 turn 在等待 token 和精确
+  RDATE 已生成、automation id 仍为 `none` 时结束。现在提交确认会直接返回
+  `codex_app__automation_update` 工具硬门、安全占位 prompt 及固定的
+  “创建 → 绑定 → 渲染 → 更新同一等待项”序列；全部完成前禁止结束 turn。若宿主仍提前结束，
+  只有原实施任务可通过 `waiting_binding_recovery_required` 补齐平台等待，且没有项目读写、测试或
+  浏览器权限；从未绑定的 RDATE 若已过期，只能由该门禁原子换成新 token 和未来 180 秒时间；
+  等待项一旦绑定，普通消息仍完全不能唤醒等待中的工作。
+  C20 前向复测在 state 创建前遇到 ChatGPT `Something went wrong`：新对话只有临时 `WEB:`
+  身份，重试后回到首页。任务只发送一次初始化消息、未重发、未另建 Chat，正式轮次和等待项
+  均为 0，账户门回到 `active_count=0`。临时身份不被冒充为正式 conversation；下一次复测改用
+  已存在的真实 UUID reviewer Chat，以隔离验证 Controller 90 的提交后平台等待硬门。
+- Controller 89 修复 C18 暴露的三项真实闭环问题：等待 Chat 的读取 lease 从 2 分钟延长为
+  5 分钟，避免浏览器重开和 DOM 配对尚未完成就失效；无回复、无账户名额或身份缺失时，
+  `rearm-waiting-check --lease-id` 会先在 state 中原子释放读取权、轮换 token，再允许更新平台
+  RDATE，杜绝“平台已改、state 未改”的短暂错序；评审证据截止点固定为本次请求提交时，本次
+  回复之后才可能发生的登记、释放、等待删除和续接仍由控制器强制验证，但不再成为产生该回复的
+  reviewer verdict 的因果前置条件。CI 同时取消同一分支上已过时的运行，减少连续推送邮件。
+- Controller 88 修复等待时间被取整到下一个整点/半点的问题：控制器现在直接生成精确的
+  180 秒单次 `platform_rdate`，平台创建后必须把真实 RDATE 回传给 `bind-waiting-check`；任何
+  取整或不一致都会失败关闭，避免产生超过用户 20 分钟判定线的假性卡住。
+- Controller 87 修复全新任务的自举身份缺口：创建完成后无需协调者再发第二条消息，
+  `startup-diagnostics` 在未显式传入 ID 时仅使用宿主注入的 `CODEX_THREAD_ID`。环境值缺失仍安全停止，
+  且继续拒绝把协调任务的 `source_thread_id` 当作实施任务身份。
+- Controller 86 修复 C14 的不可恢复等待断点：C14 已经从 DOM 取得第2轮完整回复和真实 assistant
+  identity，却只把正文写入文件，随后释放账户名额并删除一次性等待项，才发现 identity 未单独保存，
+  因而无法安全消费。现在网页回复必须在读取 lease 与 `waiting_read` 名额仍有效时先通过
+  `stage-browser-reply`，把正文文件哈希、真实 response turn/message identity、当前 cycle、token
+  和等待任务 ID 原子写入 state；只有成功登记后才能按“释放名额 → 删除等待 → resume”继续。
+  identity 缺失或登记失败时释放名额并重排同一个等待项，不再删除后进入不可恢复阻塞。
+  C14 同时把固定 Chat 中旧任务的一次请求误算为本轮次数；现在正式轮数只认当前 state 的持久化
+  request identity，Chat 历史及页面自述均不能改变本轮计数。进入 `external_blocked` 也会清理普通
+  `review_poll` lease，browser-reopen lease 仍受保护。
+- Controller 85 修复 C13 的真实自动续接误判：第 1 轮已按“释放 waiting_read 名额 → 删除单次
+  等待 → resume”正确消费唯一回复，但 Chat 的低风险隔离下一步因安全边界中写有“不得触碰生产、
+  部署或权限”而被误判为高影响并要求用户决定。现在分类前只忽略独立的否定边界句；若否定句随后
+  转为“立即部署”等真实高影响动作，仍会失败关闭。清晰、唯一、隔离范围内的自然语言 FAIL 可继续
+  为 `apply_result`，模糊、混合或真实高影响指令仍停下。
+- Controller 84 修复 C12 失败关闭后仍保留普通前台 lease 直到超时的问题：进入
+  `external_blocked` 时只额外清理当前 `turn_entry` / `apply_result` lease 及待发送授权；离开等待
+  状态时，既有逻辑本就会退休 waiting-read lease，而 browser-reopen lease 仍不可被其他 turn 抢占。说明同时与实际运行对齐：正常
+  释放后的每次新网页访问（包括同一任务的下一操作）都遵守 180 秒账户静默期，只有已证明健康的
+  一次性 bypass 例外。
 - Skill revision `.38` 修复 C12 暴露的浏览器运行时路径理解错误：`<plugin root>` 现在明确为
   同时包含 `skills/` 与 `scripts/` 的共同父目录，只允许导入
   `<plugin root>/scripts/browser-client.mjs`，不得错误追加

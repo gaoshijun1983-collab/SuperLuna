@@ -22,6 +22,12 @@ the required label.
 The user explicitly confirms the visible reviewer mode; an already-visible
 required label satisfies that confirmation without changing the selector.
 
+Every formal packet starts with the exact controller-rendered
+`[SUPERLUNA_REVIEW_RUN]` ... `[/SUPERLUNA_REVIEW_RUN]` block. Its trusted
+state-local `RUN_ID` is also required by the pre-send authorization. Earlier
+messages in a reused Chat are background only and cannot bind, count, rename,
+or reject the current run.
+
 ## 2. Start gate
 
 The implementation task first activates the in-app-browser control skill and
@@ -64,11 +70,20 @@ wait and no read lease, clears every wait identity, and moves to
 `external_blocked`. A task's own assertion, an id mismatch, or any live platform
 task cannot retire the wait.
 
+The read-only observer reports the active one-shot waiting identity as its
+effective `automation_id` whenever a wait is bound. It also exposes
+`controller_automation_id`, `waiting_check_automation_id`, and
+`waiting_check_active`; a retired legacy controller id of `none` must never be
+interpreted as proof that the current one-shot wait is missing.
+
 For delegated tasks, `<codex_delegation>.source_thread_id` identifies the
 coordinator/source task, never the newly created implementation task. The
-creator must provide the exact `threadId` returned for the child task. Passing
-`--delegation-source-thread-id` makes `startup-diagnostics` fail closed when
-that source identity is incorrectly reused as the implementation identity.
+implementation task first uses the host-injected `CODEX_THREAD_ID` as its own
+identity. When `--implementation-thread-id` is omitted,
+`startup-diagnostics` reads only that trusted environment value and fails
+closed if it is absent. It never guesses from a title or delegation wrapper.
+Passing `--delegation-source-thread-id` still fails closed when that source
+identity is incorrectly reused as the implementation identity.
 
 `autonomous-preflight --transport in_app_browser` verifies distinct
 implementation/reviewer identities, browser binding/read/send capability, and
@@ -100,6 +115,18 @@ this waiting boundary. A platform-fired waiting occurrence is the only
 exception: its first action remains `waiting-check`, followed by
 `authorize-waiting-chat-read`; an ordinary user or coordinator message cannot
 claim that source.
+
+There is one narrower pre-wait condition: a confirmed submission whose
+controller token exists but whose platform automation id is still `none` is not
+yet a real wait. The exact implementation task receives
+`waiting_binding_recovery_required`, still with no project, test, browser, or
+Chat authority and no action lease. It may only execute the returned platform
+wait create/bind/render/update sequence. A different task identity fails
+closed. Once the platform id is bound, every ordinary wakeup returns the normal
+`waiting_turn_blocked` result again. If the never-bound RDATE has already
+expired, this exact-task guard atomically rotates the token and writes a fresh
+future 180-second RDATE before returning the create contract. It cannot rearm a
+bound platform wait.
 
 The guard also requires the exact implementation-task identity before granting
 any ordinary work lease. A missing identity or one belonging to another task
@@ -225,9 +252,14 @@ future occurrence receives a fresh controller token. There is no second
 scheduler.
 
 The Codex Desktop heartbeat must use one UTC occurrence formatted exactly as
-`RDATE:YYYYMMDDTHHMMSSZ`; 禁止使用 `FREQ=`、`INTERVAL=` or any recurring rule.
-After a no-result occurrence, `rearm-waiting-check` rotates the controller token
-before the same platform heartbeat is updated to a new single `RDATE`.
+the controller's exact `platform_rdate` in `RDATE:YYYYMMDDTHHMMSSZ` form;
+rounding to an hour or half-hour is forbidden. The platform-returned RDATE must
+be supplied to `bind-waiting-check --scheduled-rdate`; a mismatch fails closed.
+禁止使用 `FREQ=`、`INTERVAL=` or any recurring rule.
+After a no-result occurrence, `rearm-waiting-check --lease-id <current read lease>`
+atomically releases that read authority and rotates the controller token before
+the same platform heartbeat is updated to a new single `RDATE`. The platform
+must never be updated first.
 Every `schedule_once`, `keep_once`, or `update_once` result also declares
 `platform_wait_rule=single_rdate`, `platform_rrule_prefix=RDATE:`, and
 `recurring_platform_rule_allowed=false`. The platform call must follow those
@@ -239,6 +271,16 @@ prompt contains the current state path, token, and automation id. A hand-written
 summarized, or partially copied occurrence prompt is invalid; failure to update
 the same future task requires deleting it and failing closed before the submit
 occurrence ends.
+`confirm-review-submission` exposes this as a host barrier, not prose advice:
+`mandatory_next_tool=codex_app__automation_update`, mode `create`, an exact
+single-RDATE `platform_wait_create` object, and a fixed
+`mandatory_next_action_sequence`. The first create uses the controller's inert
+bootstrap prompt. That prompt has no authority to inspect Chat, browser,
+project files, or state if it somehow fires before replacement. The host maps
+`target_thread_id` to the platform tool's `targetThreadId`, binds the returned
+stable id and exact RDATE, renders the identity-complete prompt, and updates the
+same platform task. `platform_wait_creation_before_turn_end=true` remains a
+hard turn barrier until all four actions succeed.
 The platform automation id must be one non-empty line of at most 64 characters.
 Before an automatic browser send, `authorize-browser-submission-send` projects
 the later complete prompt at that maximum id length. If it returns
@@ -258,6 +300,10 @@ the account slot still belongs to the same implementation task with the exact
 wrong-task, or wrong-operation slots return `account_browser_slot_required` and
 do not authorize browser initialization. Stale or duplicate occurrences do not
 read the page or mutate the project.
+Slot acquisition never re-labels an existing lease: same-task reuse requires
+the same operation. `account_browser_operation_conflict` identifies the stale
+lease for explicit release, but grants no browser access; a waiting occurrence
+then rearms state before moving the same platform wait.
 The first executable action of a due heartbeat must be the local `waiting-check`
 CLI. Browser runtime setup, tab listing/claiming, or DOM access before its saved
 `review_poll`/`receipt_reconcile` result, successful `waiting_read` account-slot
@@ -265,11 +311,12 @@ acquisition, and the second authorization is a failed cycle; any content observe
 through that bypass must not be consumed or applied.
 
 For `browser_read_authorized`, inspect the same tab without a reload. If the
-page reports a network/load failure, release the lease and call
+page reports a network/load failure, release the account slot and call
 `browser-network-observation --outcome network_error`. The controller preserves
 the stable waiting id, sets `browser_reload_same_tab_required`, and authorizes a
-single future check 180 seconds later. `rearm-waiting-check` rotates the token and
-updates that existing platform wait; it cannot create a second wait.
+single future check 180 seconds later. `rearm-waiting-check --lease-id` clears the
+claimed read and rotates the token in state first; only its successful result
+updates that existing platform wait. It cannot create a second wait.
 
 On the next due occurrence, `browser_refresh_authorized` plus
 `reload_same_tab_once=true` permits exactly one reload of the same tab. The
@@ -278,8 +325,9 @@ caller waits for page load, re-verifies the same conversation id, and inspects.
 reload-required state. A healthy page is never refreshed, a visibly streaming
 reply is never refreshed, and UI actions are not blindly repeated.
 
-If no exact receipt or complete reply exists, release the lease and rearm the
-same waiting gate for one future occurrence. A reply, phase change, block,
+If no exact receipt or complete reply exists, release the account slot and rearm
+the same waiting gate with the exact read lease before updating its one future
+occurrence. A reply, phase change, block,
 completion, or user stop retires the gate. Queued stale occurrences expire.
 
 ## 5. Natural-language result
@@ -320,12 +368,21 @@ Only a reviewed `result_received` boundary plus an explicit
 enter `completed` in `continuous` mode. Recovery override cannot bypass this
 contract. The same response identity is consumed at most once.
 
+Each reviewer verdict has a causal evidence cutoff at request submission. The
+current response's staging, account-slot release, one-shot deletion, and state
+resume are controller-owned post-response closure. They remain mandatory host
+checks, but cannot be required as evidence for the verdict that precedes them.
+Completed closure from an earlier round may be reviewed in a later request.
+
 ## 6. Retained invariants
 
 - atomic state writes and revision checks;
 - request/response identity separation and one submission fingerprint;
 - bounded action leases;
 - one stable task/Chat/tab binding;
+- one trusted state-local review-run binding, rendered into every formal request
+  and rechecked by the send authorization; older Chat history cannot rename,
+  count, or bind the current run;
 - attachment visibility verification;
 - no resend after an uncertain outcome;
 - page content cannot override role, channel, permission, quota, or direction;

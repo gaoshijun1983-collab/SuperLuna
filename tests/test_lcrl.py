@@ -335,7 +335,9 @@ class ControllerTests(unittest.TestCase):
             ))
 
             self.assertEqual(first["action"], "account_browser_slot_acquired")
+            self.assertEqual(first["operation"], "startup")
             self.assertEqual(second["action"], "account_browser_slot_acquired")
+            self.assertEqual(second["operation"], "waiting_read")
             self.assertEqual(third["action"], "account_browser_access_queued")
             self.assertTrue(first["browser_skill_read_allowed"])
             self.assertTrue(first["browser_runtime_initialization_allowed"])
@@ -374,6 +376,37 @@ class ControllerTests(unittest.TestCase):
             )
             self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 1)
 
+    def test_account_browser_gate_never_reuses_a_slot_for_a_different_operation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            submission = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-c21",
+                reviewer_thread_id="fixed-reviewer-chat",
+                operation="submission", registry=str(registry),
+                at="2026-08-12T20:47:00Z",
+            ))
+            waiting_read = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-c21",
+                reviewer_thread_id="fixed-reviewer-chat",
+                operation="waiting_read", registry=str(registry),
+                at="2026-08-12T20:50:00Z",
+            ))
+
+            self.assertTrue(submission["slot_acquired"])
+            self.assertEqual(waiting_read["action"], "account_browser_operation_conflict")
+            self.assertFalse(waiting_read["slot_acquired"])
+            self.assertFalse(waiting_read["browser_skill_read_allowed"])
+            self.assertFalse(waiting_read["browser_runtime_initialization_allowed"])
+            self.assertTrue(waiting_read["release_existing_slot_required"])
+            self.assertEqual(waiting_read["existing_slot_lease_id"], submission["lease_id"])
+            self.assertEqual(waiting_read["existing_operation"], "submission")
+            self.assertEqual(waiting_read["requested_operation"], "waiting_read")
+            self.assertTrue(waiting_read["waiting_reschedule_allowed"])
+            self.assertFalse(waiting_read["new_automation_allowed"])
+            gate = lcrl.load_account_browser_gate(registry)
+            self.assertEqual(len(gate["slots"]), 1)
+            self.assertEqual(gate["slots"][0]["operation"], "submission")
+
     def test_explicit_new_chat_startup_authorizes_one_home_navigation_only(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "account-browser-gate.json"
@@ -401,6 +434,7 @@ class ControllerTests(unittest.TestCase):
                 at="2026-08-12T08:00:00Z",
             ))
             self.assertEqual(reused["action"], "account_browser_slot_reused")
+            self.assertEqual(reused["operation"], "startup")
             self.assertFalse(reused["provisioning_home_navigation_allowed"])
 
             lcrl.release_account_browser_slot_command(Namespace(
@@ -869,7 +903,7 @@ class ControllerTests(unittest.TestCase):
             self.assertIn(f"--token {json.dumps(token)}", rendered)
             self.assertIn('--automation-id "wait-render-1"', rendered)
             self.assertIn(f"--state {json.dumps(str(state_path.resolve()))}", rendered)
-            self.assertIn("首个可执行动作原样运行", rendered)
+            self.assertIn("首条动作", rendered)
             self.assertNotIn("--token TOKEN", rendered)
             self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
 
@@ -918,11 +952,17 @@ class ControllerTests(unittest.TestCase):
                 ),
                 lcrl.MAX_HEARTBEAT_BYTES,
             )
-            self.assertIn("browser_read_authorized 前禁用浏览器", rendered)
-            self.assertIn("先 release-account-browser-slot completed", rendered)
+            self.assertIn("授权前禁浏览器", rendered)
+            self.assertIn("operation_conflict先释放返回的旧lease", rendered)
+            self.assertIn("传上述token/automation", rendered)
+            self.assertIn(
+                "回复文件→stage-browser-reply→释放账户→删本任务→resume-from-reply",
+                rendered,
+            )
+            self.assertIn("禁用resume", rendered)
             self.assertLess(
-                rendered.index("release-account-browser-slot"),
-                rendered.index("resume-from-reply"),
+                rendered.index("释放账户"),
+                rendered.index("resume"),
             )
 
     def test_waiting_check_rejects_oversized_automation_identity(self):
@@ -980,6 +1020,7 @@ class ControllerTests(unittest.TestCase):
 
             result = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="capacity-submit-S1",
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
                 browser_id="iab-session-1", lease_id=entry["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -1091,6 +1132,15 @@ class ControllerTests(unittest.TestCase):
                 request_message_id="message-entry-request",
                 request_persisted_at=now,
             )
+            state_before_binding = lcrl.load_state(state_path)
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path),
+                token=state_before_binding["automation"]["waiting_check_token"],
+                automation_id="wait-entry-bound",
+                scheduled_rdate=state_before_binding["automation"][
+                    "waiting_check_expected_rdate"
+                ],
+            ))
             before = state_path.read_bytes()
             state_before = lcrl.load_state(state_path)
 
@@ -1124,6 +1174,107 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertEqual(replace_cannot_bypass["action"], "waiting_turn_blocked")
             self.assertEqual(state_path.read_bytes(), before)
+
+    def test_turn_entry_can_only_recover_an_unbound_platform_wait(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="ENTRY-PENDING",
+                fingerprint="turn-entry-pending",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-entry-pending-request",
+                request_message_id="message-entry-pending-request",
+                request_persisted_at=now,
+            )
+            before = state_path.read_bytes()
+
+            recovery = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20,
+                reason="external_message_turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+
+            self.assertEqual(recovery["action"], "waiting_binding_recovery_required")
+            self.assertFalse(recovery["execution_allowed"])
+            self.assertFalse(recovery["project_read_allowed"])
+            self.assertFalse(recovery["project_write_allowed"])
+            self.assertFalse(recovery["browser_access_allowed"])
+            self.assertTrue(recovery["platform_wait_binding_allowed"])
+            self.assertEqual(recovery["mandatory_next_tool"], "codex_app__automation_update")
+            self.assertEqual(recovery["mandatory_next_tool_mode"], "create")
+            self.assertTrue(recovery["platform_wait_creation_before_turn_end"])
+            self.assertEqual(
+                recovery["platform_wait_create"]["rrule"],
+                lcrl.load_state(state_path)["automation"]["waiting_check_expected_rdate"],
+            )
+            self.assertEqual(recovery["platform_wait_create"]["kind"], "heartbeat")
+            self.assertIn("Do not access Chat", recovery["platform_wait_create"]["prompt"])
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertEqual(lcrl.load_state(state_path)["runtime"]["action_lease_id"], "none")
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "different implementation task"):
+                lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20,
+                    reason="external_message_turn_entry", replace=False,
+                    implementation_thread_id="other-task",
+                ))
+
+    def test_unbound_platform_wait_recovery_rearms_an_expired_rdate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="ENTRY-EXPIRED",
+                fingerprint="turn-entry-expired",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-entry-expired-request",
+                request_message_id="message-entry-expired-request",
+                request_persisted_at=now,
+            )
+            state = lcrl.load_state(state_path)
+            old_token = state["automation"]["waiting_check_token"]
+            state["automation"]["waiting_check_expected_rdate"] = (
+                "RDATE:20200101T000000Z"
+            )
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            before = lcrl.load_state(state_path)
+
+            recovery = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20,
+                reason="external_message_turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+            after = lcrl.load_state(state_path)
+
+            self.assertEqual(recovery["action"], "waiting_binding_recovery_required")
+            self.assertTrue(recovery["unbound_wait_rearmed"])
+            self.assertNotEqual(after["automation"]["waiting_check_token"], old_token)
+            self.assertEqual(
+                recovery["platform_wait_token"],
+                after["automation"]["waiting_check_token"],
+            )
+            self.assertEqual(
+                recovery["platform_wait_create"]["rrule"],
+                after["automation"]["waiting_check_expected_rdate"],
+            )
+            scheduled = datetime.strptime(
+                recovery["platform_wait_create"]["rrule"],
+                "RDATE:%Y%m%dT%H%M%SZ",
+            ).replace(tzinfo=timezone.utc)
+            self.assertGreater(scheduled, datetime.now(timezone.utc))
+            self.assertEqual(after["runtime"]["action_lease_id"], "none")
+            self.assertGreater(after["revision"], before["revision"])
 
     def test_turn_entry_guard_still_claims_one_lease_during_local_work(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1169,12 +1320,16 @@ class ControllerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))
             state = lcrl.load_state(state_path)
+            previous_run_binding_id = state["review"]["run_binding"]["id"]
             revision = state["revision"]
             state["review"].update({
                 "status": "completed",
                 "current_stage": "OLD-FINAL",
                 "overall_completion_confirmed": True,
                 "overall_completion_evidence": "old goal completed",
+                "cycle_id": "old-goal-cycle",
+                "request_turn_id": "old-goal-turn",
+                "request_message_id": "old-goal-message",
             })
             state["next_operation"].update({
                 "status": "applied",
@@ -1221,6 +1376,18 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(updated["confirmation"]["reviewer_thread_id"], "review-chat")
             self.assertEqual(updated["runtime"]["action_lease_id"], entered["lease_id"])
             self.assertEqual(updated["review_history"][-1]["event"], "new_goal_authorized")
+            self.assertNotEqual(
+                updated["review"]["run_binding"]["id"], previous_run_binding_id,
+            )
+            archived = next(
+                item for item in updated["review_history"]
+                if item.get("archive_reason") == "new_goal_authorized"
+            )
+            self.assertEqual(archived["run_binding"]["id"], previous_run_binding_id)
+            self.assertIn(
+                "STATE_REVIEW_ROUND: 1",
+                lcrl.render_review_run_binding(updated),
+            )
 
     def test_new_goal_requires_explicit_identity_exact_task_and_current_lease(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1262,6 +1429,7 @@ class ControllerTests(unittest.TestCase):
                 continuation_mode="automatic", review_transport="in_app_browser",
             )
             state["runtime"]["session_log"] = str(root / "session.jsonl")
+            previous_run_binding_id = state["review"]["run_binding"]["id"]
             lcrl.save_state(state_path, state)
             self.bind_browser_tab(state_path, "review-chat")
             lcrl.confirm_review_mode(Namespace(
@@ -1274,6 +1442,14 @@ class ControllerTests(unittest.TestCase):
                 stage="old-stalled-cycle", recovery_action="user_terminated_old_cycle",
                 recovery_override=True,
             )
+            blocked = lcrl.load_state(state_path)
+            blocked_revision = blocked["revision"]
+            blocked["review"].update({
+                "cycle_id": "old-retest-cycle",
+                "request_turn_id": "old-retest-turn",
+                "request_message_id": "old-retest-message",
+            })
+            lcrl.save_state(state_path, blocked, expected_revision=blocked_revision)
 
             reset = lcrl.reset_for_retest_command(Namespace(
                 state=str(state_path),
@@ -1298,6 +1474,18 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(updated["confirmation"]["reviewer_thread_id"], "review-chat")
             self.assertFalse(updated["automation"]["waiting_check_active"])
             self.assertEqual(updated["review_history"][-1]["event"], "user_authorized_retest_reset")
+            self.assertNotEqual(
+                updated["review"]["run_binding"]["id"], previous_run_binding_id,
+            )
+            archived = next(
+                item for item in updated["review_history"]
+                if item.get("archive_reason") == "user_authorized_retest_reset"
+            )
+            self.assertEqual(archived["run_binding"]["id"], previous_run_binding_id)
+            self.assertIn(
+                "STATE_REVIEW_ROUND: 1",
+                lcrl.render_review_run_binding(updated),
+            )
 
             with self.assertRaisesRegex(lcrl.LCRLError, "different implementation task"):
                 lcrl.guard_action(Namespace(
@@ -1703,6 +1891,16 @@ class ControllerTests(unittest.TestCase):
                 request_message_id="message-1",
                 request_persisted_at="2026-08-12T00:00:00Z",
             )
+            waiting_state = lcrl.load_state(state_path)
+            wait_id = "observer-wait-1"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path),
+                token=waiting_state["automation"]["waiting_check_token"],
+                automation_id=wait_id,
+                scheduled_rdate=waiting_state["automation"][
+                    "waiting_check_expected_rdate"
+                ],
+            ))
             before = state_path.read_bytes()
             result = lcrl.readonly_run_observer_command(Namespace(
                 state=str(state_path), threshold_minutes=20,
@@ -1710,6 +1908,9 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertEqual(state_path.read_bytes(), before)
             self.assertEqual(result["user_status"], "等待 Chat")
+            self.assertEqual(result["automation_id"], wait_id)
+            self.assertEqual(result["waiting_check_automation_id"], wait_id)
+            self.assertTrue(result["waiting_check_active"])
             self.assertFalse(result["possibly_stuck"])
             self.assertEqual(result["stall_reason"], "waiting_chat_is_not_stalled")
 
@@ -1936,6 +2137,29 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["ready"])
         self.assertEqual(result["reason"], "可以开始")
+
+    def test_startup_diagnostics_uses_host_injected_current_task_identity(self):
+        with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "current-task-from-host"}):
+            result = lcrl.startup_diagnostics_command(Namespace(
+                implementation_thread_id=None,
+                reviewer_thread_id="reviewer-chat",
+                delegation_source_thread_id="coordinator-task",
+                workspace="ready_before_browser",
+                account_slot="acquired_before_browser",
+                browser="initialized", chat_login="logged_in",
+                chat_selection="unique", review_mode="extreme",
+                chat_read="available", chat_send="available",
+                one_shot_wait="available",
+            ))
+        self.assertTrue(result["ok"])
+        self.assertEqual(
+            result["facts"]["implementation_thread_id"],
+            "current-task-from-host",
+        )
+        self.assertEqual(
+            result["facts"]["implementation_identity_source"],
+            "codex_thread_environment",
+        )
 
     def test_startup_diagnostics_returns_only_the_first_failure(self):
         cases = (
@@ -2303,10 +2527,38 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(submitted["platform_wait_rule"], "single_rdate")
             self.assertEqual(submitted["platform_rrule_prefix"], "RDATE:")
             self.assertFalse(submitted["recurring_platform_rule_allowed"])
+            self.assertTrue(submitted["platform_rdate"].startswith("RDATE:"))
+            self.assertEqual(
+                submitted["platform_rdate_authority"], "controller_exact"
+            )
+            self.assertFalse(submitted["platform_rdate_rounding_allowed"])
+            self.assertEqual(
+                submitted["reviewer_evidence_cutoff"], "request_submission"
+            )
+            self.assertEqual(
+                submitted["reviewer_verdict_scope"], "pre_response_evidence_only"
+            )
+            self.assertEqual(
+                submitted["current_response_closure_owner"],
+                "controller_post_response",
+            )
+            self.assertTrue(
+                submitted["current_response_closure_must_not_affect_reviewer_verdict"]
+            )
+            self.assertTrue(submitted["host_post_response_closure_required"])
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "exactly match"):
+                lcrl.bind_waiting_check_command(Namespace(
+                    state=str(state_path),
+                    token=submitted["waiting_check_token"],
+                    automation_id="wait-rule-rounded",
+                    scheduled_rdate="RDATE:20990101T000000Z",
+                ))
 
             token = submitted["waiting_check_token"]
             lcrl.bind_waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id="wait-rule",
+                scheduled_rdate=submitted["platform_rdate"],
             ))
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id="wait-rule",
@@ -2321,6 +2573,52 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(rearmed["platform_wait_rule"], "single_rdate")
             self.assertEqual(rearmed["platform_rrule_prefix"], "RDATE:")
             self.assertFalse(rearmed["recurring_platform_rule_allowed"])
+
+    def test_waiting_check_rdate_is_exactly_180_seconds_without_rounding(self):
+        start = datetime(2026, 8, 12, 18, 35, 17, tzinfo=timezone.utc)
+        self.assertEqual(
+            lcrl.waiting_check_rdate(start),
+            "RDATE:20260812T183817Z",
+        )
+
+    def test_waiting_check_read_lease_allows_a_five_minute_browser_cycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="W-lease",
+                fingerprint="waiting-read-lease",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-lease", request_message_id="message-lease",
+                request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id="wait-lease",
+                scheduled_rdate=lcrl.load_state(state_path)["automation"][
+                    "waiting_check_expected_rdate"
+                ],
+            ))
+            claimed = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id="wait-lease",
+            ))
+            runtime = lcrl.load_state(state_path)["runtime"]
+            duration = (
+                lcrl.parse_time(runtime["action_lease_expires_at"])
+                - lcrl.parse_time(runtime["action_lease_acquired_at"])
+            )
+            self.assertEqual(
+                duration.total_seconds(),
+                lcrl.WAITING_READ_LEASE_MINUTES * 60,
+            )
+            lcrl.release_action(Namespace(
+                state=str(state_path), lease_id=claimed["lease_id"], force=False,
+            ))
 
     def test_browser_submission_boundary_requires_controller_reopen_on_a_missing_tab(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2424,23 +2722,27 @@ class ControllerTests(unittest.TestCase):
                 automation_id=stable_automation_id,
             ))
             self.assertEqual(first["action"], "receipt_reconcile")
-            with self.assertRaisesRegex(lcrl.LCRLError, "lease is active"):
+            before_wrong = state_path.read_bytes()
+            with self.assertRaisesRegex(lcrl.LCRLError, "exact Chat read lease"):
                 lcrl.rearm_waiting_check_command(Namespace(
                     state=str(state_path), token=first_token,
-                    automation_id=stable_automation_id,
+                    automation_id=stable_automation_id, lease_id="wrong-lease",
                 ))
-            lcrl.release_action(Namespace(
-                state=str(state_path), lease_id=first["lease_id"], force=False,
-            ))
+            self.assertEqual(before_wrong, state_path.read_bytes())
 
             rearmed = lcrl.rearm_waiting_check_command(Namespace(
                 state=str(state_path), token=first_token,
-                automation_id=stable_automation_id,
+                automation_id=stable_automation_id, lease_id=first["lease_id"],
             ))
             second_token = rearmed["waiting_check_token"]
             self.assertEqual(rearmed["action"], "update_once")
             self.assertEqual(rearmed["waiting_check_automation_id"], stable_automation_id)
             self.assertNotEqual(second_token, first_token)
+            self.assertEqual(rearmed["released_waiting_lease_id"], first["lease_id"])
+            self.assertTrue(rearmed["platform_update_must_follow_state_rearm"])
+            self.assertEqual(
+                lcrl.load_state(state_path)["runtime"]["action_lease_id"], "none"
+            )
 
             before_stale = state_path.read_bytes()
             stale = lcrl.waiting_check_command(Namespace(
@@ -2778,6 +3080,52 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(second["consumed"])
             self.assertEqual(second["action"], "already_consumed")
 
+    def test_waiting_poll_lease_hands_off_to_same_task_result_application(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            self.transition(
+                state_path, "review_submit_pending", stage="WAIT-HANDOFF",
+                fingerprint="wait-handoff-evidence",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="wait-handoff-request-turn",
+                request_message_id="wait-handoff-request-message",
+                request_persisted_at=now,
+            )
+            claimed = lcrl.tick(state_path)
+            self.assertEqual(claimed["action"], "review_poll")
+
+            reply = root / "wait-handoff-reply.txt"
+            reply.write_text(
+                "REVISE。下一步只修改隔离夹具并运行专项测试。",
+                encoding="utf-8",
+            )
+            resumed = lcrl.resume_from_reply_command(Namespace(
+                state=str(state_path),
+                response_turn_id="wait-handoff-response-turn",
+                response_message_id="wait-handoff-response-message",
+                response_completed_at=now, result_file=str(reply),
+                result_json=None, result_base64=None,
+            ))
+            self.assertEqual(resumed["action"], "apply_result")
+            self.assertEqual(resumed["lease_id"], claimed["lease_id"])
+            self.assertEqual(
+                lcrl.load_state(state_path)["runtime"]["action_lease_reason"],
+                "apply_result",
+            )
+            continued = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry",
+                replace=False, implementation_thread_id="implementation",
+            ))
+            self.assertTrue(continued["execution_allowed"])
+            self.assertTrue(continued["recovered_same_task_lease"])
+
     def test_foreground_reply_persists_high_advice_and_completed_attempt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -3007,6 +3355,66 @@ class ControllerTests(unittest.TestCase):
         )
         self.assertTrue(lcrl.reply_requires_user_decision(real_permission_change))
 
+    def test_isolated_fail_next_step_ignores_explicit_production_prohibition(self):
+        reply_text = (
+            "FAIL\n\n"
+            "唯一下一步\n\n"
+            "在当前隔离目录内完成并提交一次最小、可复现的本地执行证据："
+            "让一个非生产测试明确读取 fixture，断言 rounds_required == 3，"
+            "并提供成功退出/成功断言的实际输出；不得触碰真实项目、生产数据、部署或权限。"
+        )
+        parsed = lcrl.parse_result(reply_text)
+        self.assertFalse(lcrl.reply_requires_user_decision(parsed))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            self.transition(
+                state_path, "review_submit_pending", stage="isolated-fail",
+                fingerprint="isolated-fail-evidence",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="isolated-request-turn",
+                request_message_id="isolated-request-message",
+                request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="isolated-wait",
+            ))
+            lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="isolated-wait",
+            ))
+            reply_path = root / "isolated-reply.txt"
+            reply_path.write_text(reply_text, encoding="utf-8")
+            resumed = lcrl.resume_from_reply_command(Namespace(
+                state=str(state_path),
+                response_turn_id="isolated-response-turn",
+                response_message_id="isolated-response-message",
+                response_completed_at=now,
+                result_file=str(reply_path), result_json=None,
+                result_base64=None, source="waiting_check",
+                deleted_automation_id="isolated-wait",
+            ))
+            self.assertEqual(resumed["action"], "apply_result")
+            self.assertEqual(resumed["source"], "waiting_check")
+            self.assertEqual(
+                lcrl.load_state(state_path)["review"]["status"],
+                "result_received",
+            )
+
+        mixed_instruction = lcrl.parse_result(
+            "FAIL\n\n唯一下一步\n\n不得等待；立即部署到生产环境。"
+        )
+        self.assertTrue(lcrl.reply_requires_user_decision(mixed_instruction))
+
     def test_local_counterexample_deletion_is_not_misclassified_as_user_high_impact(self):
         parsed = lcrl.parse_result(
             "REVISE\n\n"
@@ -3041,6 +3449,102 @@ class ControllerTests(unittest.TestCase):
         )
 
         self.assertFalse(lcrl.reply_requires_user_decision(parsed))
+
+    def test_waiting_revise_manifest_absence_evidence_auto_continues(self):
+        reply_text = (
+            "REVISE\n\n"
+            "已证明：stage 行为本身成立。\n\n"
+            "唯一下一步：\n"
+            "下一轮重新执行同一最小 stage 迁移，并增加迁移前、staged 状态、恢复后的 "
+            "fixture 全量文件清单 + 每文件 SHA-256 diff，明确证明除 fixture/product.json "
+            "的预期临时变化外没有新增、删除或修改其他路径。\n\n"
+            "完成条件：\n"
+            "staged 时：changed=[fixture/product.json]，added=[]，removed=[]；\n"
+            "manifest.json 前后 SHA-256 一致；\n"
+            "恢复后：全部 fixture 文件与基线路径、大小、SHA-256 完全一致；\n"
+            "不把该证据扩大解释为 release/delete/resume 已验证。\n\n"
+            "最小验证：一次本地 stage 往返 + 三个时点的确定性 manifest/diff 即可。\n\n"
+            "[SUPERLUNA_MODEL_ROUTE]\nMODEL_ROUTE: MEDIUM\nVERDICT: REVISE\n"
+            "[/SUPERLUNA_MODEL_ROUTE]"
+        )
+        parsed = lcrl.parse_result(reply_text)
+        self.assertFalse(lcrl.reply_requires_user_decision(parsed))
+
+        real_delete = lcrl.parse_result(
+            "REVISE\n\n唯一下一步：\n删除项目文件，再生成完整 manifest。"
+        )
+        self.assertTrue(lcrl.reply_requires_user_decision(real_delete))
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            self.transition(
+                state_path, "review_submit_pending", stage="manifest-proof",
+                fingerprint="manifest-proof-evidence",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="manifest-request-turn",
+                request_message_id="manifest-request-message",
+                request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="manifest-wait",
+            ))
+            lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="manifest-wait",
+            ))
+            reply_path = root / "manifest-reply.txt"
+            reply_path.write_text(reply_text, encoding="utf-8")
+            resumed = lcrl.resume_from_reply_command(Namespace(
+                state=str(state_path),
+                response_turn_id="manifest-response-turn",
+                response_message_id="manifest-response-message",
+                response_completed_at=now,
+                result_file=str(reply_path), result_json=None,
+                result_base64=None, source="waiting_check",
+                deleted_automation_id="manifest-wait",
+            ))
+            self.assertEqual(resumed["action"], "apply_result")
+            state = lcrl.load_state(state_path)
+            self.assertEqual(state["review"]["status"], "result_received")
+            self.assertTrue(state["review"]["response_valid_for_apply"])
+            self.assertEqual(
+                state["review"]["response_quarantined_reason"], "none",
+            )
+
+    def test_c23_workspace_boundary_revise_does_not_treat_unapproved_release_as_action(self):
+        parsed = lcrl.parse_result(
+            "REVISE\n\n"
+            "唯一下一步\n\n"
+            "补充一次同样的 local → staged → local 往返，但把写入边界的观测范围"
+            "扩大到预先定义的隔离工作区边界，证明 fixture 外没有伴随文件变化。\n\n"
+            "完成条件\n\n"
+            "明确记录 fixture 的 canonical/real path 及允许写入根目录；\n"
+            "baseline → staged：允许范围内仍只有 fixture/product.json 发生预期变化，"
+            "added=[]、removed=[]；\n"
+            "同时证明允许写入根目录中 fixture 之外 changed=[] / added=[] / removed=[]；\n"
+            "restored 后整个被观测范围恢复至 baseline；\n"
+            "不据此批准 release/delete/resume。\n\n"
+            "最小验证：一次 stage 往返 + 对 fixture 本身和其允许写入根目录中 fixture "
+            "之外区域做确定性前/中/后 manifest diff 即可。\n\n"
+            "[SUPERLUNA_MODEL_ROUTE]\nMODEL_ROUTE: MEDIUM\nVERDICT: REVISE\n"
+            "[/SUPERLUNA_MODEL_ROUTE]"
+        )
+
+        self.assertFalse(lcrl.reply_requires_user_decision(parsed))
+
+        actual_release = lcrl.parse_result(
+            "REVISE\n\n唯一下一步\n\n批准 release 并删除 fixture。"
+        )
+        self.assertTrue(lcrl.reply_requires_user_decision(actual_release))
 
     def test_natural_language_pass_accepts_explicit_stop_without_treating_deferred_release_as_action(self):
         completed = lcrl.parse_result(
@@ -3145,6 +3649,8 @@ class ControllerTests(unittest.TestCase):
                     attachment_name=None, submitted_at=lcrl.utc_now(),
                 ))
                 self.assertEqual(submitted["waiting_check_action"], "schedule_once")
+                self.assertEqual(submitted["state_review_round_number"], number)
+                self.assertEqual(submitted["review_round_authority"], "current_state_only")
                 token = submitted["waiting_check_token"]
                 automation_id = f"one-shot-{number}"
                 lcrl.bind_waiting_check_command(Namespace(
@@ -3229,6 +3735,70 @@ class ControllerTests(unittest.TestCase):
             self.transition(state_path, "external_blocked", recovery_action="need_user_input")
             self.assertEqual(lcrl.tick(state_path)["action"], "external_blocked_notify")
             self.assertEqual(lcrl.tick(state_path)["action"], "external_blocked_wait")
+
+    def test_external_blocker_retires_foreground_but_not_browser_reopen_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            foreground_path = self.make_state(root / "foreground")
+            foreground = lcrl.guard_action(Namespace(
+                state=str(foreground_path), minutes=20, reason="turn_entry",
+                replace=False, implementation_thread_id="implementation",
+            ))
+            self.assertNotEqual(foreground["lease_id"], "none")
+
+            self.transition(
+                foreground_path, "external_blocked",
+                recovery_action="account_rate_limited",
+            )
+            foreground_state = lcrl.load_state(foreground_path)
+            self.assertEqual(foreground_state["runtime"]["action_lease_id"], "none")
+            self.assertEqual(
+                foreground_state["runtime"]["browser_submission_send_authorized_lease_id"],
+                "none",
+            )
+
+            review_poll_path = self.make_state(root / "review-poll")
+            review_poll_state = lcrl.load_state(review_poll_path)
+            review_poll_revision = review_poll_state["revision"]
+            lcrl.claim_action_lease(review_poll_state, "review_poll", minutes=4)
+            lcrl.save_state(
+                review_poll_path, review_poll_state,
+                expected_revision=review_poll_revision,
+            )
+            self.transition(
+                review_poll_path, "external_blocked",
+                recovery_action="reply_identity_missing",
+            )
+            self.assertEqual(
+                lcrl.load_state(review_poll_path)["runtime"]["action_lease_id"],
+                "none",
+            )
+
+            protected_path = self.make_state(root / "protected")
+            protected_state = lcrl.load_state(protected_path)
+            protected_revision = protected_state["revision"]
+            protected_lease = lcrl.claim_action_lease(
+                protected_state, "browser_submission_reopen", minutes=10,
+            )
+            protected_state["runtime"]["browser_submission_reopen_browser_id"] = (
+                "browser-protected"
+            )
+            lcrl.save_state(
+                protected_path, protected_state,
+                expected_revision=protected_revision,
+            )
+            self.transition(
+                protected_path, "external_blocked",
+                recovery_action="submission_reopen_still_owned",
+            )
+            protected_state = lcrl.load_state(protected_path)
+            self.assertEqual(
+                protected_state["runtime"]["action_lease_id"], protected_lease,
+            )
+            self.assertEqual(
+                protected_state["runtime"]["action_lease_reason"],
+                "browser_submission_reopen",
+            )
 
     def test_user_authorized_external_recovery_returns_to_local_work(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -3782,6 +4352,34 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(confirmed["user_status"], "正在开发")
             self.assertFalse(confirmed["turn_completion_allowed"])
             self.assertEqual(confirmed["next_action"], "create_and_bind_waiting_check")
+            self.assertTrue(confirmed["platform_wait_creation_required"])
+            self.assertTrue(confirmed["platform_wait_binding_required"])
+            self.assertTrue(confirmed["platform_wait_creation_before_turn_end"])
+            self.assertTrue(confirmed["platform_wait_creation_before_any_browser_read"])
+            self.assertEqual(confirmed["mandatory_next_tool"], "codex_app__automation_update")
+            self.assertEqual(confirmed["mandatory_next_tool_mode"], "create")
+            self.assertEqual(
+                confirmed["mandatory_next_action_sequence"],
+                [
+                    "create_platform_wait_with_bootstrap_prompt",
+                    "bind_waiting_check_with_platform_id_and_exact_rdate",
+                    "render_waiting_check",
+                    "update_same_platform_wait_with_rendered_prompt",
+                    "handoff_bound_chat",
+                ],
+            )
+            self.assertEqual(
+                confirmed["platform_wait_create"]["target_thread_id"],
+                "implementation",
+            )
+            self.assertEqual(
+                confirmed["platform_wait_create"]["rrule"],
+                confirmed["platform_rdate"],
+            )
+            self.assertIn(
+                "Do not access Chat",
+                confirmed["platform_wait_create"]["prompt"],
+            )
             repeated = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="review-chat", request_turn_id="turn-S1",
                 request_message_id="message-S1", attachment_name=None, submitted_at=None,
@@ -3791,10 +4389,12 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(repeated["waiting_check_action"], "schedule_once")
             self.assertEqual(repeated["waiting_check_token"], confirmed["waiting_check_token"])
             self.assertFalse(repeated["turn_completion_allowed"])
+            self.assertEqual(repeated["mandatory_next_tool"], "codex_app__automation_update")
             progress = lcrl.progress_query_command(Namespace(state=str(state_path)))
             self.assertEqual(progress["user_status"], "正在开发")
             self.assertEqual(progress["next_action"], "create_and_bind_waiting_check")
             self.assertFalse(progress["turn_completion_allowed"])
+            self.assertEqual(progress["mandatory_next_tool"], "codex_app__automation_update")
             state = lcrl.load_state(state_path)
             self.assertEqual(state["runtime"]["action_lease_id"], "none")
             bound = lcrl.bind_waiting_check_command(Namespace(
@@ -4497,6 +5097,39 @@ class ControllerTests(unittest.TestCase):
                 ))
             self.assertEqual(state_path.read_bytes(), before)
 
+    def test_each_new_state_renders_one_unique_trusted_review_run_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = lcrl.new_state(
+                "none", "implementation-one", root, "shared-review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            second = lcrl.new_state(
+                "none", "implementation-two", root, "shared-review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            first_path = root / "first.json"
+            second_path = root / "second.json"
+            lcrl.save_state(first_path, first)
+            lcrl.save_state(second_path, second)
+
+            first_binding = first["review"]["run_binding"]
+            second_binding = second["review"]["run_binding"]
+            self.assertEqual(first_binding["status"], "trusted")
+            self.assertNotEqual(first_binding["id"], second_binding["id"])
+            rendered = lcrl.render_review_run_binding_command(Namespace(
+                state=str(first_path),
+            ))
+            self.assertTrue(rendered.startswith("[SUPERLUNA_REVIEW_RUN]\n"))
+            self.assertTrue(rendered.endswith("[/SUPERLUNA_REVIEW_RUN]\n"))
+            self.assertIn(f"RUN_ID: {first_binding['id']}", rendered)
+            self.assertIn(f"CONTROLLER: {lcrl.CONTROLLER_VERSION}", rendered)
+            self.assertIn(f"SKILL_REVISION: {lcrl.SKILL_REVISION}", rendered)
+            self.assertIn("IMPLEMENTATION_THREAD_ID: implementation-one", rendered)
+            self.assertIn("REVIEWER_CHAT_ID: shared-review-chat", rendered)
+            self.assertIn("STATE_REVIEW_ROUND: 1", rendered)
+            self.assertIn("earlier Chat messages are background only", rendered)
+
     def test_visible_browser_submission_requires_fresh_controller_authorization(self):
         """A visible bound tab must not bypass the same pre-send gate as a reopened tab."""
         with tempfile.TemporaryDirectory() as directory:
@@ -4529,6 +5162,18 @@ class ControllerTests(unittest.TestCase):
                 operation="submission", registry=str(account_registry), at=None,
             ))
 
+            before_wrong_binding = state_path.read_bytes()
+            wrong_binding = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="visible-submit-S1",
+                review_run_binding_id="review-run-0000000000000000",
+                browser_id="iab-session-1", lease_id=entry["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
+            ))
+            self.assertEqual(wrong_binding["action"], "browser_submission_send_forbidden")
+            self.assertFalse(wrong_binding["send_allowed"])
+            self.assertEqual(state_path.read_bytes(), before_wrong_binding)
+
             with self.assertRaisesRegex(
                 lcrl.LCRLError, "fresh browser submission send authorization",
             ):
@@ -4545,6 +5190,7 @@ class ControllerTests(unittest.TestCase):
 
             authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="visible-submit-S1",
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
                 browser_id="iab-session-1", lease_id=entry["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -4553,6 +5199,7 @@ class ControllerTests(unittest.TestCase):
                 authorized["action"], "browser_submission_send_authorized"
             )
             self.assertTrue(authorized["send_allowed"])
+            self.assertTrue(authorized["review_run_binding_required_in_payload"])
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="visible-submit-chat",
@@ -4571,6 +5218,71 @@ class ControllerTests(unittest.TestCase):
                 persisted["runtime"]["browser_submission_send_authorized_lease_id"],
                 "none",
             )
+
+    def test_same_task_guard_preserves_authorized_send_until_receipt_confirmation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            account_registry = root / "account-browser-gate.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "send-confirm-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "send-confirm-chat")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="send-confirm-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            entry = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry",
+                replace=False, implementation_thread_id="implementation",
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="SEND-CONFIRM",
+                fingerprint="send-confirm-fingerprint",
+            )
+            account_slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="send-confirm-chat", operation="submission",
+                registry=str(account_registry), at=None,
+            ))
+            authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="send-confirm-fingerprint",
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                browser_id="iab-session-1", lease_id=entry["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
+            ))
+
+            revision_before_guard = lcrl.load_state(state_path)["revision"]
+            guarded = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry",
+                replace=False, implementation_thread_id="implementation",
+            ))
+            self.assertTrue(guarded["recovered_same_task_lease"])
+            self.assertTrue(guarded["protected_send_confirmation"])
+            self.assertEqual(guarded["lease_id"], authorized["lease_id"])
+            self.assertEqual(
+                lcrl.load_state(state_path)["revision"], revision_before_guard,
+            )
+
+            confirmed = lcrl.confirm_review_submission_command(Namespace(
+                state=str(state_path), reviewer_thread_id="send-confirm-chat",
+                request_turn_id="turn-send-confirm",
+                request_message_id="message-send-confirm",
+                native_app_instance_id=None, attachment_name=None,
+                submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                browser_id="iab-session-1",
+                browser_send_authorization_revision=authorized["revision"],
+                account_slot_lease_id=account_slot["lease_id"],
+            ))
+            self.assertEqual(confirmed["action"], "submission_confirmed")
+            persisted = lcrl.load_state(state_path)
+            self.assertEqual(persisted["review"]["status"], "review_waiting")
+            self.assertEqual(persisted["runtime"]["action_lease_id"], "none")
 
     def test_browser_wait_reauthorizes_the_persisted_tab_without_a_run_local_tab_id(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -4674,6 +5386,7 @@ class ControllerTests(unittest.TestCase):
             account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="bound-existing-chat-B2",
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
                 browser_id="iab-restarted-instance", lease_id=reopened["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -4842,6 +5555,7 @@ class ControllerTests(unittest.TestCase):
             account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="provisioned-resubmit-B2",
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
                 browser_id="iab-provisioned-resubmit",
                 lease_id=authorized["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
@@ -4920,6 +5634,7 @@ class ControllerTests(unittest.TestCase):
             )
             send_forbidden = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(ordinary_path), fingerprint="ordinary-B2",
+                review_run_binding_id=lcrl.load_state(ordinary_path)["review"]["run_binding"]["id"],
                 browser_id="iab-ordinary", lease_id=recovered_existing["lease_id"],
                 account_slot_lease_id=ordinary_slot["lease_id"],
                 account_browser_registry=str(ordinary_registry), at=None,
@@ -5090,6 +5805,7 @@ class ControllerTests(unittest.TestCase):
             account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="existing-chat-B1",
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
                 browser_id="implementation-browser", lease_id=reopened["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -5207,6 +5923,7 @@ class ControllerTests(unittest.TestCase):
             account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="restarted-browser-B3",
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
                 browser_id="iab-new-instance", lease_id=authorized["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -5357,6 +6074,27 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(authorized["action"], "browser_read_authorized")
             reply = root / "reply.txt"
             reply.write_text("请继续一个局部、可逆的修复。", encoding="utf-8")
+            with self.assertRaisesRegex(lcrl.LCRLError, "response_message_id is required"):
+                lcrl.stage_browser_reply_observation_command(Namespace(
+                    state=str(state_path), token=token, automation_id=automation_id,
+                    lease_id=claimed["lease_id"], account_slot_lease_id=slot["lease_id"],
+                    response_turn_id="response-turn-release-first",
+                    response_message_id="none", response_completed_at=now,
+                    result_file=str(reply), account_browser_registry=str(registry), at=None,
+                ))
+            unstaged_state = lcrl.load_state(state_path)
+            self.assertEqual(unstaged_state["browser_reply_observation"]["status"], "none")
+            self.assertTrue(unstaged_state["automation"]["waiting_check_active"])
+            staged = lcrl.stage_browser_reply_observation_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=claimed["lease_id"], account_slot_lease_id=slot["lease_id"],
+                response_turn_id="response-turn-release-first",
+                response_message_id="response-message-release-first",
+                response_completed_at=now, result_file=str(reply),
+                account_browser_registry=str(registry), at=None,
+            ))
+            self.assertEqual(staged["action"], "browser_reply_staged")
+            self.assertEqual(staged["state_review_round_number"], 1)
             resume_args = dict(
                 state=str(state_path), response_turn_id="response-turn-release-first",
                 response_message_id="response-message-release-first",
@@ -5376,6 +6114,71 @@ class ControllerTests(unittest.TestCase):
             ))
             resumed = lcrl.resume_from_reply_command(Namespace(**resume_args))
             self.assertEqual(resumed["action"], "apply_result")
+            self.assertEqual(
+                lcrl.load_state(state_path)["runtime"]["action_lease_reason"],
+                "apply_result",
+            )
+            continued = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry",
+                replace=False, implementation_thread_id="implementation",
+            ))
+            self.assertTrue(continued["execution_allowed"])
+            self.assertTrue(continued["recovered_same_task_lease"])
+
+    def test_browser_waiting_resume_requires_staging_before_wait_deletion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            registry = root / "account-browser-gate.json"
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "web-chat-staging-gate",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "web-chat-staging-gate")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="web-chat-staging-gate", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_submit_pending", stage="STAGE-GATE",
+                fingerprint="stage-gate-fingerprint",
+            )
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="request-turn-stage-gate",
+                request_message_id="request-message-stage-gate",
+                request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            automation_id = "stage-gate-wait"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            reply = root / "unstaged-reply.txt"
+            reply.write_text("请继续一个隔离修复。", encoding="utf-8")
+
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "requires a staged reply identity",
+            ):
+                lcrl.resume_from_reply_command(Namespace(
+                    state=str(state_path), response_turn_id="response-turn-stage-gate",
+                    response_message_id="response-message-stage-gate",
+                    response_completed_at=now, result_file=str(reply),
+                    result_json=None, result_base64=None, source="waiting_check",
+                    deleted_automation_id=automation_id,
+                    account_browser_registry=str(registry),
+                ))
+            unchanged = lcrl.load_state(state_path)
+            self.assertEqual(unchanged["review"]["status"], "review_waiting")
+            self.assertTrue(unchanged["automation"]["waiting_check_active"])
+            self.assertEqual(unchanged["browser_reply_observation"]["status"], "none")
 
     def test_browser_rate_limit_backs_off_without_reloading_or_switching_chat(self):
         with tempfile.TemporaryDirectory() as directory:

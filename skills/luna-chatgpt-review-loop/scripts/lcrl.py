@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 83
-SKILL_REVISION = "2026-08-13.38"
+CONTROLLER_VERSION = 98
+SKILL_REVISION = "2026-08-13.53"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 BINDING_REGISTRY_VERSION = 1
@@ -97,6 +97,8 @@ VALID_GOAL_MODES = {"continuous", "single_stage"}
 VALID_COORDINATION_REVIEW_MODES = {"unconfirmed", "extreme", "pro"}
 VALID_REVIEW_TRANSPORTS = {"app_chat_review", "in_app_browser"}
 BROWSER_REFRESH_INTERVAL_SECONDS = 180
+WAITING_CHECK_DELAY_SECONDS = 180
+WAITING_READ_LEASE_MINUTES = 5
 BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 900
 BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600
 ACCOUNT_BROWSER_GATE_VERSION = 1
@@ -212,6 +214,27 @@ DEFERRED_SCOPE_LINE_PATTERN = re.compile(
     r"(?:剩余|其余).{0,160}(?:后续|转交|另行)|"
     r"(?:if|once).{0,80}(?:pass|complete).{0,160}(?:remaining|rest).{0,160}"
     r"(?:later|follow[- ]?up|defer|hand[- ]?off)",
+    re.IGNORECASE,
+)
+NEGATED_HIGH_IMPACT_BOUNDARY_LINE_PATTERN = re.compile(
+    r"(?:不得|禁止|严禁|不允许|不要|不可|无需|无须|不应|不能|"
+    r"must\s+not\b|do\s+not\b|never\b)[^。！？;；\n]*(?:[。！？;；]|$)",
+    re.IGNORECASE,
+)
+NEGATED_BOUNDARY_POSITIVE_TURN_PATTERN = re.compile(
+    r"(?:随后|然后|转而|改为|仍需|仍要|必须|立即)|"
+    r"\b(?:then|instead|still\s+must|must|immediately)\b",
+    re.IGNORECASE,
+)
+NEGATED_HIGH_IMPACT_EVIDENCE_PATTERN = re.compile(
+    r"(?:明确)?(?:证明|确认|验证)[^。！？;；\n]{0,180}"
+    r"(?:没有|不存在|未发生)[^。！？;；\n]{0,100}(?:删除|移除)"
+    r"[^。！？;；\n]*(?:[。！？;；]|$)|"
+    r"(?:不把|不得把|不能把|不应把)[^。！？;；\n]{0,120}"
+    r"(?:解释|视为|作为)[^。！？;；\n]{0,80}(?:已验证|已证明|已完成)"
+    r"[^。！？;；\n]*(?:[。！？;；]|$)|"
+    r"不(?:据此)?(?:批准|执行|进行|触发)[^。！？;；\n]{0,120}"
+    r"(?:[。！？;；]|$)",
     re.IGNORECASE,
 )
 
@@ -392,6 +415,15 @@ def parse_time(value: str | None) -> datetime | None:
     if not value or value == "none":
         return None
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def waiting_check_rdate(now: datetime | None = None) -> str:
+    """Return the exact single occurrence time; callers must not round it."""
+    base = now or datetime.now(timezone.utc)
+    scheduled = (base + timedelta(seconds=WAITING_CHECK_DELAY_SECONDS)).replace(
+        microsecond=0
+    )
+    return "RDATE:" + scheduled.strftime("%Y%m%dT%H%M%SZ")
 
 
 def is_timestamp(value: Any) -> bool:
@@ -927,6 +959,25 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                     "retry_not_before": existing["expires_at"],
                     "registry": str(gate_path),
                 }
+            if existing["operation"] != args.operation:
+                return {
+                    "ok": True,
+                    "action": "account_browser_operation_conflict",
+                    "slot_acquired": False,
+                    "browser_skill_read_allowed": False,
+                    "browser_runtime_initialization_allowed": False,
+                    "release_existing_slot_required": True,
+                    "existing_slot_lease_id": existing["lease_id"],
+                    "existing_operation": existing["operation"],
+                    "requested_operation": args.operation,
+                    "same_turn_wait_required": args.operation in {"startup", "submission"},
+                    "waiting_reschedule_allowed": args.operation == "waiting_read",
+                    "new_automation_allowed": False,
+                    "retry_not_before": existing["expires_at"],
+                    "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                    "active_count": len(gate["slots"]),
+                    "registry": str(gate_path),
+                }
             if reviewer_id != "none" and existing_reviewer_id == "none":
                 existing["reviewer_thread_id"] = reviewer_id
                 _save_account_browser_gate_locked(
@@ -943,6 +994,7 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 # acquisition response. Re-reading/reusing the same lease must
                 # not mint a second provisioning open.
                 "provisioning_home_navigation_allowed": False,
+                "operation": existing["operation"],
                 "lease_id": existing["lease_id"],
                 "expires_at": existing["expires_at"],
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
@@ -1082,6 +1134,7 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             "browser_runtime_initialization_allowed": True,
             "health_probe_home_navigation_allowed": args.operation == "health_probe",
             "provisioning_home_navigation_allowed": new_chat_authorization_id != "none",
+            "operation": args.operation,
             "provisioning_home_url": (
                 "https://chatgpt.com/" if new_chat_authorization_id != "none" else "none"
             ),
@@ -1231,6 +1284,10 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     automation.setdefault("waiting_check_automation_id", "none")
     automation.setdefault("waiting_check_claimed_id", "none")
     automation.setdefault(
+        "waiting_check_expected_rdate",
+        waiting_check_rdate() if legacy_waiting else "none",
+    )
+    automation.setdefault(
         "waiting_check_token",
         "wait-legacy-" + fingerprint({
             "cycle": state.get("review", {}).get("cycle_id", "none"),
@@ -1277,6 +1334,7 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     runtime.setdefault("browser_submission_send_authorized_account_slot_lease_id", "none")
     runtime.setdefault("browser_submission_send_authorized_browser_id", "none")
     runtime.setdefault("browser_submission_send_authorized_fingerprint", "none")
+    runtime.setdefault("browser_submission_send_authorized_review_run_binding_id", "none")
     runtime.setdefault("browser_submission_send_authorized_revision", 0)
     runtime.setdefault("resume_checkpoint", checkpoint_for_status(
         state.get("review", {}).get("status", "local_work")
@@ -1296,6 +1354,7 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     review.setdefault("goal_mode", "single_stage")
     review.setdefault("overall_completion_confirmed", False)
     review.setdefault("overall_completion_evidence", "none")
+    review.setdefault("run_binding", legacy_review_run_binding(state))
     browser_binding = state.setdefault("browser_binding", {})
     browser_binding.setdefault(
         "status", "unbound" if review.get("transport") == "in_app_browser" else "not_applicable"
@@ -1313,6 +1372,7 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     recovery.setdefault("browser_last_observation_at", "none")
     recovery.setdefault("browser_reload_same_tab_required", False)
     state.setdefault("review_history", [])
+    state.setdefault("browser_reply_observation", empty_browser_reply_observation())
     state.setdefault("binding", {
         "status": "unbound",
         "registry_path": "none",
@@ -1455,6 +1515,64 @@ def save_state(path: str | Path, state: dict[str, Any], expected_revision: int |
     return new_state["revision"]
 
 
+def empty_browser_reply_observation() -> dict[str, Any]:
+    """Return the durable pre-delete receipt for one browser reply."""
+    return {
+        "status": "none",
+        "cycle_id": "none",
+        "request_message_id": "none",
+        "response_turn_id": "none",
+        "response_message_id": "none",
+        "response_completed_at": "none",
+        "result_file": "none",
+        "result_sha256": "none",
+        "waiting_check_automation_id": "none",
+        "waiting_read_lease_id": "none",
+        "account_slot_lease_id": "none",
+        "staged_at": "none",
+    }
+
+
+def new_review_run_binding(
+    implementation_thread_id: str,
+    reviewer_thread_id: str,
+    *,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """Create one controller-owned identity for a state-local review run."""
+    return {
+        "status": "trusted",
+        "id": "review-run-" + secrets.token_hex(8),
+        "controller_version": CONTROLLER_VERSION,
+        "skill_revision": SKILL_REVISION,
+        "state_schema_version": SCHEMA_VERSION,
+        "implementation_thread_id": implementation_thread_id,
+        "reviewer_thread_id": reviewer_thread_id,
+        "created_at": created_at or utc_now(),
+    }
+
+
+def legacy_review_run_binding(state: dict[str, Any]) -> dict[str, Any]:
+    """Mark an older state honestly instead of inventing its source version."""
+    automation = state.get("automation", {})
+    confirmation = state.get("confirmation", {})
+    created_at = state.get("created_at", "none")
+    return {
+        "status": "legacy_unrecorded",
+        "id": "review-run-legacy-" + fingerprint({
+            "implementation_thread_id": automation.get("implementation_thread_id", "none"),
+            "reviewer_thread_id": confirmation.get("reviewer_thread_id", "none"),
+            "created_at": created_at,
+        })[:16],
+        "controller_version": "unrecorded",
+        "skill_revision": "unrecorded",
+        "state_schema_version": state.get("schema_version", SCHEMA_VERSION),
+        "implementation_thread_id": automation.get("implementation_thread_id", "none"),
+        "reviewer_thread_id": confirmation.get("reviewer_thread_id", "none"),
+        "created_at": created_at,
+    }
+
+
 def new_state(
     automation_id: str,
     implementation_thread_id: str,
@@ -1496,6 +1614,7 @@ def new_state(
             "waiting_check_active": False,
             "waiting_check_automation_id": "none",
             "waiting_check_claimed_id": "none",
+            "waiting_check_expected_rdate": "none",
         },
         "policy": {
             "implementation_role": implementation_role,
@@ -1563,8 +1682,12 @@ def new_state(
             "submission_fingerprint": "none",
             "artifacts_summary": "none",
             "recovery_action": "none",
+            "run_binding": new_review_run_binding(
+                implementation_thread_id, reviewer_thread_id, created_at=now,
+            ),
         },
         "review_history": [],
+        "browser_reply_observation": empty_browser_reply_observation(),
         "browser_binding": {
             "status": "unbound" if review_transport == "in_app_browser" else "not_applicable",
             "browser_id": "none",
@@ -1978,6 +2101,63 @@ def validate_state(state: dict[str, Any]) -> None:
     history = state.get("review_history", [])
     if not isinstance(history, list) or len(history) > 20:
         errors.append("review_history must be a list with at most 20 entries")
+    run_binding = review.get("run_binding", {})
+    if run_binding.get("status") not in {"trusted", "legacy_unrecorded"}:
+        errors.append("review run binding status must be trusted or legacy_unrecorded")
+    if not re.fullmatch(r"review-run-(?:legacy-)?[0-9a-f]{16}", str(run_binding.get("id", ""))):
+        errors.append("review run binding id is invalid")
+    if run_binding.get("implementation_thread_id") != automation.get("implementation_thread_id"):
+        errors.append("review run binding must match the implementation task")
+    if run_binding.get("reviewer_thread_id") != state.get("confirmation", {}).get("reviewer_thread_id"):
+        errors.append("review run binding must match the fixed reviewer Chat")
+    if run_binding.get("state_schema_version") != state.get("schema_version"):
+        errors.append("review run binding must match the state schema")
+    if run_binding.get("status") == "trusted" and not (
+        isinstance(run_binding.get("controller_version"), int)
+        and run_binding.get("controller_version", 0) > 0
+        and isinstance(run_binding.get("skill_revision"), str)
+        and run_binding.get("skill_revision") not in {"", "none", "unrecorded"}
+        and is_timestamp(run_binding.get("created_at"))
+    ):
+        errors.append("trusted review run binding requires recorded source identity")
+    browser_reply = state.get("browser_reply_observation", {})
+    browser_reply_status = browser_reply.get("status")
+    browser_reply_fields = (
+        "cycle_id", "request_message_id", "response_turn_id",
+        "response_message_id", "response_completed_at", "result_file",
+        "result_sha256", "waiting_check_automation_id",
+        "waiting_read_lease_id", "account_slot_lease_id", "staged_at",
+    )
+    if browser_reply_status not in {"none", "staged"}:
+        errors.append("browser reply observation status must be none or staged")
+    elif browser_reply_status == "none":
+        if any(browser_reply.get(field) not in (None, "", "none") for field in browser_reply_fields):
+            errors.append("empty browser reply observation cannot retain identity or content evidence")
+    else:
+        if review_transport != "in_app_browser":
+            errors.append("only in-app browser review may stage a browser reply")
+        if status not in {"review_waiting", "result_received", "result_quarantined", "external_blocked"}:
+            errors.append("staged browser reply requires the same active or consumed review cycle")
+        if any(browser_reply.get(field) in (None, "", "none") for field in browser_reply_fields):
+            errors.append("staged browser reply requires complete identity and file evidence")
+        if browser_reply.get("cycle_id") != review.get("cycle_id"):
+            errors.append("staged browser reply must match the current review cycle")
+        if browser_reply.get("request_message_id") != review.get("request_message_id"):
+            errors.append("staged browser reply must match the current request identity")
+        if browser_reply.get("response_message_id") == review.get("request_message_id"):
+            errors.append("staged browser reply identity must differ from the request")
+        if not is_timestamp(browser_reply.get("response_completed_at")):
+            errors.append("staged browser reply requires response_completed_at")
+        if not is_timestamp(browser_reply.get("staged_at")):
+            errors.append("staged browser reply requires staged_at")
+        if not re.fullmatch(r"[0-9a-f]{64}", str(browser_reply.get("result_sha256", ""))):
+            errors.append("staged browser reply requires a SHA-256 result hash")
+        result_file = Path(str(browser_reply.get("result_file", "none"))).expanduser()
+        project_path = Path(str(automation.get("project_path", "none"))).expanduser().resolve()
+        try:
+            result_file.resolve().relative_to(project_path)
+        except ValueError:
+            errors.append("staged browser reply file must stay inside the implementation project")
     empty = (None, "", "none")
     request_fields = ("request_turn_id", "request_message_id", "request_persisted_at")
     response_fields = ("response_turn_id", "response_message_id", "response_completed_at", "response_envelope_hash")
@@ -2118,6 +2298,9 @@ def validate_state(state: dict[str, Any]) -> None:
     waiting_check_token = automation.get("waiting_check_token", "none")
     waiting_check_automation_id = automation.get("waiting_check_automation_id", "none")
     waiting_check_claimed_id = automation.get("waiting_check_claimed_id", "none")
+    waiting_check_expected_rdate = automation.get(
+        "waiting_check_expected_rdate", "none"
+    )
     expected_waiting_check_active = (
         status in MONITOR_STATUSES and heartbeat_mode == "waiting_only"
     )
@@ -2125,10 +2308,14 @@ def validate_state(state: dict[str, Any]) -> None:
         errors.append("waiting check activity must match waiting-only continuation mode and review status")
     if (waiting_check_token == "none") == bool(waiting_check_active):
         errors.append("waiting check token must exist exactly while its check is active")
+    if (waiting_check_expected_rdate == "none") == bool(waiting_check_active):
+        errors.append("waiting check exact RDATE must exist exactly while its check is active")
     if not waiting_check_active and (
-        waiting_check_automation_id != "none" or waiting_check_claimed_id != "none"
+        waiting_check_automation_id != "none"
+        or waiting_check_claimed_id != "none"
+        or waiting_check_expected_rdate != "none"
     ):
-        errors.append("inactive waiting check cannot retain an automation or claim id")
+        errors.append("inactive waiting check cannot retain schedule identity")
     if waiting_check_claimed_id != "none" and waiting_check_claimed_id != waiting_check_automation_id:
         errors.append("waiting check claim must match the current automation id")
     if errors:
@@ -2276,14 +2463,14 @@ def _waiting_check_prompt(
         f"--operation waiting_read"
     )
     return (
-        "SuperLuna 单次等待检查。首个可执行动作原样运行：\n"
+        "SuperLuna单次等待。首条动作：\n"
         f"{command}\n"
-        "仅 action=review_poll/receipt_reconcile 时运行：\n"
+        "仅 review_poll/receipt_reconcile 后：\n"
         f"{account_command}\n"
-        "仅 slot_acquired=true 才运行 authorize-waiting-chat-read，传同一 token、task、read lease 和"
-        "账户 lease。browser_read_authorized 前禁用浏览器；授权后重取本轮标签句柄、禁用旧 Tab/id，"
-        "只读固定 Chat 并配对。读完先 release-account-browser-slot completed，再删本任务、"
-        "resume-from-reply 继续。其他 action 静默退出；禁循环和替代 Chat。"
+        "仅slot_acquired且operation=waiting_read才authorize；传上述token/automation、waiting-check lease和账户lease。"
+        "operation_conflict先释放返回的旧lease，再rearm。授权前禁浏览器。授权后重取本轮标签句柄并核对固定Chat，禁用旧 Tab/id。"
+        "回复文件→stage-browser-reply→释放账户→删本任务→resume-from-reply，"
+        "须带result-file/source=waiting_check/deleted-automation-id；禁用resume。禁循环/替代Chat。"
     )
 
 
@@ -2485,6 +2672,7 @@ def clear_action_lease(state: dict[str, Any]) -> None:
         "browser_submission_send_authorized_account_slot_lease_id": "none",
         "browser_submission_send_authorized_browser_id": "none",
         "browser_submission_send_authorized_fingerprint": "none",
+        "browser_submission_send_authorized_review_run_binding_id": "none",
         "browser_submission_send_authorized_revision": 0,
     })
 
@@ -2564,7 +2752,74 @@ def add_platform_wait_contract(result: dict[str, Any]) -> dict[str, Any]:
             "platform_rrule_prefix": "RDATE:",
             "recurring_platform_rule_allowed": False,
         })
+        expected_rdate = output.get("waiting_check_expected_rdate", "none")
+        if expected_rdate != "none":
+            output.update({
+                "platform_rdate": expected_rdate,
+                "platform_rdate_authority": "controller_exact",
+                "platform_rdate_rounding_allowed": False,
+            })
     return output
+
+
+def reviewer_evidence_scope_contract() -> dict[str, Any]:
+    """Keep a reviewer verdict causally limited to evidence that already exists."""
+    return {
+        "reviewer_evidence_cutoff": "request_submission",
+        "reviewer_verdict_scope": "pre_response_evidence_only",
+        "current_response_closure_owner": "controller_post_response",
+        "current_response_closure_must_not_affect_reviewer_verdict": True,
+        "host_post_response_closure_required": True,
+    }
+
+
+def platform_wait_binding_barrier_contract(
+    path: Path, state: dict[str, Any]
+) -> dict[str, Any]:
+    """Describe the only safe host action while a submitted wait is unbound.
+
+    The controller cannot call Codex Desktop's automation tool itself.  It can,
+    however, make the required host call unambiguous and provide an inert
+    bootstrap prompt.  If the platform occurrence somehow fires before the
+    prompt is replaced with ``render-waiting-check`` output, it therefore has
+    no authority to inspect Chat, the project, or workflow state.
+    """
+    if not waiting_check_binding_pending(state):
+        return {}
+    automation = state["automation"]
+    implementation_thread_id = automation["implementation_thread_id"]
+    expected_rdate = automation["waiting_check_expected_rdate"]
+    bootstrap_prompt = (
+        "SuperLuna waiting-check bootstrap reservation only. "
+        "Do not access Chat, the browser, project files, or workflow state. "
+        "End silently. The creating turn must replace this prompt with the "
+        "exact render-waiting-check output before it may finish."
+    )
+    return {
+        "platform_wait_creation_required": True,
+        "platform_wait_binding_required": True,
+        "platform_wait_creation_before_turn_end": True,
+        "platform_wait_creation_before_any_browser_read": True,
+        "mandatory_next_tool": "codex_app__automation_update",
+        "mandatory_next_tool_mode": "create",
+        "mandatory_next_action_sequence": [
+            "create_platform_wait_with_bootstrap_prompt",
+            "bind_waiting_check_with_platform_id_and_exact_rdate",
+            "render_waiting_check",
+            "update_same_platform_wait_with_rendered_prompt",
+            "handoff_bound_chat",
+        ],
+        "platform_wait_create": {
+            "kind": "heartbeat",
+            "status": "ACTIVE",
+            "name": f"SuperLuna wait {implementation_thread_id[-8:]}",
+            "target_thread_id": implementation_thread_id,
+            "rrule": expected_rdate,
+            "prompt": bootstrap_prompt,
+        },
+        "platform_wait_state": str(path),
+        "platform_wait_token": automation["waiting_check_token"],
+    }
 
 
 def add_user_status_exit(result: dict[str, Any]) -> dict[str, Any]:
@@ -2628,6 +2883,9 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
             "next_action": "create_and_bind_waiting_check",
             "turn_completion_allowed": False,
         })
+        output.update(platform_wait_binding_barrier_contract(
+            Path(args.state).expanduser().resolve(), state
+        ))
     return output
 
 
@@ -2675,12 +2933,27 @@ def _readonly_run_observer_projection(
         possible_stall = elapsed_minutes >= threshold_minutes
         stall_reason = "reached_threshold" if possible_stall else "within_threshold"
 
+    automation = state.get("automation", {})
+    controller_automation_id = str(automation.get("id", "none"))
+    waiting_check_automation_id = str(
+        automation.get("waiting_check_automation_id", "none")
+    )
+    effective_automation_id = (
+        waiting_check_automation_id
+        if automation.get("waiting_check_active") is True
+        and waiting_check_automation_id != "none"
+        else controller_automation_id
+    )
+
     return {
         "ok": True,
         "state_file": str(state_path),
-        "automation_id": str(state.get("automation", {}).get("id", "none")),
+        "automation_id": effective_automation_id,
+        "controller_automation_id": controller_automation_id,
+        "waiting_check_automation_id": waiting_check_automation_id,
+        "waiting_check_active": automation.get("waiting_check_active") is True,
         "implementation_thread_id": str(
-            state.get("automation", {}).get("implementation_thread_id", "none")
+            automation.get("implementation_thread_id", "none")
         ),
         "user_status": user_view["user_status"],
         "current_stage": state["review"].get("current_stage", "none"),
@@ -3305,7 +3578,15 @@ def workspace_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
 
 def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
     """Diagnose startup from caller-provided facts without touching state."""
-    implementation_thread_id = str(args.implementation_thread_id or "").strip()
+    supplied_implementation_thread_id = getattr(args, "implementation_thread_id", None)
+    if supplied_implementation_thread_id is None:
+        supplied_implementation_thread_id = os.environ.get("CODEX_THREAD_ID")
+        implementation_identity_source = (
+            "codex_thread_environment" if supplied_implementation_thread_id else "none"
+        )
+    else:
+        implementation_identity_source = "explicit_argument"
+    implementation_thread_id = str(supplied_implementation_thread_id or "").strip()
     reviewer_thread_id = str(args.reviewer_thread_id or "").strip()
     delegation_source_thread_id = str(
         getattr(args, "delegation_source_thread_id", None) or ""
@@ -3321,6 +3602,7 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
         "chat_send": args.chat_send,
         "one_shot_wait": args.one_shot_wait,
         "implementation_thread_id": implementation_thread_id,
+        "implementation_identity_source": implementation_identity_source,
         "reviewer_thread_id": reviewer_thread_id,
         "delegation_source_thread_id": delegation_source_thread_id or "none",
     }
@@ -3553,8 +3835,29 @@ def tick(state_path: str | Path, source: str = "foreground") -> dict[str, Any]:
         for observation in observations:
             changed = record_network_observation(state, observation) or changed
     if active_action_lease(state):
-        action = "concurrent_backoff"
+        # A scheduled waiting occurrence owns the review_poll lease while it
+        # stages and consumes the reply.  Once that same atomic flow has moved
+        # the state to result_received, the lease is no longer browser-read
+        # work: it is the foreground implementation handoff.  Preserve the
+        # lease identity but relabel its purpose so the same implementation
+        # task can pass the next mandatory turn-entry guard.  Other active
+        # leases remain non-preemptible and continue to back off.
+        waiting_reply_handoff = bool(
+            source == "foreground"
+            and state["review"].get("status") == "result_received"
+            and state["runtime"].get("action_lease_reason") == "review_poll"
+            and state["review"].get("response_valid_for_apply") is True
+            and state.get("next_operation", {}).get("status") == "validated"
+            and state.get("next_operation", {}).get("source_response_message_id")
+            == state["review"].get("response_message_id")
+        )
         lease_id = state["runtime"]["action_lease_id"]
+        if waiting_reply_handoff:
+            state["runtime"]["action_lease_reason"] = "apply_result"
+            action = "apply_result"
+            changed = True
+        else:
+            action = "concurrent_backoff"
     else:
         if state["runtime"].get("action_lease_id", "none") != "none":
             clear_action_lease(state)
@@ -3657,7 +3960,9 @@ def waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     revision = state["revision"]
     status = state["review"]["status"]
     state["automation"]["waiting_check_claimed_id"] = args.automation_id
-    lease_id = claim_action_lease(state, "waiting_review_poll", minutes=2)
+    lease_id = claim_action_lease(
+        state, "waiting_review_poll", minutes=WAITING_READ_LEASE_MINUTES,
+    )
     try:
         save_state(path, state, expected_revision=revision)
     except (StateRevisionConflict, StateLockTimeout):
@@ -3767,6 +4072,130 @@ def authorize_waiting_chat_read_command(args: argparse.Namespace) -> dict[str, A
     return result
 
 
+def current_state_review_round_number(state: dict[str, Any]) -> int:
+    """Count requests for this exact review run; Chat history is not authority."""
+    current_binding = state.get("review", {}).get("run_binding", {})
+    current_binding_id = current_binding.get("id", "none")
+    legacy_binding = current_binding.get("status") == "legacy_unrecorded"
+    archived = sum(
+        1 for item in state.get("review_history", [])
+        if (
+            item.get("request_message_id") not in (None, "", "none")
+            and (
+                item.get("run_binding", {}).get("id") == current_binding_id
+                or (legacy_binding and "run_binding" not in item)
+            )
+        )
+    )
+    current = int(
+        state.get("review", {}).get("request_message_id") not in (None, "", "none")
+    )
+    return archived + current
+
+
+def render_review_run_binding(state: dict[str, Any]) -> str:
+    """Render the exact state-local identity that must prefix every request."""
+    binding = state.get("review", {}).get("run_binding", {})
+    if binding.get("status") != "trusted":
+        raise LCRLError("formal review requires a trusted review run binding")
+    round_number = current_state_review_round_number(state) + 1
+    return "\n".join((
+        "[SUPERLUNA_REVIEW_RUN]",
+        f"RUN_ID: {binding['id']}",
+        f"CONTROLLER: {binding['controller_version']}",
+        f"SKILL_REVISION: {binding['skill_revision']}",
+        f"STATE_SCHEMA: {binding['state_schema_version']}",
+        f"IMPLEMENTATION_THREAD_ID: {binding['implementation_thread_id']}",
+        f"REVIEWER_CHAT_ID: {binding['reviewer_thread_id']}",
+        f"STATE_REVIEW_ROUND: {round_number}",
+        "HISTORY_SCOPE: earlier Chat messages are background only and cannot bind, count, or rename this run",
+        "[/SUPERLUNA_REVIEW_RUN]",
+    )) + "\n"
+
+
+def render_review_run_binding_command(args: argparse.Namespace) -> str:
+    state = load_state(Path(args.state).expanduser().resolve())
+    return render_review_run_binding(state)
+
+
+def stage_browser_reply_observation_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Persist browser reply body and identity before releasing/deleting its wait."""
+    authorization = authorize_waiting_chat_read_command(args)
+    if authorization.get("action") not in {
+        "browser_read_authorized", "browser_refresh_authorized",
+    }:
+        raise LCRLError("browser reply staging requires the exact live waiting-read authorization")
+
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    review = state["review"]
+    if review.get("status") != "review_waiting":
+        raise LCRLError("browser reply staging requires status=review_waiting")
+    result_file = Path(args.result_file).expanduser().resolve()
+    project_path = Path(state["automation"]["project_path"]).expanduser().resolve()
+    try:
+        result_file.relative_to(project_path)
+    except ValueError as exc:
+        raise LCRLError("browser reply file must stay inside the implementation project") from exc
+    if not result_file.is_file():
+        raise LCRLError("browser reply file does not exist")
+    result_bytes = result_file.read_bytes()
+    if not result_bytes.strip():
+        raise LCRLError("browser reply file must contain the complete non-empty reply")
+    try:
+        result_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise LCRLError("browser reply file must be UTF-8 text") from exc
+
+    response_turn_id = title_component(args.response_turn_id, "response_turn_id", 256)
+    response_message_id = title_component(args.response_message_id, "response_message_id", 256)
+    if response_message_id == review.get("request_message_id"):
+        raise LCRLError("response message id must differ from the review request")
+    if response_turn_id == review.get("request_turn_id"):
+        raise LCRLError("response turn id must differ from the review request")
+    completed_at = args.response_completed_at or utc_now()
+    parse_time(completed_at)
+    staged = {
+        "status": "staged",
+        "cycle_id": review["cycle_id"],
+        "request_message_id": review["request_message_id"],
+        "response_turn_id": response_turn_id,
+        "response_message_id": response_message_id,
+        "response_completed_at": completed_at,
+        "result_file": str(result_file),
+        "result_sha256": hashlib.sha256(result_bytes).hexdigest(),
+        "waiting_check_automation_id": args.automation_id,
+        "waiting_read_lease_id": args.lease_id,
+        "account_slot_lease_id": args.account_slot_lease_id,
+        "staged_at": utc_now(),
+    }
+    existing = state.get("browser_reply_observation", empty_browser_reply_observation())
+    if existing.get("status") == "staged":
+        if all(existing.get(key) == value for key, value in staged.items() if key != "staged_at"):
+            return {
+                "ok": True, "action": "browser_reply_already_staged", "duplicate": True,
+                "response_message_id": response_message_id,
+                "state_review_round_number": current_state_review_round_number(state),
+                "revision": revision,
+            }
+        raise LCRLError("a different browser reply is already staged for this review cycle")
+    state["browser_reply_observation"] = staged
+    save_state(path, state, expected_revision=revision)
+    return {
+        "ok": True,
+        "action": "browser_reply_staged",
+        "duplicate": False,
+        "response_turn_id": response_turn_id,
+        "response_message_id": response_message_id,
+        "result_sha256": staged["result_sha256"],
+        "state_review_round_number": current_state_review_round_number(state),
+        "safe_to_release_waiting_read": True,
+        "safe_to_delete_waiting_check_after_release": True,
+        "revision": state["revision"],
+    }
+
+
 def _bound_browser_chat_can_reopen(state: dict[str, Any]) -> bool:
     """Whether one exact canonical URL may recover the already-bound Chat.
 
@@ -3859,6 +4288,7 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
         "next_action": "open_canonical_url_once_then_authorize_send",
         "lease_id": lease_id,
         "submission_fingerprint": review["submission_fingerprint"],
+        "review_run_binding_id": review.get("run_binding", {}).get("id", "none"),
         "reviewer_thread_id": confirmation["reviewer_thread_id"],
         "authorized_browser_id": browser_id,
         "browser_rebind_required": browser_id != binding.get("browser_id"),
@@ -3885,6 +4315,10 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
     lease_id = str(getattr(args, "lease_id", "") or "").strip()
     browser_id = str(getattr(args, "browser_id", "") or "").strip()
     fingerprint = str(getattr(args, "fingerprint", "") or "").strip()
+    review_run_binding_id = str(
+        getattr(args, "review_run_binding_id", "") or ""
+    ).strip()
+    expected_review_run_binding = review.get("run_binding", {})
     account_slot_lease_id = str(
         getattr(args, "account_slot_lease_id", "") or ""
     ).strip()
@@ -3952,6 +4386,8 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
         review.get("status") == "review_submit_pending"
         and review.get("transport") == "in_app_browser"
         and review.get("submission_fingerprint") == fingerprint
+        and expected_review_run_binding.get("status") == "trusted"
+        and review_run_binding_id == expected_review_run_binding.get("id")
         and action_lease_reason in {"browser_submission_reopen", "turn_entry"}
         and runtime.get("action_lease_id") == lease_id
         and (reopened_tab or current_tab)
@@ -3982,6 +4418,9 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
     ] = account_slot_lease_id
     runtime["browser_submission_send_authorized_browser_id"] = browser_id
     runtime["browser_submission_send_authorized_fingerprint"] = fingerprint
+    runtime["browser_submission_send_authorized_review_run_binding_id"] = (
+        review_run_binding_id
+    )
     runtime["browser_submission_send_authorized_revision"] = revision + 1
     save_state(path, state, expected_revision=revision)
     return {
@@ -3993,6 +4432,8 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
         "account_slot_lease_id": account_slot_lease_id,
         "authorized_browser_id": browser_id,
         "submission_fingerprint": fingerprint,
+        "review_run_binding_id": review_run_binding_id,
+        "review_run_binding_required_in_payload": True,
         "projected_waiting_prompt_bytes": projected_waiting_prompt_bytes,
         "lease_expires_at": runtime["action_lease_expires_at"],
         "revision": state["revision"],
@@ -4461,10 +4902,19 @@ def bind_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("cannot bind a waiting check after its wait has ended")
     current_id = automation.get("waiting_check_automation_id", "none")
     claimed_id = automation.get("waiting_check_claimed_id", "none")
+    expected_rdate = automation.get("waiting_check_expected_rdate", "none")
+    scheduled_rdate = str(
+        getattr(args, "scheduled_rdate", expected_rdate) or ""
+    ).strip()
+    if expected_rdate == "none" or scheduled_rdate != expected_rdate:
+        raise LCRLError(
+            "waiting-check platform RDATE must exactly match the controller schedule"
+        )
     if current_id == automation_id:
         return add_user_status_exit({
             "ok": True, "action": "waiting_check_bound", "status": state["review"]["status"],
             "bound": True, "duplicate": True, "automation_id": automation_id,
+            "scheduled_rdate": scheduled_rdate,
         })
     if current_id != "none":
         if claimed_id != current_id or active_action_lease(state):
@@ -4476,11 +4926,12 @@ def bind_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     return add_user_status_exit({
         "ok": True, "action": "waiting_check_bound", "status": state["review"]["status"],
         "bound": True, "duplicate": False, "automation_id": automation_id,
+        "scheduled_rdate": scheduled_rdate,
     })
 
 
 def rearm_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
-    """Rotate one occurrence token while reusing the platform heartbeat ID."""
+    """Release one claimed read and rotate its existing platform wait atomically."""
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
     automation = state["automation"]
@@ -4491,12 +4942,27 @@ def rearm_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
             or automation.get("waiting_check_automation_id", "none") != args.automation_id
             or automation.get("waiting_check_claimed_id", "none") != args.automation_id):
         raise LCRLError("cannot rearm a stale or unclaimed waiting check")
-    if active_action_lease(state):
-        raise LCRLError("cannot rearm a waiting check while its Chat read lease is active")
+    runtime = state["runtime"]
+    supplied_lease_id = str(getattr(args, "lease_id", None) or "none").strip()
+    current_lease_id = str(runtime.get("action_lease_id") or "none")
+    current_lease_reason = str(runtime.get("action_lease_reason") or "none")
+    released_waiting_lease_id = "none"
+    if current_lease_reason == "waiting_review_poll":
+        if supplied_lease_id == "none" or supplied_lease_id != current_lease_id:
+            raise LCRLError(
+                "rearming a claimed waiting check requires its exact Chat read lease"
+            )
+        released_waiting_lease_id = current_lease_id
+        clear_action_lease(state)
+    elif active_action_lease(state):
+        raise LCRLError("cannot rearm while an unrelated action lease is active")
+    elif supplied_lease_id != "none":
+        raise LCRLError("waiting Chat read lease proof is stale or unrelated")
     revision = state["revision"]
     next_token = "wait-" + secrets.token_hex(8)
     automation["waiting_check_token"] = next_token
     automation["waiting_check_claimed_id"] = "none"
+    automation["waiting_check_expected_rdate"] = waiting_check_rdate()
     try:
         save_state(path, state, expected_revision=revision)
     except (StateRevisionConflict, StateLockTimeout):
@@ -4511,6 +4977,9 @@ def rearm_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
         "status": state["review"]["status"],
         "waiting_check_token": next_token,
         "waiting_check_automation_id": args.automation_id,
+        "waiting_check_expected_rdate": automation["waiting_check_expected_rdate"],
+        "released_waiting_lease_id": released_waiting_lease_id,
+        "platform_update_must_follow_state_rearm": True,
     })
 
 
@@ -4520,6 +4989,7 @@ def deactivate_waiting_check(state: dict[str, Any]) -> str:
     state["automation"]["waiting_check_active"] = False
     state["automation"]["waiting_check_automation_id"] = "none"
     state["automation"]["waiting_check_claimed_id"] = "none"
+    state["automation"]["waiting_check_expected_rdate"] = "none"
     if state["runtime"].get("action_lease_reason") == "waiting_review_poll":
         clear_action_lease(state)
     return automation_id
@@ -5322,6 +5792,48 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
     expected_implementation_thread_id = state["automation"].get(
         "implementation_thread_id", "none"
     )
+    if status in MONITOR_STATUSES and waiting_check_binding_pending(state):
+        if implementation_thread_id == "none":
+            raise LCRLError("guard requires the exact implementation task identity")
+        if implementation_thread_id != expected_implementation_thread_id:
+            raise LCRLError("pending wait binding belongs to a different implementation task")
+        expected_rdate = str(
+            state["automation"].get("waiting_check_expected_rdate", "none")
+        )
+        try:
+            expected_at = datetime.strptime(
+                expected_rdate, "RDATE:%Y%m%dT%H%M%SZ"
+            ).replace(tzinfo=timezone.utc)
+        except ValueError as exc:
+            raise LCRLError("pending wait binding has an invalid platform RDATE") from exc
+        unbound_wait_rearmed = expected_at <= datetime.now(timezone.utc)
+        if unbound_wait_rearmed:
+            state["automation"]["waiting_check_token"] = "wait-" + secrets.token_hex(8)
+            state["automation"]["waiting_check_expected_rdate"] = waiting_check_rdate()
+            save_state(path, state, expected_revision=revision)
+            state = load_state(path)
+            revision = state["revision"]
+        return add_user_status_exit({
+            "ok": True,
+            "action": "waiting_binding_recovery_required",
+            "status": status,
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "platform_wait_binding_allowed": True,
+            "waiting_check_only": True,
+            "lease_id": "none",
+            "revision": revision,
+            "unbound_wait_rearmed": unbound_wait_rearmed,
+            "waiting_check_action": "schedule_once",
+            "waiting_check_token": state["automation"]["waiting_check_token"],
+            "waiting_check_automation_id": "none",
+            "waiting_check_expected_rdate": state["automation"][
+                "waiting_check_expected_rdate"
+            ],
+            **platform_wait_binding_barrier_contract(path, state),
+        })
     if status in MONITOR_STATUSES:
         return add_user_status_exit({
             "ok": True,
@@ -5349,6 +5861,26 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         ):
             raise LCRLError("an unexpired action lease already exists")
         recovered_same_task_lease = True
+        protected_send_confirmation = bool(
+            state["review"].get("status") == "review_submit_pending"
+            and state["runtime"].get(
+                "browser_submission_send_authorized_lease_id", "none"
+            ) == state["runtime"].get("action_lease_id")
+            and state["runtime"].get(
+                "browser_submission_send_authorized_revision", 0
+            ) == state["revision"]
+        )
+        if protected_send_confirmation:
+            return {
+                "ok": True,
+                "action": "turn_entry_allowed",
+                "execution_allowed": True,
+                "lease_id": state["runtime"]["action_lease_id"],
+                "expires_at": state["runtime"]["action_lease_expires_at"],
+                "recovered_same_task_lease": True,
+                "protected_send_confirmation": True,
+                "implementation_thread_id": implementation_thread_id,
+            }
     elif implementation_thread_id == "none":
         raise LCRLError("guard requires the exact implementation task identity")
     elif implementation_thread_id != expected_implementation_thread_id:
@@ -5401,6 +5933,10 @@ def begin_new_goal_command(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("new goal cannot begin while a waiting check still exists")
 
     archive_review_cycle(state, "new_goal_authorized")
+    review["run_binding"] = new_review_run_binding(
+        implementation_thread_id,
+        state["confirmation"]["reviewer_thread_id"],
+    )
     state.setdefault("review_history", []).append({
         "event": "new_goal_authorized",
         "previous_status": "completed",
@@ -5515,6 +6051,10 @@ def reset_for_retest_command(args: argparse.Namespace) -> dict[str, Any]:
     })
     state["review_history"] = state["review_history"][-20:]
     automation["implementation_thread_id"] = implementation_thread_id
+    review["run_binding"] = new_review_run_binding(
+        implementation_thread_id,
+        state["confirmation"]["reviewer_thread_id"],
+    )
     review.update({
         "status": "local_work",
         "current_stage": stage,
@@ -5569,6 +6109,7 @@ def reset_for_retest_command(args: argparse.Namespace) -> dict[str, Any]:
         "browser_submission_send_authorized_account_slot_lease_id": "none",
         "browser_submission_send_authorized_browser_id": "none",
         "browser_submission_send_authorized_fingerprint": "none",
+        "browser_submission_send_authorized_review_run_binding_id": "none",
         "browser_submission_send_authorized_revision": 0,
     })
     state["recovery"]["consecutive_no_progress_checks"] = 0
@@ -5678,7 +6219,7 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
                 waiting_action = "schedule_once"
             elif not automatic_wait:
                 waiting_action = "foreground_resume_required"
-            return add_user_status_exit({
+            repeated_result = add_user_status_exit({
                 "ok": True,
                 "action": "already_confirmed",
                 "confirmed": False,
@@ -5689,7 +6230,10 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
                 "waiting_check_automation_id": automation.get(
                     "waiting_check_automation_id", "none"
                 ),
+                **reviewer_evidence_scope_contract(),
             })
+            repeated_result.update(platform_wait_binding_barrier_contract(path, state))
+            return repeated_result
         raise LCRLError("review submission is not pending")
     if args.reviewer_thread_id != state["confirmation"]["reviewer_thread_id"]:
         raise LCRLError("submission target must match the bound App Chat")
@@ -5742,6 +6286,9 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
             == reopen_browser_id
             and runtime.get("browser_submission_send_authorized_fingerprint")
             == review.get("submission_fingerprint")
+            and runtime.get(
+                "browser_submission_send_authorized_review_run_binding_id"
+            ) == review.get("run_binding", {}).get("id")
             and runtime.get("browser_submission_send_authorized_revision")
             == send_authorization_revision
         ):
@@ -5788,12 +6335,18 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
             reopen_browser_id if reopen_lease_id != "none" else None
         ),
     ))
-    return add_user_status_exit({
+    final_state = load_state(path)
+    output = add_user_status_exit({
         "ok": True,
         "action": "submission_confirmed",
         "confirmed": True,
         "status": result["status"],
         "request_message_id": args.request_message_id,
+        "state_review_round_number": current_state_review_round_number(
+            final_state
+        ),
+        "review_round_authority": "current_state_only",
+        "review_run_binding_id": final_state["review"]["run_binding"]["id"],
         "attachment_count": len(observed),
         "waiting_check_action": result["waiting_check_action"],
         "waiting_check_token": result["waiting_check_token"],
@@ -5801,7 +6354,11 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
         "waiting_check_previous_automation_id": result[
             "waiting_check_previous_automation_id"
         ],
+        "waiting_check_expected_rdate": result["waiting_check_expected_rdate"],
+        **reviewer_evidence_scope_contract(),
     })
+    output.update(platform_wait_binding_barrier_contract(path, final_state))
+    return output
 
 
 def invalidate_review_mode(args: argparse.Namespace) -> dict[str, Any]:
@@ -5876,7 +6433,7 @@ def archive_review_cycle(state: dict[str, Any], reason: str) -> None:
         snapshot = {
             key: deepcopy(review.get(key))
             for key in (
-                "cycle_id", "current_stage", "status", "submission_fingerprint",
+                "run_binding", "cycle_id", "current_stage", "status", "submission_fingerprint",
                 "request_turn_id", "request_message_id", "request_persisted_at",
                 "request_stage", "request_reasoning_mode", "response_turn_id",
                 "request_native_app_instance_id",
@@ -5889,6 +6446,7 @@ def archive_review_cycle(state: dict[str, Any], reason: str) -> None:
         state.setdefault("review_history", []).append(snapshot)
         state["review_history"] = state["review_history"][-20:]
     clear_review_cycle(review)
+    state["browser_reply_observation"] = empty_browser_reply_observation()
 
 
 def transition(args: argparse.Namespace) -> dict[str, Any]:
@@ -6049,6 +6607,7 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
             state["automation"]["waiting_check_active"] = True
             state["automation"]["waiting_check_automation_id"] = "none"
             state["automation"]["waiting_check_claimed_id"] = "none"
+            state["automation"]["waiting_check_expected_rdate"] = waiting_check_rdate()
             waiting_check_automation_id = "none"
             waiting_check_action = "schedule_once"
         else:
@@ -6089,6 +6648,19 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
         # local apply action finished.  Do not strand the next submission or a
         # terminal state behind an orphaned implementation lease.
         clear_action_lease(state)
+    elif (
+        review["status"] == "external_blocked"
+        and state["runtime"].get("action_lease_reason")
+        in {"turn_entry", "apply_result", "review_poll"}
+    ):
+        # A foreground implementation turn that deliberately fails closed is
+        # finished at this durable boundary. Retire only its ordinary lease so
+        # a user-authorized retest is not stranded until expiry. Leaving a
+        # waiting state already retires its waiting-read lease through the
+        # existing wait deactivation path. A foreground review_poll is also an
+        # ordinary implementation lease; browser-reopen remains protected and
+        # still requires its explicit owner cleanup.
+        clear_action_lease(state)
     record_resume_checkpoint(state)
     save_state(path, state, expected_revision=revision)
     browser_submission_preflight_required = (
@@ -6115,6 +6687,9 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
         "waiting_check_token": state["automation"]["waiting_check_token"],
         "waiting_check_automation_id": waiting_check_automation_id,
         "waiting_check_previous_automation_id": waiting_check_previous_automation_id,
+        "waiting_check_expected_rdate": state["automation"].get(
+            "waiting_check_expected_rdate", "none"
+        ),
         "browser_submission_preflight_required": browser_submission_preflight_required,
         "missing_exact_tab_action": (
             "authorize-browser-submission-reopen"
@@ -6500,18 +7075,27 @@ def reply_requires_user_decision(parsed: dict[str, Any]) -> bool:
 
 def _action_scope_requires_high_impact_decision(action_scope: str) -> bool:
     """Distinguish a local counterexample mutation from a real destructive act."""
-    if OTHER_HIGH_IMPACT_REPLY_PATTERN.search(action_scope):
+    gate_scope = NEGATED_HIGH_IMPACT_EVIDENCE_PATTERN.sub("", action_scope)
+    gate_scope = NEGATED_HIGH_IMPACT_BOUNDARY_LINE_PATTERN.sub(
+        lambda match: (
+            match.group(0)
+            if NEGATED_BOUNDARY_POSITIVE_TURN_PATTERN.search(match.group(0))
+            else ""
+        ),
+        gate_scope,
+    )
+    if OTHER_HIGH_IMPACT_REPLY_PATTERN.search(gate_scope):
         return True
-    if not DESTRUCTIVE_REPLY_PATTERN.search(action_scope):
+    if not DESTRUCTIVE_REPLY_PATTERN.search(gate_scope):
         return False
     local_counterexample = (
-        LOCAL_COUNTEREXAMPLE_MUTATION_PATTERN.search(action_scope)
+        LOCAL_COUNTEREXAMPLE_MUTATION_PATTERN.search(gate_scope)
         or (
-            REJECTED_MUTATION_ASSERTION_PATTERN.search(action_scope)
-            and DATABASE_ROW_CONTEXT_PATTERN.search(action_scope)
+            REJECTED_MUTATION_ASSERTION_PATTERN.search(gate_scope)
+            and DATABASE_ROW_CONTEXT_PATTERN.search(gate_scope)
         )
     )
-    external_target = EXTERNAL_DESTRUCTIVE_TARGET_PATTERN.search(action_scope)
+    external_target = EXTERNAL_DESTRUCTIVE_TARGET_PATTERN.search(gate_scope)
     return not (local_counterexample and not external_target)
 
 
@@ -6572,6 +7156,7 @@ def resume_from_reply_command(args: argparse.Namespace) -> dict[str, Any]:
             return _already_consumed_result(state, response_message_id)
         source = getattr(args, "source", "foreground")
         resumed_waiting_automation_id = "none"
+        staged_response_completed_at: str | None = None
         if source == "waiting_check":
             deleted_id = getattr(args, "deleted_automation_id", None)
             current_id = state["automation"].get("waiting_check_automation_id", "none")
@@ -6600,6 +7185,29 @@ def resume_from_reply_command(args: argparse.Namespace) -> dict[str, Any]:
                     raise LCRLError(
                         "scheduled browser reply resume requires waiting_read slot release"
                     )
+                observation = state.get(
+                    "browser_reply_observation", empty_browser_reply_observation()
+                )
+                if observation.get("status") != "staged":
+                    raise LCRLError(
+                        "scheduled browser reply resume requires a staged reply identity before wait deletion"
+                    )
+                if (
+                    observation.get("cycle_id") != review.get("cycle_id")
+                    or observation.get("request_message_id") != review.get("request_message_id")
+                    or observation.get("waiting_check_automation_id") != current_id
+                    or observation.get("response_turn_id") != args.response_turn_id
+                    or observation.get("response_message_id") != response_message_id
+                ):
+                    raise LCRLError("staged browser reply does not match this waiting review cycle")
+                if not args.result_file:
+                    raise LCRLError("scheduled browser reply resume requires the staged result file")
+                result_path = Path(args.result_file).expanduser().resolve()
+                if str(result_path) != observation.get("result_file"):
+                    raise LCRLError("scheduled browser reply result file differs from the staged evidence")
+                if hashlib.sha256(result_path.read_bytes()).hexdigest() != observation.get("result_sha256"):
+                    raise LCRLError("scheduled browser reply changed after its identity was staged")
+                staged_response_completed_at = observation.get("response_completed_at")
             resumed_waiting_automation_id = current_id
         if review["status"] != "review_waiting":
             # Peer may have just consumed; treat as already_consumed when applicable.
@@ -6615,7 +7223,12 @@ def resume_from_reply_command(args: argparse.Namespace) -> dict[str, Any]:
         ):
             raise LCRLError("foreground resume requires the bound App Chat to be confirmed Extreme")
 
-        now = args.response_completed_at or utc_now()
+        if (
+            staged_response_completed_at is not None
+            and args.response_completed_at not in (None, staged_response_completed_at)
+        ):
+            raise LCRLError("response completion time differs from the staged browser reply")
+        now = staged_response_completed_at or args.response_completed_at or utc_now()
         try:
             if reply_requires_user_decision(parsed):
                 revision = state["revision"]
@@ -7129,6 +7742,9 @@ def build_parser() -> argparse.ArgumentParser:
     waiting_prompt.add_argument("--state", required=True)
     waiting_prompt.add_argument("--validate-only", action="store_true")
 
+    review_run_binding = sub.add_parser("render-review-run-binding")
+    review_run_binding.add_argument("--state", required=True)
+
     tick_parser = sub.add_parser("tick")
     tick_parser.add_argument("--state", required=True)
     tick_parser.add_argument("--source", choices=("heartbeat", "foreground"), default="foreground")
@@ -7145,6 +7761,19 @@ def build_parser() -> argparse.ArgumentParser:
     authorize_waiting_read.add_argument("--lease-id", required=True)
     authorize_waiting_read.add_argument("--account-slot-lease-id", required=True)
 
+    stage_browser_reply = sub.add_parser("stage-browser-reply")
+    stage_browser_reply.add_argument("--state", required=True)
+    stage_browser_reply.add_argument("--token", required=True)
+    stage_browser_reply.add_argument("--automation-id", required=True)
+    stage_browser_reply.add_argument("--lease-id", required=True)
+    stage_browser_reply.add_argument("--account-slot-lease-id", required=True)
+    stage_browser_reply.add_argument("--response-turn-id", required=True)
+    stage_browser_reply.add_argument("--response-message-id", required=True)
+    stage_browser_reply.add_argument("--response-completed-at")
+    stage_browser_reply.add_argument("--result-file", required=True)
+    stage_browser_reply.add_argument("--account-browser-registry")
+    stage_browser_reply.add_argument("--at")
+
     authorize_submission_reopen = sub.add_parser("authorize-browser-submission-reopen")
     authorize_submission_reopen.add_argument("--state", required=True)
     authorize_submission_reopen.add_argument("--fingerprint", required=True)
@@ -7153,6 +7782,7 @@ def build_parser() -> argparse.ArgumentParser:
     authorize_submission_send = sub.add_parser("authorize-browser-submission-send")
     authorize_submission_send.add_argument("--state", required=True)
     authorize_submission_send.add_argument("--fingerprint", required=True)
+    authorize_submission_send.add_argument("--review-run-binding-id", required=True)
     authorize_submission_send.add_argument("--browser-id", required=True)
     authorize_submission_send.add_argument("--lease-id", required=True)
     authorize_submission_send.add_argument("--account-slot-lease-id", required=True)
@@ -7195,11 +7825,13 @@ def build_parser() -> argparse.ArgumentParser:
     bind_waiting_check.add_argument("--state", required=True)
     bind_waiting_check.add_argument("--token", required=True)
     bind_waiting_check.add_argument("--automation-id", required=True)
+    bind_waiting_check.add_argument("--scheduled-rdate", required=True)
 
     rearm_waiting_check = sub.add_parser("rearm-waiting-check")
     rearm_waiting_check.add_argument("--state", required=True)
     rearm_waiting_check.add_argument("--token", required=True)
     rearm_waiting_check.add_argument("--automation-id", required=True)
+    rearm_waiting_check.add_argument("--lease-id")
 
     browser_observation = sub.add_parser("browser-network-observation")
     browser_observation.add_argument("--state", required=True)
@@ -7316,7 +7948,10 @@ def build_parser() -> argparse.ArgumentParser:
         "startup-diagnostics",
         help="只读检查新实施任务初始化前的宿主能力事实",
     )
-    startup_diagnostics.add_argument("--implementation-thread-id", required=True)
+    startup_diagnostics.add_argument(
+        "--implementation-thread-id",
+        help="当前实施任务 ID；省略时只读取宿主注入的 CODEX_THREAD_ID",
+    )
     startup_diagnostics.add_argument("--reviewer-thread-id", required=True)
     startup_diagnostics.add_argument("--delegation-source-thread-id")
     startup_diagnostics.add_argument(
@@ -7666,12 +8301,16 @@ def main(argv: list[str] | None = None) -> int:
             result = render_heartbeat(args.state, args.validate_only)
         elif args.command == "render-waiting-check":
             result = render_waiting_check(args.state, args.validate_only)
+        elif args.command == "render-review-run-binding":
+            result = render_review_run_binding_command(args)
         elif args.command == "tick":
             result = tick(args.state, source=args.source)
         elif args.command == "waiting-check":
             result = waiting_check_command(args)
         elif args.command == "authorize-waiting-chat-read":
             result = authorize_waiting_chat_read_command(args)
+        elif args.command == "stage-browser-reply":
+            result = stage_browser_reply_observation_command(args)
         elif args.command == "authorize-browser-submission-reopen":
             result = authorize_browser_submission_reopen_command(args)
         elif args.command == "authorize-browser-submission-send":

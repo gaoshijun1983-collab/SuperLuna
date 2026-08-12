@@ -15,11 +15,86 @@ ID `luna-review-loop`, Skill/folder `luna-chatgpt-review-loop`, and command
 `lcrl`. It is a plugin plus a bundled Skill and standard-library Python safety
 controller, not a standalone desktop application.
 
+The clean macOS C27 run has now completed three consecutive isolated real web
+review rounds on Controller 98: each round used one submission, one gated read,
+one staged identity, one deleted one-shot wait, and one reply consumption. The
+same task continued without coordinator messages and finished with no active
+wait. This is strong Alpha transport evidence, but it is not a real-project
+cycle and therefore does not satisfy the Public Beta gate.
+
 ## Current source status
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 83 / Skill revision `2026-08-13.38`, refuses to consume a scheduled
+Controller 98 / Skill revision `2026-08-13.53` removes an ambiguous waiting
+instruction that abbreviated the final command as `resume`. It now names the
+exact `resume-from-reply` subcommand and its required deletion-proof arguments,
+preventing a successfully staged reply from being stranded after its platform
+wait is deleted. Controller 97 completes the scheduled-reply
+handoff: after a one-shot wait reads and consumes a valid reply, its protected
+`review_poll` lease is atomically relabelled as the same task's `apply_result`
+lease. The mandatory next turn-entry therefore continues implementation instead
+of incorrectly stopping for a user decision. Controller 96 preserves an already-authorized
+single browser send across repeated same-task turn-entry guards until its real
+receipt is confirmed. Ordinary orphaned leases still rotate, and another task
+still cannot take them over. Controller 95 also recognizes an explicit
+“do not approve release/delete/resume from this evidence” clause as a boundary,
+not an action. Controller 94 keeps a safe, explicit reviewer
+`REVISE` actionable when its acceptance criteria use negative manifest evidence
+such as “no added or removed files”; those absence assertions no longer look like
+a destructive instruction. Real delete, publish, deploy, permission, payment, and
+credential actions remain gated. Controller 93 also makes the read-only observer report
+the active one-shot waiting task rather than the retired legacy scheduler id, while
+preserving both explicit fields for diagnosis. Controller 92 gave every new state a unique,
+controller-owned review-run identity. Every formal request must begin with the
+exact rendered binding and prove the same run id at the pre-send gate, so old
+messages in a reused reviewer Chat remain background and cannot rename, count,
+or bind the current run. This addresses C21's reviewer-side identity conflict
+with an older Controller 89 conversation. Controller 91 prevents an account-browser slot
+from crossing operation boundaries. C21 proved that the single-RDATE platform
+wait can be created, bound, and fired without coordinator prompting, then found
+that a still-live `submission` slot could be returned as reusable for
+`waiting_read`. The second authorization rejected it before browser startup.
+Different operations now fail closed with the exact stale lease identified for
+release and safe wait rearm; reuse remains available only for the operation that
+actually acquired the slot. Controller 90 turns the post-submission platform
+wait into a machine-readable host barrier: it names the Codex Desktop
+automation tool, exact single RDATE, target task, inert bootstrap prompt, and
+mandatory create/bind/render/update sequence. If a host turn still ends before
+binding, only the exact implementation task may recover that platform step;
+project and browser authority remain denied, and an expired never-bound RDATE
+is atomically moved to a fresh future occurrence. Once bound, ordinary wakeups are
+blocked exactly as before. Controller 89 extends a waiting-read lease to
+five minutes, atomically rearms state before the host updates its one platform
+RDATE, and makes the reviewer evidence cutoff explicit: the current response's
+staging, slot release, wait deletion, and resume remain mandatory controller
+closure, but cannot be evidence required for the verdict that precedes them.
+The CI workflow now cancels obsolete runs on the same branch to reduce redundant
+failure mail. Controller 88 makes the controller generate the
+exact one-shot RDATE and requires the platform-returned schedule to match during
+binding, preventing an intended 180-second check from being rounded to the next
+hour or half-hour. Controller 87 lets a newly created task obtain
+its own trusted identity directly from the host-injected `CODEX_THREAD_ID`, so
+the first-message-only autonomous launch no longer depends on a coordinator
+follow-up. Missing host identity still fails closed. Controller 86 adds a durable pre-delete
+receipt gate for scheduled browser replies: the complete body, real response
+turn/message identity, current request cycle, and file hash must be staged while
+the waiting-read authorization is still live. Only then may the task release the
+account slot, delete the one-shot wait, and resume. Missing identity now keeps the
+same wait recoverable instead of deleting it and stranding the run. Formal round
+counting is state-local, so older messages in a reused fixed Chat and page prose
+cannot advance or stop the current run. Entering `external_blocked` also retires
+an ordinary foreground `review_poll` lease while preserving browser-reopen ownership.
+Controller 85 allows a clear low-risk FAIL
+next step from a scheduled Chat reply to continue even when its safety boundary
+explicitly says not to touch production, deployment, or permissions. It still
+blocks mixed or positive high-impact instructions. Controller 84 retires an ordinary foreground
+lease when that implementation turn durably enters `external_blocked`. Leaving
+the waiting state already retires its waiting-read lease; browser-reopen leases
+remain protected against preemption.
+It also clarifies that the 180-second account quiet interval applies to every
+new browser acquisition after a normal release, including the same task's next
+operation. Controller 83 refuses to consume a scheduled
 browser reply while the owning task still holds a live `waiting_read` account
 slot, and the rendered one-shot prompt now releases that slot before deleting
 the wait and resuming. Revision `.38` also makes the Browser plugin-root boundary

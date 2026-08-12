@@ -1,7 +1,7 @@
 {
-  "controller_version": 83,
+  "controller_version": 98,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-13.38",
+  "skill_revision": "2026-08-13.53",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",
@@ -10,6 +10,7 @@
   "heartbeat_interval_minutes": 0,
   "heartbeat_mode": "waiting_only",
   "browser_refresh_interval_seconds": 180,
+  "waiting_read_lease_minutes": 5,
   "browser_rate_limit_backoff_seconds": [900, 1800, 3600],
   "account_browser_max_active": 2,
   "account_browser_slot_seconds": 600,
