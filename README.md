@@ -13,8 +13,11 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.42`; the latest archive remains
-Alpha 27. Controller 50 / Skill revision `2026-08-12.4` makes the fresh
+The current source candidate is `0.2.0-alpha.43`; the latest archive remains
+Alpha 27. This source also publishes the bounded Pro-progress event shape and a
+machine-checked milestone/rollback guide without claiming that every nested
+state invariant is expressed in JSON Schema. Controller 50 / Skill revision
+`2026-08-12.4` makes the fresh
 pre-send gate a persisted, single-use controller fact: the reopen revision by
 itself can no longer be passed directly to submission confirmation as forged
 proof. Clearing the reopen lease clears that authorization. This is locally

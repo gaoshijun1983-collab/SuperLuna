@@ -36,13 +36,22 @@ class MilestoneValidationTests(unittest.TestCase):
         }
         self.assertIn("milestones[0].verification must be a non-empty list of strings", validator.validate_contract(document))
 
-    def test_alpha_cannot_claim_real_device_or_beta_evidence(self):
+    def test_local_only_scope_cannot_claim_real_device_or_beta_evidence(self):
         document = json.loads((ROOT / "docs" / "milestones.json").read_text(encoding="utf-8"))
         document["milestones"][0]["real_device_evidence"] = True
         document["milestones"][0]["public_beta_evidence"] = True
         errors = validator.validate_contract(document)
-        self.assertIn("milestones[0] Alpha milestone cannot claim real_device_evidence", errors)
-        self.assertIn("milestones[0] Alpha milestone cannot claim public_beta_evidence", errors)
+        self.assertIn(
+            "milestones[0] local_only scope cannot claim real-device or Public Beta evidence",
+            errors,
+        )
+
+    def test_alpha_can_record_real_device_evidence_without_claiming_public_beta(self):
+        document = json.loads((ROOT / "docs" / "milestones.json").read_text(encoding="utf-8"))
+        milestone = document["milestones"][0]
+        milestone["evidence_scope"] = "real_device"
+        milestone["real_device_evidence"] = True
+        self.assertEqual(validator.validate_contract(document), [])
 
 
 if __name__ == "__main__":

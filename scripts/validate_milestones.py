@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -18,7 +17,6 @@ REQUIRED_FIELDS = (
     "rollback_steps",
     "verification",
 )
-ALPHA_VERSION = re.compile(r"^\d+\.\d+\.\d+-alpha\.\d+$")
 ALLOWED_SCOPES = {"local_only", "real_device", "public_beta"}
 
 
@@ -59,14 +57,18 @@ def validate_contract(document: Any) -> list[str]:
         scope = milestone.get("evidence_scope")
         if scope not in ALLOWED_SCOPES:
             errors.append(f"{label}.evidence_scope must be one of {sorted(ALLOWED_SCOPES)}")
-        alpha = isinstance(version, str) and bool(ALPHA_VERSION.fullmatch(version))
-        if alpha:
-            if scope != "local_only":
-                errors.append(f"{label} Alpha milestone must use evidence_scope=local_only")
-            if milestone.get("real_device_evidence") is not False:
-                errors.append(f"{label} Alpha milestone cannot claim real_device_evidence")
-            if milestone.get("public_beta_evidence") is not False:
-                errors.append(f"{label} Alpha milestone cannot claim public_beta_evidence")
+        real_device = milestone.get("real_device_evidence")
+        public_beta = milestone.get("public_beta_evidence")
+        if not isinstance(real_device, bool):
+            errors.append(f"{label}.real_device_evidence must be boolean")
+        if not isinstance(public_beta, bool):
+            errors.append(f"{label}.public_beta_evidence must be boolean")
+        if scope == "local_only" and (real_device is not False or public_beta is not False):
+            errors.append(f"{label} local_only scope cannot claim real-device or Public Beta evidence")
+        if scope == "real_device" and (real_device is not True or public_beta is not False):
+            errors.append(f"{label} real_device scope requires real-device evidence only")
+        if scope == "public_beta" and (real_device is not True or public_beta is not True):
+            errors.append(f"{label} public_beta scope requires real-device and Public Beta evidence")
     return errors
 
 

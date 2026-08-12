@@ -2,8 +2,8 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.41",
-      "title": "Browser-first loop transport correction",
+      "version": "0.2.0-alpha.43",
+      "title": "Browser-first loop proof and release-contract correction",
       "upgrade_prerequisites": [
         "Run the repository test suite and controller selftest.",
         "Confirm the current candidate remains Alpha and Public Beta is blocked."

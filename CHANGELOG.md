@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Published the bounded Pro-progress event shape in the state schema and added
+  a package regression for its required fields and 20-event ceiling. The
+  broader nested-state audit remains open; the release report no longer
+  overclaims that this one slice completes every nested contract.
+- Added a machine-readable milestone and rollback contract with a deterministic
+  validator. Evidence scope is checked for internal consistency: an Alpha may
+  truthfully record real-device evidence without thereby claiming Public Beta
+  readiness, while local-only milestones cannot claim either.
 - Closed a proof gap in controller 50 / Skill revision `2026-08-12.4`.
   Controller 49's fresh browser pre-send gate returned the current state
   revision without persisting that the gate had actually run, so a caller that

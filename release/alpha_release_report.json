@@ -1,6 +1,6 @@
 {
   "product_name": "SuperLuna",
-  "package_version": "0.2.0-alpha.42",
+  "package_version": "0.2.0-alpha.43",
   "controller_version": 50,
   "schema_version": 7,
   "skill_revision": "2026-08-12.4",
@@ -12,7 +12,7 @@
     "command": "lcrl"
   },
   "automated_evidence": {
-    "repository_tests": 188,
+    "repository_tests": 194,
     "controller_selftests": 15,
     "native_session_concurrent_start_serialized": true,
     "native_session_spawn_process_exclusion": true,
@@ -37,7 +37,8 @@
     "browser_submission_fresh_pre_send_gate_local_tested": true,
     "browser_submission_pre_send_gate_persisted_proof_local_tested": true,
     "published_state_schema_requires_every_runtime_top_level_section": true,
-    "published_state_schema_nested_contract_complete": true,
+    "published_state_schema_nested_contract_complete": false,
+    "published_state_schema_progress_contract_matches_runtime": true,
     "published_state_schema_policy_contract_matches_runtime": true,
     "published_state_schema_confirmation_trust_contract_matches_runtime": true,
     "published_state_schema_capabilities_contract_matches_runtime": true,
