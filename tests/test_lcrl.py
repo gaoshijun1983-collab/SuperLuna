@@ -23,6 +23,36 @@ SPEC.loader.exec_module(lcrl)
 
 
 class AtomicReplaceTests(unittest.TestCase):
+    def test_shared_registry_read_retries_transient_permission_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "registry.json"
+            target.write_text('{"ok": true}\n', encoding="utf-8")
+            real_read_text = Path.read_text
+            attempts = 0
+
+            def flaky_read_text(path, *args, **kwargs):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "transient sharing violation")
+                return real_read_text(path, *args, **kwargs)
+
+            with mock.patch.object(Path, "read_text", autospec=True, side_effect=flaky_read_text):
+                value = lcrl.read_shared_registry_text(target, timeout=0.1)
+
+            self.assertEqual(attempts, 2)
+            self.assertEqual(value, '{"ok": true}\n')
+
+    def test_shared_registry_read_rethrows_persistent_permission_error(self):
+        with mock.patch.object(
+            Path,
+            "read_text",
+            autospec=True,
+            side_effect=PermissionError(13, "persistent sharing violation"),
+        ):
+            with self.assertRaises(PermissionError):
+                lcrl.read_shared_registry_text("registry.json", timeout=0)
+
     def test_atomic_replace_retries_transient_permission_error(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 69
-SKILL_REVISION = "2026-08-12.23"
+CONTROLLER_VERSION = 70
+SKILL_REVISION = "2026-08-12.24"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -269,6 +269,22 @@ def atomic_replace(
         try:
             _replace_file_once(source, destination)
             return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(ATOMIC_REPLACE_POLL_SECONDS)
+
+
+def read_shared_registry_text(
+    path: str | Path,
+    timeout: float = SHARED_REGISTRY_REPLACE_TIMEOUT_SECONDS,
+) -> str:
+    """Read an already-serialized shared registry after transient Windows denial."""
+    target = Path(path)
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        try:
+            return target.read_text(encoding="utf-8")
         except PermissionError:
             if time.monotonic() >= deadline:
                 raise
@@ -573,7 +589,7 @@ def load_binding_registry(path: str | Path, allow_missing: bool = False) -> dict
             return empty_binding_registry()
         raise LCRLError(f"binding registry not found: {registry_path}")
     try:
-        value = json.loads(registry_path.read_text(encoding="utf-8"))
+        value = json.loads(read_shared_registry_text(registry_path))
     except (OSError, json.JSONDecodeError) as exc:
         raise LCRLError(f"invalid binding registry {registry_path}: {exc}") from exc
     validate_binding_registry(value)
@@ -587,7 +603,7 @@ def _save_binding_registry_locked(
 ) -> int:
     """Persist a registry while its sidecar lock is already held."""
     if registry_path.exists() and expected_revision is not None:
-        current = json.loads(registry_path.read_text(encoding="utf-8"))
+        current = json.loads(read_shared_registry_text(registry_path))
         if current.get("revision") != expected_revision:
             raise LCRLError(
                 f"registry revision conflict: expected {expected_revision}, found {current.get('revision')}"
@@ -713,7 +729,7 @@ def load_account_browser_gate(path: str | Path, allow_missing: bool = False) -> 
             return empty_account_browser_gate()
         raise LCRLError(f"account browser gate not found: {gate_path}")
     try:
-        value = json.loads(gate_path.read_text(encoding="utf-8"))
+        value = json.loads(read_shared_registry_text(gate_path))
     except (OSError, json.JSONDecodeError) as exc:
         raise LCRLError(f"invalid account browser gate {gate_path}: {exc}") from exc
     value.setdefault("handoff_not_before", "none")
@@ -730,7 +746,7 @@ def _save_account_browser_gate_locked(
     expected_revision: int | None = None,
 ) -> int:
     if gate_path.exists() and expected_revision is not None:
-        current = json.loads(gate_path.read_text(encoding="utf-8"))
+        current = json.loads(read_shared_registry_text(gate_path))
         if current.get("revision") != expected_revision:
             raise LCRLError(
                 f"account browser gate revision conflict: expected {expected_revision}, found {current.get('revision')}"

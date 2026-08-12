@@ -1,5 +1,12 @@
 # Changelog
 
+- Unreleased Controller 70 / Skill revision `2026-08-12.24`: the first
+  Controller 69 six-platform matrix exposed one more Windows Python 3.13
+  sharing denial while a newly serialized account-gate reader opened the file
+  immediately after replacement. Only the two shared registries now receive
+  the same bounded retry on reads as on replacement; persistent errors still
+  fail closed and ordinary workflow state remains unchanged.
+
 - Unreleased Controller 69 / Skill revision `2026-08-12.23`: a real projectless
   Mac C2 task proved that merely saying “slot before browser” was insufficient:
   reading the browser Skill first caused runtime initialization before the
