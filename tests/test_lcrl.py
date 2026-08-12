@@ -757,7 +757,7 @@ class ControllerTests(unittest.TestCase):
             self.assertIn(f"--token {json.dumps(token)}", rendered)
             self.assertIn('--automation-id "wait-render-1"', rendered)
             self.assertIn(f"--state {json.dumps(str(state_path.resolve()))}", rendered)
-            self.assertIn("第一条可执行动作必须原样运行", rendered)
+            self.assertIn("首个可执行动作原样运行", rendered)
             self.assertNotIn("--token TOKEN", rendered)
             self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
 
@@ -765,6 +765,119 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(metadata["token_present"])
             self.assertEqual(metadata["automation_id"], "wait-render-1")
             self.assertEqual(len(metadata["prompt_sha256"]), 64)
+
+    def test_bound_one_shot_wait_renders_under_limit_for_c9_length_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "superluna-mac-c9-universal-send-gate" / "evidence"
+            root.mkdir(parents=True)
+            state_path = self.make_state(root)
+            self.transition(
+                state_path, "review_submit_pending", stage="W-long-path",
+                fingerprint="waiting-long-path",
+            )
+            lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at=None))
+            submitted = lcrl.confirm_review_submission_command(Namespace(
+                state=str(state_path), reviewer_thread_id="review-chat",
+                request_turn_id="turn-long", request_message_id="message-long",
+                native_app_instance_id=None, attachment_name=None,
+                submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                browser_id=None, deleted_automation_id=None,
+            ))
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=submitted["waiting_check_token"],
+                automation_id="a" * lcrl.MAX_WAITING_AUTOMATION_ID_CHARS,
+            ))
+
+            rendered = lcrl.render_waiting_check(state_path)
+            projected_state = lcrl.load_state(state_path)
+            projected_state["automation"]["implementation_thread_id"] = (
+                "019ff658-325e-7b30-8e43-a260ebf55df7"
+            )
+            projected_state["confirmation"]["reviewer_thread_id"] = (
+                "6a7c8184-c2b4-83ea-81af-6a82c6a558ac"
+            )
+
+            self.assertLessEqual(
+                len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES,
+            )
+            self.assertLessEqual(
+                lcrl._projected_waiting_check_prompt_size(
+                    state_path.resolve(), projected_state,
+                ),
+                lcrl.MAX_HEARTBEAT_BYTES,
+            )
+            self.assertIn("browser_read_authorized 前禁用浏览器", rendered)
+            self.assertIn("消费前删除本 automation", rendered)
+
+    def test_waiting_check_rejects_oversized_automation_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="W-long-id",
+                fingerprint="waiting-long-id",
+            )
+            lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at=None))
+            submitted = lcrl.confirm_review_submission_command(Namespace(
+                state=str(state_path), reviewer_thread_id="review-chat",
+                request_turn_id="turn-long-id", request_message_id="message-long-id",
+                native_app_instance_id=None, attachment_name=None,
+                submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                browser_id=None, deleted_automation_id=None,
+            ))
+            with self.assertRaisesRegex(lcrl.LCRLError, "invalid or too long"):
+                lcrl.bind_waiting_check_command(Namespace(
+                    state=str(state_path), token=submitted["waiting_check_token"],
+                    automation_id="a" * (lcrl.MAX_WAITING_AUTOMATION_ID_CHARS + 1),
+                ))
+
+    def test_browser_send_fails_before_click_when_waiting_prompt_cannot_fit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / ("x" * 100) / ("y" * 100)
+            root.mkdir(parents=True)
+            state_path = root / "state.json"
+            account_registry = root / "account-browser-gate.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "capacity-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "capacity-chat")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="capacity-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            entry = lcrl.guard_action(Namespace(
+                state=str(state_path), reason="turn_entry", minutes=10,
+                implementation_thread_id="implementation",
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="CAPACITY-S1",
+                fingerprint="capacity-submit-S1",
+            )
+            account_slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="capacity-chat", operation="submission",
+                registry=str(account_registry), at=None,
+            ))
+
+            result = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="capacity-submit-S1",
+                browser_id="iab-session-1", lease_id=entry["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
+            ))
+
+            self.assertEqual(result["action"], "waiting_prompt_capacity_exceeded")
+            self.assertFalse(result["send_allowed"])
+            self.assertGreater(
+                result["projected_waiting_prompt_bytes"], lcrl.MAX_HEARTBEAT_BYTES,
+            )
+            persisted = lcrl.load_state(state_path)
+            self.assertEqual(
+                persisted["runtime"]["browser_submission_send_authorized_revision"], 0,
+            )
 
     def test_bound_one_shot_wait_forbids_a_prior_occurrence_tab_handle(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -788,8 +901,8 @@ class ControllerTests(unittest.TestCase):
 
             rendered = lcrl.render_waiting_check(state_path)
 
-            self.assertIn("从本轮标签列表重取句柄", rendered)
-            self.assertIn("禁用旧 Tab 对象/id", rendered)
+            self.assertIn("重取本轮标签句柄", rendered)
+            self.assertIn("禁用旧 Tab/id", rendered)
             self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
 
     def test_network_disconnect_is_counted_once_then_success_recovers(self):

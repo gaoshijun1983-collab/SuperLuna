@@ -125,6 +125,10 @@ packet once through the bound tab's visible composer only after
 `authorize-browser-submission-send` accepts the current action lease, exact
 browser identity, submission fingerprint, and live reviewer-bound `submission`
 account-slot lease. This gate is mandatory even when the tab never disappeared.
+For automatic continuation it also projects the complete later one-shot wait
+prompt using the maximum supported 64-character automation identity. A
+`waiting_prompt_capacity_exceeded` result forbids the visible send; shorten the
+state location and restart a clean run instead of creating a post-send wait gap.
 Confirm the request using the returned authorization revision, the same browser
 and account-slot lease, new visible message identity, and exact body identity. If the receipt is
 uncertain, reconcile in the same tab; never send a duplicate and never create a

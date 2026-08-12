@@ -239,6 +239,11 @@ prompt contains the current state path, token, and automation id. A hand-written
 summarized, or partially copied occurrence prompt is invalid; failure to update
 the same future task requires deleting it and failing closed before the submit
 occurrence ends.
+The platform automation id must be one non-empty line of at most 64 characters.
+Before an automatic browser send, `authorize-browser-submission-send` projects
+the later complete prompt at that maximum id length. If it returns
+`waiting_prompt_capacity_exceeded`, no send is authorized; the run must stop
+before the click rather than submit a request that cannot receive a safe wait.
 When `waiting-check` returns `waiting_check_busy`, it has not consumed or
 authorized the occurrence. Do not read Chat or rotate its token; update the same
 platform heartbeat to one `RDATE` at or after `retry_not_before`, with the same

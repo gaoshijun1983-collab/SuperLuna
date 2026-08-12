@@ -58,10 +58,14 @@
         "waiting_check_active": {"type": "boolean"},
         "waiting_check_automation_id": {
           "type": "string",
+          "maxLength": 64,
+          "pattern": "^[^\\r\\n\\t]+$",
           "description": "Stable platform heartbeat identity for the live waiting phase; consecutive future occurrences may reuse it."
         },
         "waiting_check_claimed_id": {
           "type": "string",
+          "maxLength": 64,
+          "pattern": "^[^\\r\\n\\t]+$",
           "description": "Platform heartbeat identity claimed by the current occurrence; cleared only by an authorized rearm or phase exit."
         }
       },

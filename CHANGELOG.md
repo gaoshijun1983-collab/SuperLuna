@@ -1,5 +1,16 @@
 # Changelog
 
+- Unreleased Controller 80 / Skill revision `2026-08-12.34`: the clean C9
+  macOS retest proved the universal browser-send gate, then safely stopped
+  because its controller-rendered waiting prompt was 1215 bytes—15 bytes over
+  the immutable 1200-byte limit. The one-shot prompt is now shorter without
+  dropping its state, token, account-slot, browser-read, current-tab, deletion,
+  or resume requirements. Browser send authorization also projects the later
+  prompt with a maximum supported automation identity and refuses the send
+  before the click if it cannot fit. Waiting automation identities are now
+  bounded to 64 single-line characters, so post-send prompt growth cannot
+  invalidate the projection.
+
 - Unreleased Controller 79 / Skill revision `2026-08-12.33`: the contaminated
   C8 run revealed that the durable pre-send authorization applied only to the
   missing-tab reopen path. An implementation task could therefore use a still-

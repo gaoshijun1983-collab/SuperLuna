@@ -19,7 +19,12 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 79 / Skill revision `2026-08-12.33`, requires every browser submission—including
+Controller 80 / Skill revision `2026-08-12.34`, keeps the exact one-shot wait
+prompt within its 1200-byte safety budget for the C9 macOS path and projects
+that prompt before any browser send; an unsupported longer path now fails
+before the click instead of after a request has already been submitted.
+Waiting automation identities are bounded to 64 single-line characters so the
+post-send prompt cannot outgrow that projection. Controller 79 requires every browser submission—including
 a still-visible bound tab—to consume a fresh controller authorization proving
 the exact state, action lease, browser, fingerprint, Extreme reviewer, and live
 reviewer-bound account slot before the visible send. Controller 78 serializes each fixed reviewer

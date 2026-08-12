@@ -187,6 +187,26 @@ class PackageTests(unittest.TestCase):
         self.assertIn("--account-slot-lease-id", source)
         self.assertIn('"account_browser_slot_required"', source)
 
+    def test_waiting_automation_identity_budget_matches_runtime_and_registry(self):
+        schema = json.loads(
+            (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        registry = json.loads(
+            (SKILL_ROOT / "references" / "controller.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+        automation = schema["properties"]["automation"]["properties"]
+
+        self.assertEqual(registry["max_waiting_automation_id_chars"], 64)
+        self.assertIn("MAX_WAITING_AUTOMATION_ID_CHARS = 64", source)
+        for field in ("waiting_check_automation_id", "waiting_check_claimed_id"):
+            self.assertEqual(automation[field]["maxLength"], 64)
+            self.assertEqual(automation[field]["pattern"], "^[^\\r\\n\\t]+$")
+
     def test_published_state_schema_accepts_every_runtime_reasoning_source(self):
         schema = json.loads(
             (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(encoding="utf-8")

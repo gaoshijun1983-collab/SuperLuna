@@ -414,7 +414,10 @@ python -B <skill-root>/scripts/lcrl.py render-waiting-check --state <state-file>
 
 把该命令输出的**完整原文**更新为同一个平台等待项的 prompt，保留原单一 `RDATE`、任务 id
 和目标实施任务不变。禁止手写、概括或删减这个 prompt；它包含本轮精确 state、token 和
-automation id。平台更新成功后才允许结束提交 occurrence。若无法完成绑定、渲染或更新，必须
+automation id。等待任务 id 必须是非空、单行且不超过 64 个字符。浏览器发送前的
+`authorize-browser-submission-send` 已按这一最大长度预估完整 prompt；若返回
+`waiting_prompt_capacity_exceeded`，不得发送，必须在本地保持失败关闭并使用更短的受支持 state
+路径重新开始干净测试，不能先发送再补救。平台更新成功后才允许结束提交 occurrence。若无法完成绑定、渲染或更新，必须
 删除刚创建的平台等待项并保持失败关闭，不能声称已经安排等待。
 如果 `waiting-check` 返回 `waiting_check_busy`，不得读取 Chat，也不得轮换 token；必须保留
 返回的 token 和等待任务 ID，把同一个平台 heartbeat 更新为不早于 `retry_not_before` 的一次

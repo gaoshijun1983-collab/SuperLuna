@@ -30,6 +30,14 @@ Updating an automation cannot rewrite turns that were already queued. Pause ever
 
 Use Skill revision `2026-08-02.12` or newer. Earlier V8 P0 templates could exceed the safety limit when both the state and controller lived under long Windows paths. Do not raise the limit to hide the problem; regenerate the heartbeat from the shortened immutable template.
 
+If `render-waiting-check` reports the same limit, first confirm Controller 80 /
+Skill revision `2026-08-12.34` or newer. Its browser-send authorization projects
+the later one-shot prompt before the click and its waiting automation id is
+limited to 64 single-line characters. `waiting_prompt_capacity_exceeded` means
+the state path itself is outside the supported budget: do not send, raise the
+limit, hand-edit the prompt, or reuse a partially submitted run. Start a clean
+run at a shorter state path.
+
 ## The reviewer cannot read local files
 
 Local paths are not evidence. Use a bounded inline packet or a user-confirmed native attachment. Enable `mcp_readonly` only after identity, allowed root, and exact read-only capabilities have been verified.

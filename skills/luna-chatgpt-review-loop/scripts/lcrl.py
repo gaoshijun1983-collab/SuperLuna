@@ -32,9 +32,10 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 79
-SKILL_REVISION = "2026-08-12.33"
+CONTROLLER_VERSION = 80
+SKILL_REVISION = "2026-08-12.34"
 MAX_HEARTBEAT_BYTES = 1200
+MAX_WAITING_AUTOMATION_ID_CHARS = 64
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
 SUPPORTED_NAMING_TEMPLATE_VERSIONS = {1, 2, 3}
@@ -2170,6 +2171,46 @@ def render_heartbeat(state_path: str | Path, validate_only: bool = False) -> str
     return result
 
 
+def _waiting_check_prompt(
+    path: Path, state: dict[str, Any], token: str, automation_id: str,
+) -> str:
+    """Build the immutable one-shot prompt without consulting mutable UI state."""
+    cli = str(Path(__file__).resolve())
+    command = (
+        f"python -B {json.dumps(cli)} waiting-check "
+        f"--state {json.dumps(str(path))} --token {json.dumps(str(token))} "
+        f"--automation-id {json.dumps(str(automation_id))}"
+    )
+    account_command = (
+        f"python -B {json.dumps(cli)} acquire-account-browser-slot "
+        f"--implementation-thread-id "
+        f"{json.dumps(str(state['automation']['implementation_thread_id']))} "
+        f"--reviewer-thread-id {json.dumps(str(state['confirmation']['reviewer_thread_id']))} "
+        f"--operation waiting_read"
+    )
+    return (
+        "SuperLuna 单次等待检查。首个可执行动作原样运行：\n"
+        f"{command}\n"
+        "仅 action=review_poll/receipt_reconcile 时运行：\n"
+        f"{account_command}\n"
+        "仅 slot_acquired=true 才运行 authorize-waiting-chat-read，传同一 token、automation id、"
+        "waiting-check lease_id 和账户 lease_id。browser_read_authorized 前禁用浏览器；授权后重取"
+        "本轮标签句柄并禁用旧 Tab/id，只读绑定 Chat、配对真实身份。消费前删除本 automation，"
+        "再 resume-from-reply 并在原任务继续。其他 action 静默退出；禁循环规则和替代 Chat。"
+    )
+
+
+def _projected_waiting_check_prompt_size(path: Path, state: dict[str, Any]) -> int:
+    """Upper-bound the later waiting prompt before a browser send can occur."""
+    projected = _waiting_check_prompt(
+        path,
+        state,
+        "wait-" + ("0" * 16),
+        "a" * MAX_WAITING_AUTOMATION_ID_CHARS,
+    )
+    return len(projected.encode("utf-8"))
+
+
 def render_waiting_check(state_path: str | Path, validate_only: bool = False) -> str:
     """Render the exact prompt for the currently bound one-shot wait occurrence."""
     path = Path(state_path).expanduser().resolve()
@@ -2185,32 +2226,14 @@ def render_waiting_check(state_path: str | Path, validate_only: bool = False) ->
         or automation_id == "none"
     ):
         raise LCRLError("an exact waiting-check prompt requires a bound active wait")
+    if (
+        not isinstance(automation_id, str)
+        or len(automation_id) > MAX_WAITING_AUTOMATION_ID_CHARS
+        or any(character in automation_id for character in "\r\n\t")
+    ):
+        raise LCRLError("waiting-check automation id is invalid or too long")
 
-    cli = str(Path(__file__).resolve())
-    command = (
-        f"python -B {json.dumps(cli)} waiting-check "
-        f"--state {json.dumps(str(path))} --token {json.dumps(str(token))} "
-        f"--automation-id {json.dumps(str(automation_id))}"
-    )
-    account_command = (
-        f"python -B {json.dumps(cli)} acquire-account-browser-slot "
-        f"--implementation-thread-id "
-        f"{json.dumps(str(state['automation']['implementation_thread_id']))} "
-        f"--reviewer-thread-id {json.dumps(str(state['confirmation']['reviewer_thread_id']))} "
-        f"--operation waiting_read"
-    )
-    prompt = (
-        "SuperLuna 单次等待检查。第一条可执行动作必须原样运行：\n"
-        f"{command}\n"
-        "仅当 action 为 review_poll/receipt_reconcile，第二步运行：\n"
-        f"{account_command}\n"
-        "仅当 slot_acquired=true，才运行 authorize-waiting-chat-read，并传同一 token、automation id、"
-        "waiting-check lease_id 与 --account-slot-lease-id <账户返回 lease_id>。获得 "
-        "browser_read_authorized 前禁用浏览器。授权后从本轮标签列表重取句柄，"
-        "禁用旧 Tab 对象/id；只读已绑定 Chat，"
-        "完成真实请求/回复身份配对；消费回复前先删除本 automation，随后 resume-from-reply，"
-        "并在同一实施任务继续。其他 action 静默结束。不得创建循环规则或替代 Chat。"
-    )
+    prompt = _waiting_check_prompt(path, state, str(token), automation_id)
     size = len(prompt.encode("utf-8"))
     if size > MAX_HEARTBEAT_BYTES:
         raise LCRLError(
@@ -3810,6 +3833,22 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
             "required_operation": "submission",
             "lease_id": "none",
         }
+    projected_waiting_prompt_bytes = 0
+    if state["automation"].get("heartbeat_mode") == "waiting_only":
+        projected_waiting_prompt_bytes = _projected_waiting_check_prompt_size(
+            path, state,
+        )
+        if projected_waiting_prompt_bytes > MAX_HEARTBEAT_BYTES:
+            return {
+                "ok": True,
+                "action": "waiting_prompt_capacity_exceeded",
+                "send_allowed": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
+                "projected_waiting_prompt_bytes": projected_waiting_prompt_bytes,
+                "max_waiting_prompt_bytes": MAX_HEARTBEAT_BYTES,
+                "lease_id": "none",
+            }
     expiry = parse_time(runtime.get("action_lease_expires_at"))
     enough_time_to_send = bool(
         expiry and datetime.now(timezone.utc) + timedelta(seconds=60) <= expiry
@@ -3867,6 +3906,7 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
         "account_slot_lease_id": account_slot_lease_id,
         "authorized_browser_id": browser_id,
         "submission_fingerprint": fingerprint,
+        "projected_waiting_prompt_bytes": projected_waiting_prompt_bytes,
         "lease_expires_at": runtime["action_lease_expires_at"],
         "revision": state["revision"],
     }
@@ -4318,6 +4358,14 @@ def bind_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
     automation = state["automation"]
+    automation_id = str(args.automation_id or "").strip()
+    if (
+        not automation_id
+        or automation_id == "none"
+        or len(automation_id) > MAX_WAITING_AUTOMATION_ID_CHARS
+        or any(character in automation_id for character in "\r\n\t")
+    ):
+        raise LCRLError("waiting-check automation id is invalid or too long")
     if automation.get("heartbeat_mode") != "waiting_only":
         raise LCRLError("foreground-only state cannot bind an automatic waiting check")
     if (state["review"]["status"] not in MONITOR_STATUSES
@@ -4326,21 +4374,21 @@ def bind_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("cannot bind a waiting check after its wait has ended")
     current_id = automation.get("waiting_check_automation_id", "none")
     claimed_id = automation.get("waiting_check_claimed_id", "none")
-    if current_id == args.automation_id:
+    if current_id == automation_id:
         return add_user_status_exit({
             "ok": True, "action": "waiting_check_bound", "status": state["review"]["status"],
-            "bound": True, "duplicate": True, "automation_id": args.automation_id,
+            "bound": True, "duplicate": True, "automation_id": automation_id,
         })
     if current_id != "none":
         if claimed_id != current_id or active_action_lease(state):
             raise LCRLError("cannot replace an unclaimed or still-running waiting check")
     revision = state["revision"]
-    automation["waiting_check_automation_id"] = args.automation_id
+    automation["waiting_check_automation_id"] = automation_id
     automation["waiting_check_claimed_id"] = "none"
     save_state(path, state, expected_revision=revision)
     return add_user_status_exit({
         "ok": True, "action": "waiting_check_bound", "status": state["review"]["status"],
-        "bound": True, "duplicate": False, "automation_id": args.automation_id,
+        "bound": True, "duplicate": False, "automation_id": automation_id,
     })
 
 
