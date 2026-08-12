@@ -1,5 +1,16 @@
 # Changelog
 
+- Unreleased Controller 79 / Skill revision `2026-08-12.33`: the contaminated
+  C8 run revealed that the durable pre-send authorization applied only to the
+  missing-tab reopen path. An implementation task could therefore use a still-
+  visible tab to send while state was not authorized, then fail only when
+  confirming the receipt. Every in-app-browser submission now requires one
+  fresh controller authorization immediately before send. It proves the active
+  `review_submit_pending` state, current action lease, exact browser and payload
+  fingerprint, confirmed Extreme reviewer identity, and a live `submission`
+  account slot bound to that reviewer. Confirmation must consume the persisted
+  revision plus the same browser and account-slot identities.
+
 - Unreleased Controller 78 / Skill revision `2026-08-12.32`: a Codex platform
   create request unexpectedly produced two live implementation tasks for the
   same fixed reviewer Chat. Both passed the global two-slot gate and the

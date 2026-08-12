@@ -121,8 +121,12 @@ mode with `confirm-review-mode --source in_app_browser`; SuperLuna never changes
 the model or reasoning level automatically.
 
 Capture the visible message baseline immediately before submitting. Send the
-packet once through the bound tab's visible composer. Confirm the request using
-new visible message identity plus exact body identity. If the receipt is
+packet once through the bound tab's visible composer only after
+`authorize-browser-submission-send` accepts the current action lease, exact
+browser identity, submission fingerprint, and live reviewer-bound `submission`
+account-slot lease. This gate is mandatory even when the tab never disappeared.
+Confirm the request using the returned authorization revision, the same browser
+and account-slot lease, new visible message identity, and exact body identity. If the receipt is
 uncertain, reconcile in the same tab; never send a duplicate and never create a
 replacement Chat.
 
@@ -152,10 +156,11 @@ authentication state, Extreme label, and composer. This reconciliation **must
 not open, navigate, or reload again**, and it grants no second reopen
 authorization. After the same tab passes every page and identity check, call
 `authorize-browser-submission-send` with the current fingerprint, browser id,
-and reopen lease. Only `browser_submission_send_authorized` permits the one
+reopen lease, and reviewer-bound submission account-slot lease. Only
+`browser_submission_send_authorized` permits the one
 visible send. The gate atomically persists its matching reopen lease and
-authorization revision. Return that `revision` through
-`confirm-review-submission --browser-send-authorization-revision`; confirmation
+authorization revision. Return that `revision` and the same account-slot lease through
+`confirm-review-submission --browser-send-authorization-revision --account-slot-lease-id`; confirmation
 must consume the persisted fact at the unchanged revision. The reopen
 authorization or its already-known revision never authorizes sending. The caller **must not close the tab merely because the navigation
 call timed out**. If that same tab then passes every identity check, use the
@@ -163,8 +168,9 @@ original lease for the single send and confirmation. Otherwise release the
 lease and stop in `review_submit_pending`; do not send, reopen, or create a
 replacement Chat.
 
-Complete page/login/Extreme/composer checks before requesting this lease whenever
-the exact tab is already visible. After authorization, perform only the final
+Complete page/login/Extreme/composer checks whenever the exact tab is already
+visible, then request the same one-shot send authorization using the current
+turn-entry lease. After authorization, perform only the final
 identity check, one send, and immediate submission confirmation. Never resend if
 the visible request exists but confirmation fails or the lease expires.
 

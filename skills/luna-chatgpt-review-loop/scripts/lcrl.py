@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 78
-SKILL_REVISION = "2026-08-12.32"
+CONTROLLER_VERSION = 79
+SKILL_REVISION = "2026-08-12.33"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -1186,6 +1186,9 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     runtime.setdefault("action_lease_reason", "none")
     runtime.setdefault("browser_submission_reopen_browser_id", "none")
     runtime.setdefault("browser_submission_send_authorized_lease_id", "none")
+    runtime.setdefault("browser_submission_send_authorized_account_slot_lease_id", "none")
+    runtime.setdefault("browser_submission_send_authorized_browser_id", "none")
+    runtime.setdefault("browser_submission_send_authorized_fingerprint", "none")
     runtime.setdefault("browser_submission_send_authorized_revision", 0)
     runtime.setdefault("resume_checkpoint", checkpoint_for_status(
         state.get("review", {}).get("status", "local_work")
@@ -1542,6 +1545,9 @@ def new_state(
             "action_lease_reason": "none",
             "browser_submission_reopen_browser_id": "none",
             "browser_submission_send_authorized_lease_id": "none",
+            "browser_submission_send_authorized_account_slot_lease_id": "none",
+            "browser_submission_send_authorized_browser_id": "none",
+            "browser_submission_send_authorized_fingerprint": "none",
             "browser_submission_send_authorized_revision": 0,
             "resume_checkpoint": "local_work",
             "resume_checkpoint_at": now,
@@ -1990,16 +1996,36 @@ def validate_state(state: dict[str, Any]) -> None:
     send_authorized_revision = runtime.get(
         "browser_submission_send_authorized_revision", 0
     )
+    send_authorized_account_slot_lease_id = runtime.get(
+        "browser_submission_send_authorized_account_slot_lease_id", "none"
+    )
+    send_authorized_browser_id = runtime.get(
+        "browser_submission_send_authorized_browser_id", "none"
+    )
+    send_authorized_fingerprint = runtime.get(
+        "browser_submission_send_authorized_fingerprint", "none"
+    )
     if send_authorized_lease_id not in (None, "", "none"):
         if (
-            runtime.get("action_lease_reason") != "browser_submission_reopen"
+            runtime.get("action_lease_reason")
+            not in {"browser_submission_reopen", "turn_entry"}
             or send_authorized_lease_id != lease_id
         ):
-            errors.append("browser submission send authorization requires its reopen lease")
+            errors.append("browser submission send authorization requires its action lease")
+        if send_authorized_account_slot_lease_id in (None, "", "none"):
+            errors.append("browser submission send authorization requires its account slot")
+        if send_authorized_browser_id in (None, "", "none"):
+            errors.append("browser submission send authorization requires a browser identity")
+        if send_authorized_fingerprint in (None, "", "none"):
+            errors.append("browser submission send authorization requires a fingerprint")
         if not isinstance(send_authorized_revision, int) or send_authorized_revision < 1:
             errors.append("browser submission send authorization requires a state revision")
-    elif send_authorized_revision != 0:
-        errors.append("browser submission send authorization revision requires its lease")
+    elif any(value not in (None, "", "none") for value in (
+        send_authorized_account_slot_lease_id,
+        send_authorized_browser_id,
+        send_authorized_fingerprint,
+    )) or send_authorized_revision != 0:
+        errors.append("browser submission send authorization evidence requires its lease")
     waiting_check_active = automation.get("waiting_check_active")
     waiting_check_token = automation.get("waiting_check_token", "none")
     waiting_check_automation_id = automation.get("waiting_check_automation_id", "none")
@@ -2346,6 +2372,9 @@ def clear_action_lease(state: dict[str, Any]) -> None:
         "action_lease_reason": "none",
         "browser_submission_reopen_browser_id": "none",
         "browser_submission_send_authorized_lease_id": "none",
+        "browser_submission_send_authorized_account_slot_lease_id": "none",
+        "browser_submission_send_authorized_browser_id": "none",
+        "browser_submission_send_authorized_fingerprint": "none",
         "browser_submission_send_authorized_revision": 0,
     })
 
@@ -3729,29 +3758,86 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
 
 
 def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[str, Any]:
-    """Recheck the reopen lease immediately before the one visible send."""
+    """Authorize exactly one visible send after all controller gates agree.
+
+    The gate is mandatory whether the bound Chat tab stayed visible or had to
+    be reopened.  This prevents the common but unsafe shortcut where an agent
+    sends first and only discovers at confirmation time that its state or
+    shared-account lease was invalid.
+    """
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
     revision = state["revision"]
     review = state["review"]
     runtime = state["runtime"]
+    binding = state["browser_binding"]
+    confirmation = state["confirmation"]
     lease_id = str(getattr(args, "lease_id", "") or "").strip()
     browser_id = str(getattr(args, "browser_id", "") or "").strip()
     fingerprint = str(getattr(args, "fingerprint", "") or "").strip()
+    account_slot_lease_id = str(
+        getattr(args, "account_slot_lease_id", "") or ""
+    ).strip()
+    account_gate_override = getattr(args, "account_browser_registry", None)
+    account_gate_path = (
+        Path(account_gate_override).expanduser().resolve()
+        if account_gate_override
+        else default_account_browser_gate_path()
+    )
+    try:
+        account_gate = load_account_browser_gate(account_gate_path)
+        live_account_slots = _live_account_browser_slots(
+            account_gate, _account_gate_now(getattr(args, "at", None)),
+        )
+    except (LCRLError, OSError, ValueError):
+        live_account_slots = []
+    implementation_thread_id = state["automation"]["implementation_thread_id"]
+    reviewer_thread_id = confirmation.get("reviewer_thread_id", "none")
+    account_slot_authorized = any(
+        slot.get("lease_id") == account_slot_lease_id
+        and slot.get("implementation_thread_id") == implementation_thread_id
+        and slot.get("reviewer_thread_id") == reviewer_thread_id
+        and slot.get("operation") == "submission"
+        for slot in live_account_slots
+    )
+    if not account_slot_authorized:
+        return {
+            "ok": True,
+            "action": "account_browser_slot_required",
+            "send_allowed": False,
+            "browser_skill_read_allowed": False,
+            "browser_runtime_initialization_allowed": False,
+            "required_operation": "submission",
+            "lease_id": "none",
+        }
     expiry = parse_time(runtime.get("action_lease_expires_at"))
     enough_time_to_send = bool(
         expiry and datetime.now(timezone.utc) + timedelta(seconds=60) <= expiry
+    )
+    action_lease_reason = runtime.get("action_lease_reason")
+    reopened_tab = action_lease_reason == "browser_submission_reopen"
+    current_tab = action_lease_reason == "turn_entry"
+    browser_identity_matches = (
+        runtime.get("browser_submission_reopen_browser_id") == browser_id
+        if reopened_tab
+        else binding.get("browser_id") == browser_id
     )
     authorized = bool(
         review.get("status") == "review_submit_pending"
         and review.get("transport") == "in_app_browser"
         and review.get("submission_fingerprint") == fingerprint
-        and runtime.get("action_lease_reason") == "browser_submission_reopen"
+        and action_lease_reason in {"browser_submission_reopen", "turn_entry"}
         and runtime.get("action_lease_id") == lease_id
-        and runtime.get("browser_submission_reopen_browser_id") == browser_id
+        and (reopened_tab or current_tab)
+        and browser_identity_matches
         and active_action_lease(state)
         and enough_time_to_send
         and _bound_browser_chat_can_reopen(state)
+        and confirmation.get("reviewer_reasoning_confirmed") is True
+        and confirmation.get("reviewer_reasoning_mode") == "extreme"
+        and confirmation.get("reviewer_reasoning_control_source") == "in_app_browser"
+        and confirmation.get("reviewer_reasoning_observed_thread_id")
+        == reviewer_thread_id
         and all(review.get(field) in (None, "", "none") for field in (
             "request_turn_id", "request_message_id", "request_persisted_at",
             "response_turn_id", "response_message_id",
@@ -3765,6 +3851,11 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
             "lease_id": "none",
         }
     runtime["browser_submission_send_authorized_lease_id"] = lease_id
+    runtime[
+        "browser_submission_send_authorized_account_slot_lease_id"
+    ] = account_slot_lease_id
+    runtime["browser_submission_send_authorized_browser_id"] = browser_id
+    runtime["browser_submission_send_authorized_fingerprint"] = fingerprint
     runtime["browser_submission_send_authorized_revision"] = revision + 1
     save_state(path, state, expected_revision=revision)
     return {
@@ -3773,6 +3864,7 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
         "send_allowed": True,
         "send_once": True,
         "lease_id": lease_id,
+        "account_slot_lease_id": account_slot_lease_id,
         "authorized_browser_id": browser_id,
         "submission_fingerprint": fingerprint,
         "lease_expires_at": runtime["action_lease_expires_at"],
@@ -5339,6 +5431,9 @@ def reset_for_retest_command(args: argparse.Namespace) -> dict[str, Any]:
     runtime.update({
         "browser_submission_reopen_browser_id": "none",
         "browser_submission_send_authorized_lease_id": "none",
+        "browser_submission_send_authorized_account_slot_lease_id": "none",
+        "browser_submission_send_authorized_browser_id": "none",
+        "browser_submission_send_authorized_fingerprint": "none",
         "browser_submission_send_authorized_revision": 0,
     })
     state["recovery"]["consecutive_no_progress_checks"] = 0
@@ -5473,6 +5568,9 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
         getattr(args, "browser_reopen_lease_id", None) or "none"
     ).strip()
     reopen_browser_id = str(getattr(args, "browser_id", None) or "none").strip()
+    account_slot_lease_id = str(
+        getattr(args, "account_slot_lease_id", None) or "none"
+    ).strip()
     runtime = state["runtime"]
     active_reopen_lease = (
         runtime.get("action_lease_reason") == "browser_submission_reopen"
@@ -5490,21 +5588,40 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
         and _bound_browser_chat_can_reopen(state)
     ):
         raise LCRLError("browser submission reopen lease proof is invalid or expired")
-    if reopen_lease_id != "none":
+    browser_transport = review.get("transport") == "in_app_browser"
+    if browser_transport:
         send_authorization_revision = getattr(
             args, "browser_send_authorization_revision", None
         )
         if not (
             send_authorization_revision == state["revision"]
+            and active_action_lease(state)
+            and runtime.get("action_lease_reason")
+            in {"browser_submission_reopen", "turn_entry"}
             and runtime.get("browser_submission_send_authorized_lease_id")
-            == reopen_lease_id
+            == runtime.get("action_lease_id")
+            and runtime.get(
+                "browser_submission_send_authorized_account_slot_lease_id"
+            ) == account_slot_lease_id
+            and runtime.get("browser_submission_send_authorized_browser_id")
+            == reopen_browser_id
+            and runtime.get("browser_submission_send_authorized_fingerprint")
+            == review.get("submission_fingerprint")
             and runtime.get("browser_submission_send_authorized_revision")
             == send_authorization_revision
         ):
             raise LCRLError(
                 "fresh browser submission send authorization is required"
             )
-    submission_lease_id = reopen_lease_id
+        if runtime.get("action_lease_reason") == "browser_submission_reopen":
+            if reopen_lease_id != runtime.get("action_lease_id"):
+                raise LCRLError("browser submission reopen lease proof is required")
+        elif reopen_lease_id != "none":
+            raise LCRLError("visible browser submission cannot claim a reopen lease")
+    submission_lease_id = (
+        str(runtime.get("action_lease_id") or "none")
+        if browser_transport else reopen_lease_id
+    )
     if (
         submission_lease_id == "none"
         and runtime.get("action_lease_reason") == "turn_entry"
@@ -6881,6 +6998,9 @@ def build_parser() -> argparse.ArgumentParser:
     authorize_submission_send.add_argument("--fingerprint", required=True)
     authorize_submission_send.add_argument("--browser-id", required=True)
     authorize_submission_send.add_argument("--lease-id", required=True)
+    authorize_submission_send.add_argument("--account-slot-lease-id", required=True)
+    authorize_submission_send.add_argument("--account-browser-registry")
+    authorize_submission_send.add_argument("--at")
 
     authorize_startup_reopen = sub.add_parser("authorize-browser-startup-reopen")
     authorize_startup_reopen.add_argument("--state", required=True)
@@ -7192,6 +7312,7 @@ def build_parser() -> argparse.ArgumentParser:
     submission.add_argument("--browser-reopen-lease-id")
     submission.add_argument("--browser-id")
     submission.add_argument("--browser-send-authorization-revision", type=int)
+    submission.add_argument("--account-slot-lease-id")
 
     invalidate_mode = sub.add_parser("invalidate-review-mode")
     invalidate_mode.add_argument("--state", required=True)

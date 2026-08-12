@@ -19,7 +19,10 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 78 / Skill revision `2026-08-12.32`, serializes each fixed reviewer
+Controller 79 / Skill revision `2026-08-12.33`, requires every browser submission—including
+a still-visible bound tab—to consume a fresh controller authorization proving
+the exact state, action lease, browser, fingerprint, Extreme reviewer, and live
+reviewer-bound account slot before the visible send. Controller 78 serializes each fixed reviewer
 Chat across implementation tasks so an accidentally duplicated platform task
 cannot initialize the browser or send while the intended task owns that Chat.
 Controller 77 requires every wait occurrence

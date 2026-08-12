@@ -340,7 +340,12 @@ PASS。视觉审查必须让 Chat 真正看到图片，只有本地路径不算�
   保持该状态，不得初始化浏览器或发送；
 - 再核验同一标签、同一 conversation id、页面可读和用户确认仍有效；
 - 捕获当前可见用户消息身份基线和将发送的完整正文身份；
-- 通过该标签的可见 composer 只发送一次。
+- **无论标签是否需要重开**，都必须在点击发送前立即运行
+  `authorize-browser-submission-send --state <state-file> --fingerprint <本轮正文身份> --browser-id <当前browser.browserId> --lease-id <当前turn-entry或受权重开lease> --account-slot-lease-id <submission账户名额lease>`；
+  只有返回 `browser_submission_send_authorized` 才能通过该标签的可见 composer 发送一次；
+- 发送后立即运行 `confirm-review-submission`，交回同一 `--browser-id`、
+  `--account-slot-lease-id` 和授权返回的 `--browser-send-authorization-revision`；重开路径还要交回
+  `--browser-reopen-lease-id`。缺少任一证明时保持 `review_submit_pending`，不得发送或补发。
 
 任何已经绑定的固定 Chat 若在后续新一轮提交前已从 `user.openTabs()` 和 `tabs.list()` 同时
 消失，只能在原 state 仍保存同一精确 conversation URL、当前状态为
@@ -351,8 +356,9 @@ PASS。视觉审查必须让 Chat 真正看到图片，只有本地路径不算�
 必须把返回的 `lease_id` 作为 `--browser-reopen-lease-id`、并把同一当前 browser id 作为
 `--browser-id` 交回控制器。若应用重启导致 browser id 改变，只有该 lease 可暂存这一个换绑候选，
 并只在提交确认时生效。失败时释放 lease 并停止。
-若固定页面已经可见，先完成 URL、登录、“极高”和 composer 的视觉检查，最后才申请十分钟 lease；
-授权后只做最终身份核验、单次发送和立即确认。若消息已可见但确认失败或 lease 过期，绝不重发。
+若固定页面已经可见，先完成 URL、登录、“极高”和 composer 的视觉检查，再用当前
+`turn_entry` lease 申请上述一次性发送授权；授权后只做最终身份核验、单次发送和立即确认。
+若消息已可见但确认失败或 lease 过期，绝不重发。
 旧 fingerprint、错误 URL、没有 lease 证明或没有固定绑定的提交均不允许这条路径。普通
 provider 标签只有在两个当前列表都不存在其精确 URL 时，才能使用同一受权重开路径；它不会
 因此获得换 Chat、新建 Chat、重复发送或跳过页面核验的权限。
@@ -362,10 +368,10 @@ provider 标签只有在两个当前列表都不存在其精确 URL 时，才能
 内做一次有界的同标签稳定等待，然后重新读取该标签的当前 URL、标题、页面主体、登录状态、
 “极高”和 composer。此协调过程 **must not open, navigate, or reload again**，也不得申请第二份
 重开授权。若原页面随后满足全部核验条件，必须在发送前立即调用
-`authorize-browser-submission-send --state <state-file> --fingerprint <本轮正文身份> --browser-id <当前browser.browserId> --lease-id <重开lease>`；
+`authorize-browser-submission-send --state <state-file> --fingerprint <本轮正文身份> --browser-id <当前browser.browserId> --lease-id <重开lease> --account-slot-lease-id <submission账户名额lease>`；
 只有返回 `browser_submission_send_authorized` 才允许沿用原 lease 发送一次。该命令会把匹配
 lease 与一次性授权 revision 原子写入 state；把返回的 `revision` 作为
-`confirm-review-submission --browser-send-authorization-revision` 交回控制器。仅传入重开授权
+`confirm-review-submission --browser-send-authorization-revision --account-slot-lease-id` 交回控制器。仅传入重开授权
 已经公开的 revision 不构成发送授权，提交确认必须消费 state 中持久化的精确授权事实。
 实现任务
 **must not close the tab merely because the navigation call timed out**。只有同一标签在有界协调后

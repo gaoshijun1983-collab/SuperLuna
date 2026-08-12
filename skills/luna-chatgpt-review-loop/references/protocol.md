@@ -201,6 +201,13 @@ revision; `confirm-review-submission` must consume both at the unchanged state
 revision. The reopen authorization or its revision alone is not proof. A normal
 user-selected tab or promoted provider identity never receives this authorization.
 
+The fresh pre-send gate is not limited to reopen recovery. Every browser
+submission, including one through a still-visible bound tab, must prove the
+current `review_submit_pending` state, current action lease, exact browser and
+fingerprint, confirmed Extreme reviewer identity, and a live `submission`
+account slot bound to that reviewer. Confirmation must consume the stored
+authorization revision plus the same browser and account-slot identities.
+
 If any already-bound fixed Chat later disappears from both current browser
 listings, the same identity-gated occurrence may receive
 `canonical_url_reopen_allowed=true`. It may open only the stored canonical URL

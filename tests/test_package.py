@@ -294,6 +294,14 @@ class PackageTests(unittest.TestCase):
 
         self.assertEqual(set(schema["required"]), runtime_sections)
         self.assertTrue(runtime_sections.issubset(schema["properties"]))
+        runtime_required = set(schema["properties"]["runtime"]["required"])
+        self.assertTrue({
+            "browser_submission_send_authorized_lease_id",
+            "browser_submission_send_authorized_account_slot_lease_id",
+            "browser_submission_send_authorized_browser_id",
+            "browser_submission_send_authorized_fingerprint",
+            "browser_submission_send_authorized_revision",
+        }.issubset(runtime_required))
 
     def test_published_policy_schema_matches_runtime_role_and_transport_locks(self):
         schema = json.loads(
@@ -886,6 +894,7 @@ class PackageTests(unittest.TestCase):
             self.assertIn("authorize-browser-submission-send", normalized)
             self.assertIn("browser_submission_send_authorized", normalized)
             self.assertIn("--browser-send-authorization-revision", normalized)
+            self.assertIn("account-slot", normalized)
         normalized_transport = " ".join(transport.split())
         self.assertIn("within the existing ten-minute lease", normalized_transport)
         self.assertIn("no second reopen authorization", normalized_transport)

@@ -60,9 +60,14 @@
    **must not open, navigate, or reload again**，也不产生第二份提交授权。实现任务
    **must not close the tab merely because the navigation call timed out**。同一标签随后通过全部核验
    时，必须调用 `authorize-browser-submission-send` 并交回当前 fingerprint、browser id 与原
-   reopen lease；只有 `browser_submission_send_authorized` 才允许单次发送，确认时还必须传回
-   `--browser-send-authorization-revision`。仍不可核验时释放 lease 并保持 `review_submit_pending`，不得发送、
+   reopen lease，以及绑定同一 reviewer 的 `submission` 账户名额 lease；只有
+   `browser_submission_send_authorized` 才允许单次发送，确认时还必须传回
+   `--browser-send-authorization-revision`、同一 browser id 与
+   `--account-slot-lease-id`。仍不可核验时释放 lease 并保持 `review_submit_pending`，不得发送、
    第二次重开或创建替代 Chat。
+
+   即使固定标签始终可见，也必须在发送前执行相同的一次性发送授权；此时使用当前
+   `turn_entry` lease，不得把“无需重开”解释成“无需控制器授权”。
 
 普通用户选择并已绑定的固定 Chat 若在后续回合也同时消失于两个当前标签列表，遵循通用
 `canonical_url_reopen_allowed` 合同：只能在受权 occurrence 内打开原 URL 一次并重新核验，

@@ -410,6 +410,9 @@
         "action_lease_reason",
         "browser_submission_reopen_browser_id",
         "browser_submission_send_authorized_lease_id",
+        "browser_submission_send_authorized_account_slot_lease_id",
+        "browser_submission_send_authorized_browser_id",
+        "browser_submission_send_authorized_fingerprint",
         "browser_submission_send_authorized_revision"
       ],
       "properties": {
@@ -421,7 +424,19 @@
         },
         "browser_submission_send_authorized_lease_id": {
           "type": "string",
-          "description": "Reopen lease that passed the fresh pre-send gate; cleared with that lease."
+          "description": "Current turn-entry or submission-reopen action lease that passed the fresh pre-send gate; cleared with that lease."
+        },
+        "browser_submission_send_authorized_account_slot_lease_id": {
+          "type": "string",
+          "description": "Live reviewer-bound submission account-slot lease proven by the fresh pre-send gate."
+        },
+        "browser_submission_send_authorized_browser_id": {
+          "type": "string",
+          "description": "Exact in-app browser identity proven by the fresh pre-send gate."
+        },
+        "browser_submission_send_authorized_fingerprint": {
+          "type": "string",
+          "description": "Exact current submission fingerprint proven by the fresh pre-send gate."
         },
         "browser_submission_send_authorized_revision": {
           "type": "integer",

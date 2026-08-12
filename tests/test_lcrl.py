@@ -273,6 +273,7 @@ class ControllerTests(unittest.TestCase):
         registry = state_path.parent / "account-browser-gate.json"
         slot = lcrl.acquire_account_browser_slot_command(Namespace(
             implementation_thread_id=state["automation"]["implementation_thread_id"],
+            reviewer_thread_id=state["confirmation"]["reviewer_thread_id"],
             operation="waiting_read",
             registry=str(registry),
             at=None,
@@ -711,6 +712,14 @@ class ControllerTests(unittest.TestCase):
             observed_title="SuperLuna reviewer",
             provisioned_chat=False,
             at=None,
+        ))
+
+    def acquire_submission_slot(self, state_path: Path, registry: Path):
+        state = lcrl.load_state(state_path)
+        return lcrl.acquire_account_browser_slot_command(Namespace(
+            implementation_thread_id=state["automation"]["implementation_thread_id"],
+            reviewer_thread_id=state["confirmation"]["reviewer_thread_id"],
+            operation="submission", registry=str(registry), at=None,
         ))
 
     def test_retired_heartbeat_prompt_is_short_and_does_not_embed_mutable_state(self):
@@ -4259,6 +4268,81 @@ class ControllerTests(unittest.TestCase):
                 ))
             self.assertEqual(state_path.read_bytes(), before)
 
+    def test_visible_browser_submission_requires_fresh_controller_authorization(self):
+        """A visible bound tab must not bypass the same pre-send gate as a reopened tab."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            account_registry = root / "account-browser-gate.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "visible-submit-chat",
+                continuation_mode="foreground", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "visible-submit-chat")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="visible-submit-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            entry = lcrl.guard_action(Namespace(
+                state=str(state_path), reason="turn_entry", minutes=10,
+                implementation_thread_id="implementation",
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="VISIBLE-S1",
+                fingerprint="visible-submit-S1",
+            )
+            account_slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="visible-submit-chat",
+                operation="submission", registry=str(account_registry), at=None,
+            ))
+
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "fresh browser submission send authorization",
+            ):
+                lcrl.confirm_review_submission_command(Namespace(
+                    state=str(state_path), reviewer_thread_id="visible-submit-chat",
+                    request_turn_id="turn-visible-S1",
+                    request_message_id="message-visible-S1",
+                    native_app_instance_id=None, attachment_name=None,
+                    submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                    browser_id="iab-session-1",
+                    browser_send_authorization_revision=None,
+                    account_slot_lease_id=account_slot["lease_id"],
+                ))
+
+            authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="visible-submit-S1",
+                browser_id="iab-session-1", lease_id=entry["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
+            ))
+            self.assertEqual(
+                authorized["action"], "browser_submission_send_authorized"
+            )
+            self.assertTrue(authorized["send_allowed"])
+
+            confirmed = lcrl.confirm_review_submission_command(Namespace(
+                state=str(state_path), reviewer_thread_id="visible-submit-chat",
+                request_turn_id="turn-visible-S1",
+                request_message_id="message-visible-S1",
+                native_app_instance_id=None, attachment_name=None,
+                submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                browser_id="iab-session-1",
+                browser_send_authorization_revision=authorized["revision"],
+                account_slot_lease_id=account_slot["lease_id"],
+            ))
+            self.assertEqual(confirmed["action"], "submission_confirmed")
+            persisted = lcrl.load_state(state_path)
+            self.assertEqual(persisted["review"]["status"], "review_waiting")
+            self.assertEqual(
+                persisted["runtime"]["browser_submission_send_authorized_lease_id"],
+                "none",
+            )
+
     def test_browser_wait_reauthorizes_the_persisted_tab_without_a_run_local_tab_id(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4357,9 +4441,13 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(
                 reopened["browser_binding"]["provider_tab_id"], "provider-tab-1"
             )
+            account_registry = root / "account-browser-gate.json"
+            account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="bound-existing-chat-B2",
                 browser_id="iab-restarted-instance", lease_id=reopened["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
             ))
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
@@ -4370,6 +4458,7 @@ class ControllerTests(unittest.TestCase):
                 browser_reopen_lease_id=reopened["lease_id"],
                 browser_id="iab-restarted-instance",
                 browser_send_authorization_revision=send_authorized["revision"],
+                account_slot_lease_id=account_slot["lease_id"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)
@@ -4520,10 +4609,14 @@ class ControllerTests(unittest.TestCase):
                     browser_send_authorization_revision=authorized["revision"],
                 ))
 
+            account_registry = root / "account-browser-gate.json"
+            account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="provisioned-resubmit-B2",
                 browser_id="iab-provisioned-resubmit",
                 lease_id=authorized["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
             ))
             self.assertEqual(
                 send_authorized["action"], "browser_submission_send_authorized"
@@ -4551,6 +4644,7 @@ class ControllerTests(unittest.TestCase):
                 browser_reopen_lease_id=authorized["lease_id"],
                 browser_id="iab-provisioned-resubmit",
                 browser_send_authorization_revision=send_authorized["revision"],
+                account_slot_lease_id=account_slot["lease_id"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)
@@ -4591,9 +4685,15 @@ class ControllerTests(unittest.TestCase):
             expired_revision = expired["revision"]
             expired["runtime"]["action_lease_expires_at"] = "2000-01-01T00:00:00Z"
             lcrl.save_state(ordinary_path, expired, expected_revision=expired_revision)
+            ordinary_registry = root / "ordinary-account-browser-gate.json"
+            ordinary_slot = self.acquire_submission_slot(
+                ordinary_path, ordinary_registry,
+            )
             send_forbidden = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(ordinary_path), fingerprint="ordinary-B2",
                 browser_id="iab-ordinary", lease_id=recovered_existing["lease_id"],
+                account_slot_lease_id=ordinary_slot["lease_id"],
+                account_browser_registry=str(ordinary_registry), at=None,
             ))
             self.assertEqual(
                 send_forbidden["action"], "browser_submission_send_forbidden"
@@ -4757,9 +4857,13 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertEqual(reopened["action"], "browser_submission_reopen_authorized")
             self.assertTrue(reopened["open_canonical_url_once"])
+            account_registry = root / "account-browser-gate.json"
+            account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="existing-chat-B1",
                 browser_id="implementation-browser", lease_id=reopened["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
             ))
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
@@ -4770,8 +4874,15 @@ class ControllerTests(unittest.TestCase):
                 browser_reopen_lease_id=reopened["lease_id"],
                 browser_id="implementation-browser",
                 browser_send_authorization_revision=send_authorized["revision"],
+                account_slot_lease_id=account_slot["lease_id"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                lease_id=account_slot["lease_id"], outcome="completed",
+                registry=str(account_registry), at="2000-01-01T00:00:00Z",
+                health_proof=None,
+            ))
             persisted = lcrl.load_state(state_path)
             token = persisted["automation"]["waiting_check_token"]
             lcrl.bind_waiting_check_command(Namespace(
@@ -4863,9 +4974,13 @@ class ControllerTests(unittest.TestCase):
                     browser_id="iab-different-instance",
                 ))
 
+            account_registry = root / "account-browser-gate.json"
+            account_slot = self.acquire_submission_slot(state_path, account_registry)
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="restarted-browser-B3",
                 browser_id="iab-new-instance", lease_id=authorized["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
             ))
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
@@ -4876,6 +4991,7 @@ class ControllerTests(unittest.TestCase):
                 browser_reopen_lease_id=authorized["lease_id"],
                 browser_id="iab-new-instance",
                 browser_send_authorization_revision=send_authorized["revision"],
+                account_slot_lease_id=account_slot["lease_id"],
             ))
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)
