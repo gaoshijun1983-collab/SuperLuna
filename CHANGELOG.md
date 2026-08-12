@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added controller 51 / Skill revision `2026-08-12.5` after a real ecosystem
+  task reused a state whose previous goal was already completed. The new
+  `begin-new-goal` command requires the same implementation task's live
+  turn-entry lease, an explicit current user authorization identity, a concrete
+  first stage, and zero surviving waiting checks. It preserves the bound Chat
+  but clears the old completion and operation package and requires fresh visible
+  reasoning-mode confirmation. Ordinary wakeups cannot reopen completed work.
+- Corrected the published Pro-progress ledger ceiling from 20 to the
+  controller's actual 256-event bound. The package regression now compares the
+  schema directly with `MAX_PROGRESS_EVENTS` instead of proving a duplicated
+  literal against itself.
 - Published the bounded Pro-progress event shape in the state schema and added
   a package regression for its required fields and 20-event ceiling. The
   broader nested-state audit remains open; the release report no longer

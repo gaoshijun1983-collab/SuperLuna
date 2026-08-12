@@ -349,7 +349,7 @@
             "meaningful_steps_since_pro": {"type": "integer", "minimum": 0},
             "events": {
               "type": "array",
-              "maxItems": 20,
+              "maxItems": 256,
               "items": {
                 "type": "object",
                 "required": [

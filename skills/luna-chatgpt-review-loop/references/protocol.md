@@ -77,6 +77,14 @@ when it supplies the exact persisted implementation-task identity. Cross-task,
 waiting-read, and browser-reopen leases remain non-reclaimable with or without
 the flag.
 
+A completed workflow is terminal for ordinary turns. A new overall goal may
+reuse the same implementation task, project, and bound reviewer Chat only via
+`begin-new-goal`, under that task's current `turn_entry` lease and an explicit
+current user-message/delegation identity. The command fails closed if any
+waiting check survives, archives the authorization fact, clears the previous
+completion and operation package, and requires fresh visible reasoning-mode
+confirmation. It is not a recovery path for waiting or a generic "continue".
+
 ## 3. Submit exactly once
 
 Immediately before the send, capture the same tab, conversation id, visible

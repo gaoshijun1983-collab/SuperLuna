@@ -13,8 +13,13 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.43`; the latest archive remains
-Alpha 27. This source also publishes the bounded Pro-progress event shape and a
+The current source candidate is `0.2.0-alpha.44`; the latest archive remains
+Alpha 27. Controller 51 / Skill revision `2026-08-12.5` adds an explicit,
+lease-bound way for the same visible implementation task to begin a genuinely
+new user-authorized goal after its previous goal completed; ordinary wakeups
+still cannot reopen completed work, and the bound Chat must be visibly
+reconfirmed. It also corrects the published Pro-progress ceiling to the
+controller's actual 256-event bound. This source publishes the bounded Pro-progress event shape and a
 machine-checked milestone/rollback guide without claiming that every nested
 state invariant is expressed in JSON Schema. Controller 50 / Skill revision
 `2026-08-12.4` makes the fresh

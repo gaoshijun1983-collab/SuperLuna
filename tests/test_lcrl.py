@@ -305,6 +305,94 @@ class ControllerTests(unittest.TestCase):
             state = lcrl.load_state(state_path)
             self.assertEqual(state["runtime"]["action_lease_id"], entered["lease_id"])
 
+    def test_explicit_new_goal_reuses_completed_task_without_reusing_completion(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            state = lcrl.load_state(state_path)
+            revision = state["revision"]
+            state["review"].update({
+                "status": "completed",
+                "current_stage": "OLD-FINAL",
+                "overall_completion_confirmed": True,
+                "overall_completion_evidence": "old goal completed",
+            })
+            state["next_operation"].update({
+                "status": "applied",
+                "path": str(Path(directory) / "old-operation.json"),
+                "sha256": "old-operation-sha",
+                "source_response_message_id": "old-response",
+                "source_stage": "OLD-FINAL",
+                "next_stage": "done",
+                "result_hash": "old-result-hash",
+                "validated_at": lcrl.utc_now(),
+                "applied_at": lcrl.utc_now(),
+            })
+            state["confirmation"].update({
+                "reviewer_reasoning_mode": "extreme",
+                "reviewer_reasoning_confirmed": True,
+                "reviewer_reasoning_confirmed_at": lcrl.utc_now(),
+                "reviewer_reasoning_control_source": "user",
+                "reviewer_reasoning_observed_label": "极高",
+                "reviewer_reasoning_observed_thread_id": "review-chat",
+            })
+            lcrl.save_state(state_path, state, expected_revision=revision)
+            entered = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+
+            started = lcrl.begin_new_goal_command(Namespace(
+                state=str(state_path), lease_id=entered["lease_id"],
+                implementation_thread_id="implementation",
+                authorization_id="user-message-new-fashion-goal",
+                stage="FASHION-NEXT", goal_mode="continuous",
+            ))
+
+            self.assertEqual(started["action"], "new_goal_started")
+            self.assertTrue(started["continuation_required"])
+            self.assertFalse(started["turn_completion_allowed"])
+            updated = lcrl.load_state(state_path)
+            self.assertEqual(updated["review"]["status"], "local_work")
+            self.assertEqual(updated["review"]["current_stage"], "FASHION-NEXT")
+            self.assertFalse(updated["review"]["overall_completion_confirmed"])
+            self.assertEqual(updated["review"]["overall_completion_evidence"], "none")
+            self.assertEqual(updated["next_operation"]["status"], "none")
+            self.assertFalse(updated["confirmation"]["reviewer_reasoning_confirmed"])
+            self.assertEqual(updated["confirmation"]["reviewer_thread_id"], "review-chat")
+            self.assertEqual(updated["runtime"]["action_lease_id"], entered["lease_id"])
+            self.assertEqual(updated["review_history"][-1]["event"], "new_goal_authorized")
+
+    def test_new_goal_requires_explicit_identity_exact_task_and_current_lease(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            state = lcrl.load_state(state_path)
+            revision = state["revision"]
+            state["review"].update({
+                "status": "completed",
+                "overall_completion_confirmed": True,
+                "overall_completion_evidence": "old goal completed",
+            })
+            lcrl.save_state(state_path, state, expected_revision=revision)
+            entered = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+            before = state_path.read_bytes()
+            base = {
+                "state": str(state_path), "lease_id": entered["lease_id"],
+                "implementation_thread_id": "implementation",
+                "authorization_id": "new-goal-message", "stage": "NEXT",
+                "goal_mode": "continuous",
+            }
+            for override in (
+                {"authorization_id": "none"},
+                {"implementation_thread_id": "other-task"},
+                {"lease_id": "lease-wrong"},
+            ):
+                with self.assertRaises(lcrl.LCRLError):
+                    lcrl.begin_new_goal_command(Namespace(**(base | override)))
+                self.assertEqual(state_path.read_bytes(), before)
+
     def test_same_task_guard_reclaims_an_orphaned_ordinary_lease(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))

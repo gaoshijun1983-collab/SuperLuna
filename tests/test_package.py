@@ -270,7 +270,10 @@ class PackageTests(unittest.TestCase):
             set(progress["required"]),
             {"active_minutes_since_pro", "meaningful_steps_since_pro", "events"},
         )
-        self.assertEqual(progress["properties"]["events"]["maxItems"], 20)
+        self.assertEqual(
+            progress["properties"]["events"]["maxItems"],
+            lcrl.MAX_PROGRESS_EVENTS,
+        )
         event = progress["properties"]["events"]["items"]
         self.assertEqual(
             set(event["required"]),

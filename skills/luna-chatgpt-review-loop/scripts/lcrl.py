@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 50
-SKILL_REVISION = "2026-08-12.4"
+CONTROLLER_VERSION = 51
+SKILL_REVISION = "2026-08-12.5"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -4051,6 +4051,107 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def begin_new_goal_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Start one explicitly authorized goal after a previous goal completed."""
+    path = Path(args.state).resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    review = state["review"]
+    runtime = state["runtime"]
+    automation = state["automation"]
+    implementation_thread_id = str(args.implementation_thread_id).strip()
+    authorization_id = str(args.authorization_id).strip()
+    stage = str(args.stage).strip()
+    if review.get("status") != "completed":
+        raise LCRLError("a new goal can begin only after the previous goal completed")
+    if implementation_thread_id != automation.get("implementation_thread_id"):
+        raise LCRLError("new goal authorization belongs to a different implementation task")
+    if authorization_id in {"", "none"} or len(authorization_id) > 256:
+        raise LCRLError("new goal requires an explicit user authorization identity")
+    if stage in {"", "none"} or len(stage) > 256:
+        raise LCRLError("new goal requires a concrete initial stage")
+    if not (
+        args.lease_id == runtime.get("action_lease_id")
+        and runtime.get("action_lease_reason") == "turn_entry"
+        and active_action_lease(state)
+    ):
+        raise LCRLError("new goal requires the current task's active turn-entry lease")
+    if (
+        automation.get("waiting_check_active") is not False
+        or automation.get("waiting_check_token") != "none"
+        or automation.get("waiting_check_automation_id") != "none"
+        or automation.get("waiting_check_claimed_id") != "none"
+    ):
+        raise LCRLError("new goal cannot begin while a waiting check still exists")
+
+    archive_review_cycle(state, "new_goal_authorized")
+    state.setdefault("review_history", []).append({
+        "event": "new_goal_authorized",
+        "previous_status": "completed",
+        "authorization_id": authorization_id,
+        "implementation_thread_id": implementation_thread_id,
+        "new_stage": stage,
+        "recorded_at": utc_now(),
+    })
+    state["review_history"] = state["review_history"][-20:]
+    review.update({
+        "status": "local_work",
+        "current_stage": stage,
+        "goal_mode": args.goal_mode,
+        "overall_completion_confirmed": False,
+        "overall_completion_evidence": "none",
+        "artifacts_summary": "none",
+        "recovery_action": "new_goal_authorized",
+        "last_progress_at": utc_now(),
+    })
+    state["next_operation"] = {
+        "status": "none",
+        "path": "none",
+        "sha256": "none",
+        "source_response_message_id": "none",
+        "source_stage": "none",
+        "next_stage": "none",
+        "result_hash": "none",
+        "validated_at": "none",
+        "applied_at": "none",
+    }
+    state["attachment"] = {
+        "required": False,
+        "verification": "not_required",
+        "expected_names": [],
+        "observed_names": [],
+        "verified_at": "none",
+    }
+    state["confirmation"].update({
+        "reviewer_reasoning_mode": "unconfirmed",
+        "reviewer_reasoning_confirmed": False,
+        "reviewer_reasoning_confirmed_at": "none",
+        "reviewer_reasoning_control_source": "none",
+        "reviewer_reasoning_observed_label": "none",
+        "reviewer_reasoning_observed_thread_id": "none",
+        "reviewer_reasoning_native_app_instance_id": "none",
+        "reviewer_reasoning_invalidated_reason": "new_goal_requires_fresh_review_mode_confirmation",
+    })
+    state["recovery"]["consecutive_no_progress_checks"] = 0
+    state["recovery"]["user_notified_stall"] = False
+    record_resume_checkpoint(state)
+    save_state(path, state, expected_revision=revision)
+    return add_user_status_exit({
+        "ok": True,
+        "action": "new_goal_started",
+        "status": "local_work",
+        "stage": stage,
+        "authorization_id": authorization_id,
+        "lease_id": args.lease_id,
+        "review_chat_reused": state["confirmation"].get("reviewer_thread_id") != "none",
+        "review_mode_reconfirmation_required": True,
+        "continuation_required": True,
+        "turn_completion_allowed": False,
+        "next_action": "reconfirm_bound_chat_then_continue_local_work",
+        "revision": state["revision"],
+    })
+
+
 def release_action(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.state).resolve()
     state = load_state(path)
@@ -5723,6 +5824,16 @@ def build_parser() -> argparse.ArgumentParser:
     guard.add_argument("--implementation-thread-id")
     guard.add_argument("--replace", action="store_true")
 
+    begin_new_goal = sub.add_parser("begin-new-goal")
+    begin_new_goal.add_argument("--state", required=True)
+    begin_new_goal.add_argument("--lease-id", required=True)
+    begin_new_goal.add_argument("--implementation-thread-id", required=True)
+    begin_new_goal.add_argument("--authorization-id", required=True)
+    begin_new_goal.add_argument("--stage", required=True)
+    begin_new_goal.add_argument(
+        "--goal-mode", choices=sorted(VALID_GOAL_MODES), default="continuous"
+    )
+
     release = sub.add_parser("release")
     release.add_argument("--state", required=True)
     release.add_argument("--lease-id", required=True)
@@ -5986,6 +6097,8 @@ def main(argv: list[str] | None = None) -> int:
             result = set_monitor_mode_command(args)
         elif args.command == "guard":
             result = guard_action(args)
+        elif args.command == "begin-new-goal":
+            result = begin_new_goal_command(args)
         elif args.command == "release":
             result = release_action(args)
         elif args.command == "confirm-review-mode":

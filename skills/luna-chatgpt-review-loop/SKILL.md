@@ -88,6 +88,23 @@ turn 的自阻塞，不是并发抢占。
 `waiting-check`，而不是 `guard`。只有 `waiting-check` 与随后
 `authorize-waiting-chat-read` 双重通过，才能读取 Chat。普通外部消息不能冒充等待 occurrence。
 
+若门禁放行后发现旧状态是 `completed`，普通外部消息仍不能把它自动改回开发。只有当前用户
+消息或明确的用户授权委派本身提出了一个**新的总体目标**，同一实施任务才可在当前
+`turn_entry` lease 下运行一次：
+
+```text
+python -B <skill-root>/scripts/lcrl.py begin-new-goal \
+  --state <state-file> --lease-id <当前turn-entry lease> \
+  --implementation-thread-id <当前实施任务ID> \
+  --authorization-id <当前用户消息或授权委派的稳定身份/正文指纹> \
+  --stage <新目标首阶段> --goal-mode continuous
+```
+
+该入口只接受 `completed`、精确任务身份、当前活动 lease、明确授权身份且不存在任何等待检查
+的状态。它保留原项目与固定 Chat 绑定，但清除旧完成结论、旧 operation package 和附件要求，
+并强制重新目视确认评审 Chat 的推理档位；返回后必须在同一 turn 继续新目标。普通“继续”、
+状态询问、调度补跑、Chat 回复或没有稳定授权身份的外部消息不得调用它。
+
 1. 首先同时使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器
    binding；不得因为尚未调用该浏览器 Skill、当前标签列表为空或协调任务曾经打开过网页，
    就声称 Codex 没有浏览器能力。若没有旧状态，先在这个实现任务自己的内置浏览器打开
