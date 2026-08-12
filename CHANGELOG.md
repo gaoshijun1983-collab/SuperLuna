@@ -1,5 +1,13 @@
 # Changelog
 
+- Unreleased Controller 74 / Skill revision `2026-08-12.28`: a documentation-
+  only follow-up commit reproduced a Windows Python 3.13 failure when one of six
+  concurrent task-binding registrations spent the ordinary two-second state
+  budget waiting to open the shared lock sidecar. The already-serialized binding
+  registry now has a dedicated ten-second bounded queue budget. Persistent
+  permission denial still fails closed; ordinary workflow-state lock timing is
+  unchanged.
+
 - Unreleased Controller 73 / Skill revision `2026-08-12.27`: real projectless
   Mac C4 proved browser health recovery and provisioned its sole reviewer Chat,
   but only then discovered that the hardcoded `/var/tmp` test directory was

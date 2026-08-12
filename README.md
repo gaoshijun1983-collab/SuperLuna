@@ -19,7 +19,10 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 73 / Skill revision `2026-08-12.27`, first verifies the current task's
+Controller 74 / Skill revision `2026-08-12.28`, gives the serialized binding
+registry a dedicated bounded queue budget so six simultaneous Windows tasks do
+not fail while merely waiting to open the shared lock sidecar. It retains
+Controller 73's rule that the current task first verifies its
 assigned workspace with a create/read/remove probe, then requires the shared account slot
 before even reading the browser Skill or initializing its runtime. It keeps active startup/submission
 turns alive through the 180-second quiet handoff instead of ending without a

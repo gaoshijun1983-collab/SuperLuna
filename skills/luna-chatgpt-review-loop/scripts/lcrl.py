@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 73
-SKILL_REVISION = "2026-08-12.27"
+CONTROLLER_VERSION = 74
+SKILL_REVISION = "2026-08-12.28"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -228,6 +228,7 @@ class StateLockTimeout(LCRLError):
 
 STATE_LOCK_TIMEOUT_SECONDS = 2.0
 STATE_LOCK_POLL_SECONDS = 0.01
+BINDING_REGISTRY_LOCK_TIMEOUT_SECONDS = 10.0
 ATOMIC_REPLACE_TIMEOUT_SECONDS = 0.5
 ATOMIC_REPLACE_POLL_SECONDS = 0.01
 SHARED_REGISTRY_REPLACE_TIMEOUT_SECONDS = 2.0
@@ -649,7 +650,10 @@ def _save_binding_registry_locked(
 def save_binding_registry(path: str | Path, value: dict[str, Any], expected_revision: int | None = None) -> int:
     registry_path = Path(path).expanduser().resolve()
     registry_path.parent.mkdir(parents=True, exist_ok=True)
-    with acquire_state_lock(registry_path):
+    with acquire_state_lock(
+        registry_path,
+        timeout=BINDING_REGISTRY_LOCK_TIMEOUT_SECONDS,
+    ):
         return _save_binding_registry_locked(registry_path, value, expected_revision)
 
 
@@ -4259,7 +4263,10 @@ def register_binding_command(args: argparse.Namespace) -> dict[str, Any]:
         "naming_template_version": NAMING_TEMPLATE_VERSION,
         "updated_at": utc_now(),
     }
-    with acquire_state_lock(registry_path):
+    with acquire_state_lock(
+        registry_path,
+        timeout=BINDING_REGISTRY_LOCK_TIMEOUT_SECONDS,
+    ):
         # Registry read, uniqueness validation, state bind, and registry replace
         # share one short critical section. Competing registrations therefore
         # merge against the latest durable task set instead of racing on a

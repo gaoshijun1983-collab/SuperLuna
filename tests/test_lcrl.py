@@ -3256,6 +3256,39 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual(state["binding"]["status"], "bound")
                 self.assertEqual(state["binding"]["task_id"], f"task-{number}")
 
+    def test_binding_registration_allows_a_longer_shared_registry_lock_queue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry_path = root / "bindings.json"
+            state = lcrl.new_state(
+                "automation-1", "implementation-1", root, "review-chat-1",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            real_acquire_state_lock = lcrl.acquire_state_lock
+            observed = []
+
+            def recording_lock(path, timeout=lcrl.STATE_LOCK_TIMEOUT_SECONDS):
+                observed.append((Path(path).resolve(), timeout))
+                return real_acquire_state_lock(path, timeout=timeout)
+
+            with mock.patch.object(lcrl, "acquire_state_lock", side_effect=recording_lock):
+                result = lcrl.register_binding_command(Namespace(
+                    state=str(state_path),
+                    registry=str(registry_path),
+                    task_id="task-1",
+                    display_name="项目1",
+                    iteration="A1",
+                    work_status_label="开发",
+                ))
+
+            self.assertTrue(result["ok"])
+            self.assertIn(
+                (registry_path.resolve(), lcrl.BINDING_REGISTRY_LOCK_TIMEOUT_SECONDS),
+                observed,
+            )
+
     def test_foreground_only_bindings_do_not_require_fake_automation_ids(self):
         registry = lcrl.empty_binding_registry()
         for number in (1, 2):
