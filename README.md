@@ -19,7 +19,10 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 76 / Skill revision `2026-08-12.30`, recognizes a standalone
+Controller 77 / Skill revision `2026-08-12.31`, requires every wait occurrence
+to obtain a current tab handle instead of reusing a prior-occurrence object or
+numeric id, and forbids asking Chat to PASS evidence that will only exist after
+submission. Controller 76 recognizes a standalone
 `唯一下一步` / `next step` heading as the boundary of an actionable natural-
 language review. Hypothetical permission or release words before that heading
 no longer block a safe local action, while real high-impact instructions inside

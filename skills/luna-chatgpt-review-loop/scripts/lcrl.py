@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 76
-SKILL_REVISION = "2026-08-12.30"
+CONTROLLER_VERSION = 77
+SKILL_REVISION = "2026-08-12.31"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -2120,7 +2120,8 @@ def render_waiting_check(state_path: str | Path, validate_only: bool = False) ->
         f"{account_command}\n"
         "仅当 slot_acquired=true，才运行 authorize-waiting-chat-read，并传同一 token、automation id、"
         "waiting-check lease_id 与 --account-slot-lease-id <账户返回 lease_id>。获得 "
-        "browser_read_authorized 前禁止初始化或访问浏览器。只读取已绑定固定 Chat，"
+        "browser_read_authorized 前禁用浏览器。授权后从本轮标签列表重取句柄，"
+        "禁用旧 Tab 对象/id；只读已绑定 Chat，"
         "完成真实请求/回复身份配对；消费回复前先删除本 automation，随后 resume-from-reply，"
         "并在同一实施任务继续。其他 action 静默结束。不得创建循环规则或替代 Chat。"
     )

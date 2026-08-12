@@ -731,6 +731,32 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(metadata["automation_id"], "wait-render-1")
             self.assertEqual(len(metadata["prompt_sha256"]), 64)
 
+    def test_bound_one_shot_wait_forbids_a_prior_occurrence_tab_handle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="W-current-tab",
+                fingerprint="waiting-current-tab",
+            )
+            lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at=None))
+            submitted = lcrl.confirm_review_submission_command(Namespace(
+                state=str(state_path), reviewer_thread_id="review-chat",
+                request_turn_id="turn-current-tab", request_message_id="message-current-tab",
+                native_app_instance_id=None, attachment_name=None,
+                submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                browser_id=None, deleted_automation_id=None,
+            ))
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=submitted["waiting_check_token"],
+                automation_id="wait-current-tab-1",
+            ))
+
+            rendered = lcrl.render_waiting_check(state_path)
+
+            self.assertIn("从本轮标签列表重取句柄", rendered)
+            self.assertIn("禁用旧 Tab 对象/id", rendered)
+            self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
+
     def test_network_disconnect_is_counted_once_then_success_recovers(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

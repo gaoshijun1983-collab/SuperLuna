@@ -698,6 +698,13 @@ class PackageTests(unittest.TestCase):
             self.assertIn(requirement, packet)
         self.assertIn("本地文件路径不是 Chat 能看到的证据", packet)
 
+    def test_review_packet_cannot_request_pass_for_future_evidence(self):
+        packet = (SKILL_ROOT / "references" / "review_packet.md").read_text(encoding="utf-8")
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("提交前已经发生", packet)
+        self.assertIn("未来计划不能作为 PASS 证据", packet)
+        self.assertIn("只审查提交前已经发生的证据", skill)
+
     def test_skill_binds_one_user_selected_web_chat_without_creating_it(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         for requirement in (

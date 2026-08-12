@@ -1,5 +1,14 @@
 # Changelog
 
+- Unreleased Controller 77 / Skill revision `2026-08-12.31`: the real macOS C7
+  continuation retest completed two review cycles and reached its third wait
+  without coordinator prompts. Two waiting occurrences first tried stale or
+  absent prior-occurrence tab handles before recovering through the persisted
+  binding, and the third review packet asked Chat to approve occurrence evidence
+  that could only exist after submission. Rendered waits now require a handle
+  from the current occurrence's tab listing and forbid old Tab objects/ids;
+  review packets may request PASS only for evidence completed before submission.
+
 - Unreleased Controller 76 / Skill revision `2026-08-12.30`: the first clean
   Controller 75 macOS waiting cycle acquired the exact `waiting_read` account
   slot, authorized browser access, deleted its one-shot task, and consumed the

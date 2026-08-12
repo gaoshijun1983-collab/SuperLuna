@@ -328,8 +328,8 @@ python -B <skill-root>/scripts/lcrl.py confirm-review-mode \
 ## 提交一次
 
 审阅包遵守 [review_packet.md](references/review_packet.md)：区分已证明、合理推断和未验证；
-要求 Chat 主动找反例；证据不足不得 PASS。视觉审查必须让 Chat 真正看到图片，只有本地
-路径不算证据。
+要求 Chat 主动找反例；只审查提交前已经发生的证据，未来动作不得申请 PASS。证据不足不得
+PASS。视觉审查必须让 Chat 真正看到图片，只有本地路径不算证据。
 
 发送前：
 
