@@ -96,7 +96,10 @@ toward Beta means real-cycle and platform evidence, not more orchestration.
 - Refine plain-language status and user recovery for expired login, changed Chat,
   unavailable browser capability, and platform UI changes.
 - Validate cooldown behavior on real rate-limit and network-recovery events.
-- Add a versioned milestone guide and rollback-section validation.
+- Add a versioned milestone guide and rollback-section validation. The contract
+  lives in `docs/milestones.json`, with a readable companion at
+  `docs/MILESTONE_GUIDE.md`; validate it with
+  `python -B scripts/validate_milestones.py`.
 
 ## 0.4: conversation health
 
