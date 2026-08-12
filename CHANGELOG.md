@@ -1,5 +1,11 @@
 # Changelog
 
+- Unreleased Controller 66 / Skill revision `2026-08-12.20`: after the account
+  gate passed, the next Windows Python 3.13 run exposed the same sharing denial
+  in the concurrent task-binding registry. The bounded two-second budget now
+  covers both already-serialized shared registries, while ordinary state files
+  remain at the generic 0.5-second fail-closed budget.
+
 - Unreleased Controller 65 / Skill revision `2026-08-12.19`: repeated Windows
   Python 3.13 CI runs showed that six simultaneous account-gate acquisitions
   can retain a sharing denial beyond the generic 0.5-second atomic-replace

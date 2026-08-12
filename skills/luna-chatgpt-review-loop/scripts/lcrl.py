@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 65
-SKILL_REVISION = "2026-08-12.19"
+CONTROLLER_VERSION = 66
+SKILL_REVISION = "2026-08-12.20"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -228,7 +228,7 @@ STATE_LOCK_TIMEOUT_SECONDS = 2.0
 STATE_LOCK_POLL_SECONDS = 0.01
 ATOMIC_REPLACE_TIMEOUT_SECONDS = 0.5
 ATOMIC_REPLACE_POLL_SECONDS = 0.01
-ACCOUNT_BROWSER_GATE_REPLACE_TIMEOUT_SECONDS = 2.0
+SHARED_REGISTRY_REPLACE_TIMEOUT_SECONDS = 2.0
 
 
 def atomic_replace(
@@ -577,7 +577,11 @@ def _save_binding_registry_locked(
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        atomic_replace(temp_name, registry_path)
+        atomic_replace(
+            temp_name,
+            registry_path,
+            timeout=SHARED_REGISTRY_REPLACE_TIMEOUT_SECONDS,
+        )
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
@@ -717,12 +721,12 @@ def _save_account_browser_gate_locked(
             os.fsync(handle.fileno())
         # Windows 3.13 may retain a short sharing lock on this machine-wide
         # registry while several new tasks start together. Keep the generic
-        # durable-write budget strict; only this already-serialized gate gets
-        # the same bounded budget as its cross-process lock acquisition.
+        # durable-write budget strict; only already-serialized shared
+        # registries get the bounded cross-process retry budget.
         atomic_replace(
             temp_name,
             gate_path,
-            timeout=ACCOUNT_BROWSER_GATE_REPLACE_TIMEOUT_SECONDS,
+            timeout=SHARED_REGISTRY_REPLACE_TIMEOUT_SECONDS,
         )
     finally:
         if os.path.exists(temp_name):
