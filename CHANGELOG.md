@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added controller 55 / Skill revision `2026-08-12.9` with a fail-closed,
+  byte-preserving `observe-runs` overview for multiple implementation states,
+  including all five user statuses, stage, evidence age, the exact 20-minute
+  boundary, and aggregate counts.
 - Added controller 54 / Skill revision `2026-08-12.8` after continuation testing
   found that a guard could grant a fresh work lease without validating the exact
   implementation-task identity. Ordinary work entry and serial recovery now

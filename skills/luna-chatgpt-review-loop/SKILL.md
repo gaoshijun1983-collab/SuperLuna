@@ -295,6 +295,17 @@ python -B <skill-root>/scripts/lcrl.py observe-run \
   --state <state-file> --threshold-minutes 20
 ```
 
+协调主线需要一次查看多个实施任务时，可重复传入 `--state`：
+
+```text
+python -B <skill-root>/scripts/lcrl.py observe-runs \
+  --state <state-file-1> --state <state-file-2> --threshold-minutes 20
+```
+
+它返回每条任务的五种用户状态、阶段、最近实质证据、证据年龄和 20 分钟卡住判定，
+并汇总五种状态计数与可能卡住数量。所有输入必须先通过只读校验；任一输入无效时不写入
+任何 state，不发送任务消息、不读取 Chat、不取得执行权，也不改变工作流。
+
 它只根据已记录的实质进展事件返回五种用户状态、阶段、距上次证据的分钟数和
 `possibly_stuck`；状态文件字节与 revision 必须不变。达到 20 分钟即标记可能卡住，但
 `等待 Chat` 永不因等待时长被判卡；没有进度事件时明确报告“无证据”，不虚构时间。该命令

@@ -13,8 +13,9 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.47`; the latest archive remains
-Alpha 27. Controller 54 / Skill revision `2026-08-12.8` makes the guard fail
+The current source candidate is `0.2.0-alpha.48`; the latest archive remains
+Alpha 27. Controller 55 / Skill revision `2026-08-12.9` adds a fail-closed,
+read-only multi-run overview. Controller 54 makes the guard fail
 closed for missing or cross-task implementation identities before granting a
 work lease, while preserving same-task serial recovery only for ordinary
 `turn_entry` and `apply_result` leases. Controller 53 / Skill revision `2026-08-12.7` extends the exact
