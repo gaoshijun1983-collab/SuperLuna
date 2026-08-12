@@ -1,0 +1,30 @@
+{
+  "contract_version": "1",
+  "milestones": [
+    {
+      "version": "0.2.0-alpha.41",
+      "title": "Browser-first loop transport correction",
+      "upgrade_prerequisites": [
+        "Run the repository test suite and controller selftest.",
+        "Confirm the current candidate remains Alpha and Public Beta is blocked."
+      ],
+      "rollback_triggers": [
+        "A focused regression test fails.",
+        "A local validation result is presented as real-device or Beta evidence."
+      ],
+      "rollback_steps": [
+        "Stop the current change and preserve the failing output.",
+        "Restore only the bounded milestone diff from the last verified commit.",
+        "Re-run the focused validator and the required local checks."
+      ],
+      "verification": [
+        "The milestone validator exits successfully.",
+        "Repository tests, selftest, and closure-check pass independently.",
+        "Local checks remain labelled as local-only evidence."
+      ],
+      "evidence_scope": "local_only",
+      "real_device_evidence": false,
+      "public_beta_evidence": false
+    }
+  ]
+}
