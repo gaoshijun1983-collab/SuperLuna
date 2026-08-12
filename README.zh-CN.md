@@ -16,8 +16,9 @@ Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 
 ## 当前源码状态
 
-当前源码候选是 `0.2.0-alpha.48`，最新归档仍为 Alpha 27。控制器 55 / Skill revision
-`2026-08-12.9` 增加失败关闭、完全只读的多任务总览。控制器 54 让 guard 在发放普通工作 lease 前
+当前源码候选是 `0.2.0-alpha.49`，最新归档仍为 Alpha 27。控制器 56 / Skill revision
+`2026-08-12.10` 为 Windows 原子持久化时短暂的文件共享拒绝增加有界重试；持续权限错误仍失败关闭。
+控制器 55 增加失败关闭、完全只读的多任务总览。控制器 54 让 guard 在发放普通工作 lease 前
 就对缺失或跨任务的实施任务 identity 失败关闭，
 同时保留仅对同一任务的 `turn_entry` / `apply_result` 普通 lease 串行恢复；等待和浏览器重开 lease 仍不可抢占。
 控制器 53 / Skill revision

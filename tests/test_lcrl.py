@@ -8,6 +8,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,6 +20,44 @@ SPEC = importlib.util.spec_from_file_location("lcrl", SCRIPT)
 lcrl = importlib.util.module_from_spec(SPEC)
 assert SPEC and SPEC.loader
 SPEC.loader.exec_module(lcrl)
+
+
+class AtomicReplaceTests(unittest.TestCase):
+    def test_atomic_replace_retries_transient_permission_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.tmp"
+            destination = root / "destination.json"
+            source.write_text("new\n", encoding="utf-8")
+            destination.write_text("old\n", encoding="utf-8")
+            real_replace = os.replace
+            attempts = 0
+
+            def flaky_replace(source_path, destination_path):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "transient sharing violation")
+                return real_replace(source_path, destination_path)
+
+            with mock.patch.object(lcrl.os, "replace", side_effect=flaky_replace):
+                lcrl.atomic_replace(source, destination, timeout=0.1)
+
+            self.assertEqual(attempts, 2)
+            self.assertEqual(destination.read_text(encoding="utf-8"), "new\n")
+            self.assertFalse(source.exists())
+
+    def test_atomic_replace_rethrows_persistent_permission_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.tmp"
+            source.write_text("new\n", encoding="utf-8")
+            with mock.patch.object(
+                lcrl.os,
+                "replace",
+                side_effect=PermissionError(13, "persistent sharing violation"),
+            ):
+                with self.assertRaises(PermissionError):
+                    lcrl.atomic_replace(source, Path(directory) / "destination.json", timeout=0)
 
 
 def _load_lcrl_module():

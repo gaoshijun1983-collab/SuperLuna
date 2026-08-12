@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 55
-SKILL_REVISION = "2026-08-12.9"
+CONTROLLER_VERSION = 56
+SKILL_REVISION = "2026-08-12.10"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -218,6 +218,25 @@ class StateLockTimeout(LCRLError):
 
 STATE_LOCK_TIMEOUT_SECONDS = 2.0
 STATE_LOCK_POLL_SECONDS = 0.01
+ATOMIC_REPLACE_TIMEOUT_SECONDS = 0.5
+ATOMIC_REPLACE_POLL_SECONDS = 0.01
+
+
+def atomic_replace(
+    source: str | Path,
+    destination: str | Path,
+    timeout: float = ATOMIC_REPLACE_TIMEOUT_SECONDS,
+) -> None:
+    """Replace a durable file, tolerating only transient Windows sharing denial."""
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(ATOMIC_REPLACE_POLL_SECONDS)
 
 
 def state_lock_path(state_path: Path) -> Path:
@@ -549,7 +568,7 @@ def _save_binding_registry_locked(
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_name, registry_path)
+        atomic_replace(temp_name, registry_path)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
@@ -810,7 +829,7 @@ def save_state(path: str | Path, state: dict[str, Any], expected_revision: int |
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp_name, state_path)
+            atomic_replace(temp_name, state_path)
         finally:
             if os.path.exists(temp_name):
                 os.unlink(temp_name)
@@ -2028,7 +2047,7 @@ def _atomic_write_json(path: Path, value: dict[str, Any]) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_name, path)
+        atomic_replace(temp_name, path)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
@@ -5080,7 +5099,7 @@ def validate_result_command(args: argparse.Namespace) -> dict[str, Any]:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp_name, operation_path)
+        atomic_replace(temp_name, operation_path)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)

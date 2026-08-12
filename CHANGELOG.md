@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added controller 56 / Skill revision `2026-08-12.10` after the Windows
+  Python 3.13 CI job exposed a transient sharing violation during concurrent
+  binding registration. All durable atomic replacements now retry only
+  `PermissionError` for at most 0.5 seconds; persistent permission failures
+  still fail closed, and focused tests cover both paths.
 - Added controller 55 / Skill revision `2026-08-12.9` with a fail-closed,
   byte-preserving `observe-runs` overview for multiple implementation states,
   including all five user statuses, stage, evidence age, the exact 20-minute
