@@ -247,6 +247,29 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(len(queued), 4, payloads)
             self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 2)
 
+    def test_account_browser_gate_uses_bounded_windows_sharing_retry_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            observed_timeouts = []
+            real_atomic_replace = lcrl.atomic_replace
+
+            def record_atomic_replace(source, destination, timeout=lcrl.ATOMIC_REPLACE_TIMEOUT_SECONDS):
+                observed_timeouts.append(timeout)
+                return real_atomic_replace(source, destination, timeout=timeout)
+
+            with mock.patch.object(lcrl, "atomic_replace", side_effect=record_atomic_replace):
+                result = lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id="task-one", operation="startup",
+                    registry=str(registry), at="2026-08-12T08:00:00Z",
+                ))
+
+            self.assertTrue(result["slot_acquired"])
+            self.assertEqual(
+                observed_timeouts,
+                [lcrl.ACCOUNT_BROWSER_GATE_REPLACE_TIMEOUT_SECONDS],
+            )
+            self.assertEqual(lcrl.ATOMIC_REPLACE_TIMEOUT_SECONDS, 0.5)
+
     def test_account_browser_gate_paces_cross_task_handoff_after_release(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "account-browser-gate.json"

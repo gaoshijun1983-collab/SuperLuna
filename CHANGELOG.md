@@ -1,5 +1,12 @@
 # Changelog
 
+- Unreleased Controller 65 / Skill revision `2026-08-12.19`: repeated Windows
+  Python 3.13 CI runs showed that six simultaneous account-gate acquisitions
+  can retain a sharing denial beyond the generic 0.5-second atomic-replace
+  budget. The already-serialized machine-wide account gate now has a bounded
+  two-second replace budget; other durable files retain 0.5 seconds and
+  persistent permission errors still fail closed.
+
 - Unreleased Controller 64 / Skill revision `2026-08-12.18`: A2 completed its
   first autonomous reply cycle and prepared round two, but ended at
   `review_submit_pending` when the 180-second handoff blocked submission. Since
