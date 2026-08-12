@@ -27,7 +27,7 @@ The reviewer may return `MEDIUM`, `HIGH_ONCE`, or `TERRA_REQUEST` only inside on
 
 Record only measured active development time attached to a completed evidence-producing action. Do not count heartbeat wakeups, Chat waiting time, network backoff, duplicate retries, or unattended wall-clock time.
 
-Every progress event requires a unique ID, stage, 1–120 active minutes, unique evidence fingerprint, and an explicit meaningful-step flag. Replaying the same ID with the same evidence is idempotent; replaying it with different evidence or assigning the same evidence to another ID is an error. The controller never evicts old IDs to make room for a replay; a full bounded ledger must be diagnosed or completed explicitly.
+Every progress event requires a unique ID, stage, 1–120 active minutes, unique evidence fingerprint, and an explicit meaningful-step flag. Replaying the same ID with the same evidence is idempotent; replaying it with different evidence or assigning the same evidence to another ID is an error. The controller never evicts old IDs to make room for a replay; a full bounded ledger must be diagnosed or completed explicitly. The published `state_schema_v7.json` mirrors this nested event shape and its 20-event bound; uniqueness and counter-to-event reconciliation remain runtime checks.
 
 ## Pro milestone review
 
