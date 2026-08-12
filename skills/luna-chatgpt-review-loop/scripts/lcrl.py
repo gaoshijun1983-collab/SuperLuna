@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 67
-SKILL_REVISION = "2026-08-12.21"
+CONTROLLER_VERSION = 68
+SKILL_REVISION = "2026-08-12.22"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -231,6 +231,32 @@ ATOMIC_REPLACE_POLL_SECONDS = 0.01
 SHARED_REGISTRY_REPLACE_TIMEOUT_SECONDS = 2.0
 
 
+def _windows_replace_file(source: str | Path, destination: str | Path) -> None:
+    """Use the Win32 single-operation replacement API for an existing file."""
+    import ctypes
+    from ctypes import wintypes
+
+    replace_file = ctypes.WinDLL("kernel32", use_last_error=True).ReplaceFileW
+    replace_file.argtypes = [
+        wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.LPCWSTR,
+        wintypes.DWORD, wintypes.LPVOID, wintypes.LPVOID,
+    ]
+    replace_file.restype = wintypes.BOOL
+    if not replace_file(str(destination), str(source), None, 0, None, None):
+        raise ctypes.WinError(ctypes.get_last_error())
+
+
+def _running_on_windows() -> bool:
+    return os.name == "nt"
+
+
+def _replace_file_once(source: str | Path, destination: str | Path) -> None:
+    if _running_on_windows() and Path(destination).exists():  # pragma: no cover - Windows CI
+        _windows_replace_file(source, destination)
+        return
+    os.replace(source, destination)
+
+
 def atomic_replace(
     source: str | Path,
     destination: str | Path,
@@ -240,7 +266,7 @@ def atomic_replace(
     deadline = time.monotonic() + max(0.0, float(timeout))
     while True:
         try:
-            os.replace(source, destination)
+            _replace_file_once(source, destination)
             return
         except PermissionError:
             if time.monotonic() >= deadline:

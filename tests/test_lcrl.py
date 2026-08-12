@@ -30,7 +30,7 @@ class AtomicReplaceTests(unittest.TestCase):
             destination = root / "destination.json"
             source.write_text("new\n", encoding="utf-8")
             destination.write_text("old\n", encoding="utf-8")
-            real_replace = os.replace
+            real_replace = lcrl._replace_file_once
             attempts = 0
 
             def flaky_replace(source_path, destination_path):
@@ -40,7 +40,7 @@ class AtomicReplaceTests(unittest.TestCase):
                     raise PermissionError(13, "transient sharing violation")
                 return real_replace(source_path, destination_path)
 
-            with mock.patch.object(lcrl.os, "replace", side_effect=flaky_replace):
+            with mock.patch.object(lcrl, "_replace_file_once", side_effect=flaky_replace):
                 lcrl.atomic_replace(source, destination, timeout=0.1)
 
             self.assertEqual(attempts, 2)
@@ -52,12 +52,28 @@ class AtomicReplaceTests(unittest.TestCase):
             source = Path(directory) / "source.tmp"
             source.write_text("new\n", encoding="utf-8")
             with mock.patch.object(
-                lcrl.os,
-                "replace",
+                lcrl,
+                "_replace_file_once",
                 side_effect=PermissionError(13, "persistent sharing violation"),
             ):
                 with self.assertRaises(PermissionError):
                     lcrl.atomic_replace(source, Path(directory) / "destination.json", timeout=0)
+
+    def test_existing_windows_destination_uses_replacefilew(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.tmp"
+            destination = Path(directory) / "destination.json"
+            source.write_text("new\n", encoding="utf-8")
+            destination.write_text("old\n", encoding="utf-8")
+            with (
+                mock.patch.object(lcrl, "_running_on_windows", return_value=True),
+                mock.patch.object(lcrl, "_windows_replace_file") as replace_file,
+                mock.patch.object(lcrl.os, "replace") as generic_replace,
+            ):
+                lcrl._replace_file_once(source, destination)
+
+            replace_file.assert_called_once_with(source, destination)
+            generic_replace.assert_not_called()
 
 
 def _load_lcrl_module():

@@ -1,5 +1,11 @@
 # Changelog
 
+- Unreleased Controller 68 / Skill revision `2026-08-12.22`: extending the
+  sharing-denial retry budget was not stable on Windows Python 3.13. Existing
+  durable files now use the native Win32 `ReplaceFileW` single-operation API;
+  first creation and non-Windows platforms retain `os.replace`. The same
+  bounded retry and fail-closed behavior remains around either primitive.
+
 - Unreleased Controller 67 / Skill revision `2026-08-12.21`: a clean
   projectless Mac C1 task proved that browser capability may exist while the
   default account gate under `~/.codex` still requires a manual filesystem
