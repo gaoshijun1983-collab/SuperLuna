@@ -6,6 +6,10 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 
 ## 0.2: reliable browser-first loop
 
+- Prove the task's already assigned workspace writable with a disposable
+  create/read/remove probe before browser initialization or Chat provisioning;
+  projectless runs must use their assigned output directory rather than a
+  hardcoded external path.
 - Prove `Codex work → one bound ChatGPT web Chat → same Codex task continues`.
 - Keep one implementation writer, one conversation id, and one claimed browser
   tab for the whole run.

@@ -137,11 +137,26 @@ class PackageTests(unittest.TestCase):
 
     def test_account_slot_precedes_browser_skill_and_runtime(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        workspace_step = skill.index("workspace-preflight")
         slot_step = skill.index("acquire-account-browser-slot")
         browser_step = skill.index("随后才读取并使用 `browser:control-in-app-browser`")
+        self.assertLess(workspace_step, slot_step)
         self.assertLess(slot_step, browser_step)
+        self.assertIn("--workspace ready_before_browser", skill)
+        self.assertIn("不得硬编码 `/var/tmp`", skill)
         self.assertIn("browser_skill_read_allowed=true", skill)
         self.assertIn("browser_runtime_initialization_allowed=true", skill)
+        self.assertLess(
+            transport.index("run `workspace-preflight`"),
+            transport.index("acquire an account browser slot"),
+        )
+        self.assertLess(
+            transport.index("acquire an account browser slot"),
+            transport.index("activate `browser:control-in-app-browser`"),
+        )
 
     def test_published_state_schema_accepts_every_runtime_reasoning_source(self):
         schema = json.loads(

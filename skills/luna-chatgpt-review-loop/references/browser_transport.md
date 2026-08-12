@@ -78,10 +78,20 @@ prove that another computer signed into the same ChatGPT account is idle.
 
 ## Start and send
 
-At skill entry, activate `browser:control-in-app-browser` and initialize the
-implementation task's own browser. If no ChatGPT tab exists, open
-`https://chatgpt.com/` before local project work and verify login; an empty tab
-list is not evidence that browser control is unavailable.
+At skill entry, read only the SuperLuna Skill. Before acquiring a browser slot,
+run `workspace-preflight` against the existing workspace assigned to the current
+task. A projectless task uses its assigned output directory; it must not hardcode
+`/var/tmp`, Desktop, or another path outside that sandbox. The preflight creates,
+verifies, and removes one unique probe. If the directory is missing, unwritable,
+or the probe cannot be removed, stop before browser initialization, Chat
+provisioning, message send, or state creation.
+
+Only after `workspace_ready` may the task acquire an account browser slot. Only
+after that lease explicitly allows browser Skill reading and runtime
+initialization may it activate `browser:control-in-app-browser` and initialize
+its own browser. If no ChatGPT tab exists, follow the separately authorized
+health-probe or provisioning path; an empty tab list is not evidence that browser
+control is unavailable.
 
 When a coordinator has already provisioned the sole Chat and durable state is
 still a pristine `local_work` / provisioned `pending_handoff`, call
@@ -98,7 +108,9 @@ implementation occurrence must continue its already-authorized local work in
 the same turn. Binding recovery alone is not a deliverable and cannot be used
 to defer work to another wakeup.
 
-Run `autonomous-preflight --transport in_app_browser`, then create state with
+Run `startup-diagnostics --workspace ready_before_browser
+--account-slot acquired_before_browser` and then
+`autonomous-preflight --transport in_app_browser`, then create state with
 `init --review-transport in_app_browser`. The user confirms the visible reviewer
 mode with `confirm-review-mode --source in_app_browser`; SuperLuna never changes
 the model or reasoning level automatically.

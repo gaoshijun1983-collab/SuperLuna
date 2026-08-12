@@ -1,5 +1,14 @@
 # Changelog
 
+- Unreleased Controller 73 / Skill revision `2026-08-12.27`: real projectless
+  Mac C4 proved browser health recovery and provisioned its sole reviewer Chat,
+  but only then discovered that the hardcoded `/var/tmp` test directory was
+  outside its assigned writable workspace. Startup now runs a controller-backed
+  create/verify/remove probe in the task's existing assigned workspace before
+  acquiring a browser slot. Missing, unwritable, mismatched, or uncleanable
+  workspaces fail before browser initialization, Chat creation, sending, or
+  state creation, preventing orphan reviewer Chats.
+
 - Unreleased Controller 72 / Skill revision `2026-08-12.26`: real projectless
   Mac C3 obeyed the slot-before-browser order, but a fresh browser had no tab
   from which to prove post-cooldown conversation-history health. A health-probe

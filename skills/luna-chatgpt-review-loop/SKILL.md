@@ -146,8 +146,22 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 状态询问、调度补跑、Chat 回复或没有稳定授权身份的外部消息不得调用它。
 
 1. **先只读取本 SuperLuna Skill，不得提前读取或启用浏览器 Skill。** 取得并校验当前任务的
-   精确 identity 后，立即取得机器级共享名额；浏览器 Skill 的读取、运行时连接、说明、标签、
-   页面和截图都属于受控浏览器启动，不得用“尚未打开网页”绕过：
+   精确 identity 后，先使用宿主分配给当前任务的现有 `cwd` / 项目根目录运行工作区预检；
+   无项目任务也必须使用自己已经分配的可写输出目录，不得硬编码 `/var/tmp`、桌面或另一个
+   未授权路径，也不得为了通过预检自行创建替代目录：
+
+```text
+python -B <skill-root>/scripts/lcrl.py workspace-preflight \
+  --project-path <当前任务被分配的现有工作目录>
+```
+
+   只有返回 `action=workspace_ready`、`workspace_ready=true` 且 `probe_removed=true` 才继续。
+   该命令只创建并删除一个随机命名的最小写入探针，不创建 state、不授权浏览器或 Chat。
+   缺失、不可写、校验失败或探针无法清理时，必须在初始化浏览器、创建/打开 Chat、发送消息
+   或创建 state **之前**停止；不得先留下孤儿 Chat 再请求目录权限。
+
+   工作区通过后才取得机器级共享名额；浏览器 Skill 的读取、运行时连接、说明、标签、页面和
+   截图都属于受控浏览器启动，不得用“尚未打开网页”绕过：
 
 ```text
 python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
@@ -228,6 +242,7 @@ python -B <skill-root>/scripts/lcrl.py browser-startup-plan \
 python -B <skill-root>/scripts/lcrl.py startup-diagnostics \
   --implementation-thread-id <实施任务ID> --reviewer-thread-id <网页conversation-id> \
   --delegation-source-thread-id <委派来源任务ID；无委派时省略> \
+  --workspace ready_before_browser \
   --account-slot acquired_before_browser \
   --browser initialized --chat-login logged_in --chat-selection unique \
   --review-mode extreme --chat-read available --chat-send available \

@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 72
-SKILL_REVISION = "2026-08-12.26"
+CONTROLLER_VERSION = 73
+SKILL_REVISION = "2026-08-12.27"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -86,6 +86,7 @@ VALID_ATTACHMENT_CAPABILITIES = {"native", "manual", "unavailable"}
 VALID_FILESYSTEM_CAPABILITIES = {"inline", "mcp_verified", "unavailable"}
 VALID_COORDINATION_CAPABILITIES = {"available", "unavailable", "unknown"}
 VALID_STARTUP_BROWSER_STATES = {"initialized", "uninitialized"}
+VALID_STARTUP_WORKSPACE_STATES = {"ready_before_browser", "missing", "checked_after_browser"}
 VALID_STARTUP_ACCOUNT_SLOT_STATES = {"acquired_before_browser", "missing", "acquired_after_browser"}
 VALID_STARTUP_CHAT_LOGIN_STATES = {"logged_in", "not_logged_in"}
 VALID_STARTUP_CHAT_SELECTION_STATES = {"unique", "not_unique"}
@@ -3009,6 +3010,86 @@ def autonomous_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def workspace_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Prove the assigned workspace is writable before browser startup."""
+    project_path = Path(args.project_path).expanduser().resolve()
+    blocked = {
+        "ok": False,
+        "action": "workspace_unavailable",
+        "workspace_ready": False,
+        "project_path": str(project_path),
+        "browser_access_allowed": False,
+        "chat_creation_allowed": False,
+        "state_creation_allowed": False,
+        "user_status": "需要你决定",
+        "user_message": "当前任务的工作目录不可用于本轮测试。",
+        "user_next_choice": "请为当前任务提供一个已经存在且可写的工作目录。",
+    }
+    if not project_path.is_dir():
+        return {
+            **blocked,
+            "reason_code": "workspace_not_directory",
+            "probe_removed": True,
+        }
+
+    probe_path: Path | None = None
+    descriptor: int | None = None
+    probe_removed = True
+    try:
+        descriptor, probe_name = tempfile.mkstemp(
+            prefix=".superluna-write-probe-",
+            dir=str(project_path),
+        )
+        probe_path = Path(probe_name)
+        payload = secrets.token_bytes(32)
+        stream = os.fdopen(descriptor, "wb")
+        descriptor = None
+        with stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if probe_path.read_bytes() != payload:
+            reason_code = "workspace_probe_mismatch"
+        else:
+            reason_code = "none"
+    except OSError:
+        reason_code = "workspace_probe_failed"
+    finally:
+        if descriptor is not None:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if probe_path is not None and probe_path.exists():
+            try:
+                probe_path.unlink()
+            except OSError:
+                probe_removed = False
+
+    if reason_code != "none" or not probe_removed:
+        return {
+            **blocked,
+            "reason_code": (
+                "workspace_probe_cleanup_failed" if not probe_removed else reason_code
+            ),
+            "probe_removed": probe_removed,
+        }
+    return {
+        "ok": True,
+        "action": "workspace_ready",
+        "workspace_ready": True,
+        "project_path": str(project_path),
+        "probe_removed": True,
+        "must_run_before_browser": True,
+        "browser_access_allowed_by_this_check": False,
+        "chat_creation_allowed_by_this_check": False,
+        "state_creation_allowed_by_this_check": False,
+        "user_status": "正在开发",
+        "user_message": "工作目录已确认，可以继续启动检查。",
+        "user_next_choice": "无需操作。",
+    }
+
+
 def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
     """Diagnose startup from caller-provided facts without touching state."""
     implementation_thread_id = str(args.implementation_thread_id or "").strip()
@@ -3017,6 +3098,7 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
         getattr(args, "delegation_source_thread_id", None) or ""
     ).strip()
     facts = {
+        "workspace": args.workspace,
         "account_slot": args.account_slot,
         "browser": args.browser,
         "chat_login": args.chat_login,
@@ -3042,6 +3124,18 @@ def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
             "implementation_identity_is_delegation_source",
             "当前实施任务 identity 错误复用了协调任务的 source_thread_id。",
             "请取得新建实施任务自身的精确 threadId；不得使用委派包装里的 source_thread_id。",
+        ),
+        (
+            args.workspace == "missing",
+            "workspace_preflight_missing",
+            "尚未在浏览器启动前确认当前任务的工作目录可写。",
+            "请先在当前任务被分配的工作目录运行 workspace-preflight；不得先创建 Chat。",
+        ),
+        (
+            args.workspace != "ready_before_browser",
+            "workspace_preflight_sequence_invalid",
+            "工作目录是在浏览器启动后才检查，启动顺序无效。",
+            "请停止本轮，并在新的干净任务中先完成工作目录预检，再启动浏览器。",
         ),
         (
             args.account_slot != "acquired_before_browser",
@@ -6837,6 +6931,9 @@ def build_parser() -> argparse.ArgumentParser:
     startup_diagnostics.add_argument("--reviewer-thread-id", required=True)
     startup_diagnostics.add_argument("--delegation-source-thread-id")
     startup_diagnostics.add_argument(
+        "--workspace", required=True, choices=sorted(VALID_STARTUP_WORKSPACE_STATES),
+    )
+    startup_diagnostics.add_argument(
         "--account-slot", required=True, choices=sorted(VALID_STARTUP_ACCOUNT_SLOT_STATES),
     )
     startup_diagnostics.add_argument(
@@ -6873,6 +6970,12 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("user_open_tabs", "controlled_tabs", "authorized_exact_url_open"),
     )
     browser_startup_plan.add_argument("--exact-url-open-authorized", action="store_true")
+
+    workspace_preflight = sub.add_parser(
+        "workspace-preflight",
+        help="在浏览器启动前验证当前任务被分配的工作目录真实可写",
+    )
+    workspace_preflight.add_argument("--project-path", required=True)
 
     acquire_account_browser_slot = sub.add_parser(
         "acquire-account-browser-slot",
@@ -7213,6 +7316,8 @@ def main(argv: list[str] | None = None) -> int:
             result = autonomous_preflight_command(args)
         elif args.command == "startup-diagnostics":
             result = startup_diagnostics_command(args)
+        elif args.command == "workspace-preflight":
+            result = workspace_preflight_command(args)
         elif args.command == "browser-startup-plan":
             result = browser_startup_plan_command(args)
         elif args.command == "acquire-account-browser-slot":

@@ -1512,11 +1512,105 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result["continuation_owner"], "implementation_task")
         self.assertEqual(result["coordinator_role"], "exception_only")
 
+    def test_workspace_preflight_proves_existing_directory_writable_and_cleans_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+
+            result = lcrl.workspace_preflight_command(Namespace(
+                project_path=str(project),
+            ))
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["action"], "workspace_ready")
+            self.assertTrue(result["workspace_ready"])
+            self.assertTrue(result["probe_removed"])
+            self.assertEqual(list(project.glob(".superluna-write-probe-*")), [])
+            self.assertFalse(result["browser_access_allowed_by_this_check"])
+            self.assertFalse(result["chat_creation_allowed_by_this_check"])
+
+    def test_workspace_preflight_fails_closed_before_creating_missing_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "missing"
+
+            result = lcrl.workspace_preflight_command(Namespace(
+                project_path=str(project),
+            ))
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["action"], "workspace_unavailable")
+            self.assertEqual(result["reason_code"], "workspace_not_directory")
+            self.assertFalse(result["workspace_ready"])
+            self.assertFalse(project.exists())
+            self.assertFalse(result["browser_access_allowed"])
+            self.assertFalse(result["chat_creation_allowed"])
+
+    def test_workspace_preflight_removes_probe_when_verification_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            real_read_bytes = Path.read_bytes
+
+            def wrong_probe_bytes(path):
+                if path.name.startswith(".superluna-write-probe-"):
+                    return b"wrong"
+                return real_read_bytes(path)
+
+            with mock.patch.object(Path, "read_bytes", autospec=True, side_effect=wrong_probe_bytes):
+                result = lcrl.workspace_preflight_command(Namespace(
+                    project_path=str(project),
+                ))
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["reason_code"], "workspace_probe_mismatch")
+            self.assertEqual(list(project.glob(".superluna-write-probe-*")), [])
+
+    def test_workspace_preflight_fails_closed_when_probe_cannot_be_created(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with mock.patch.object(
+                lcrl.tempfile,
+                "mkstemp",
+                side_effect=PermissionError(13, "not writable"),
+            ):
+                result = lcrl.workspace_preflight_command(Namespace(
+                    project_path=directory,
+                ))
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["reason_code"], "workspace_probe_failed")
+            self.assertFalse(result["browser_access_allowed"])
+            self.assertFalse(result["chat_creation_allowed"])
+
+    def test_workspace_preflight_fails_closed_when_probe_cannot_be_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            real_unlink = Path.unlink
+
+            def blocked_probe_unlink(path, *args, **kwargs):
+                if path.name.startswith(".superluna-write-probe-"):
+                    raise PermissionError(13, "cannot remove probe")
+                return real_unlink(path, *args, **kwargs)
+
+            with mock.patch.object(
+                Path,
+                "unlink",
+                autospec=True,
+                side_effect=blocked_probe_unlink,
+            ):
+                result = lcrl.workspace_preflight_command(Namespace(
+                    project_path=str(project),
+                ))
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["reason_code"], "workspace_probe_cleanup_failed")
+            self.assertFalse(result["probe_removed"])
+            for probe in project.glob(".superluna-write-probe-*"):
+                probe.unlink()
+
     def test_startup_diagnostics_reports_ready_when_all_facts_are_present(self):
         result = lcrl.startup_diagnostics_command(Namespace(
             implementation_thread_id="implementation-task",
             reviewer_thread_id="reviewer-chat",
             delegation_source_thread_id="coordinator-task",
+            workspace="ready_before_browser",
             account_slot="acquired_before_browser",
             browser="initialized", chat_login="logged_in",
             chat_selection="unique", review_mode="extreme",
@@ -1530,6 +1624,8 @@ class ControllerTests(unittest.TestCase):
     def test_startup_diagnostics_returns_only_the_first_failure(self):
         cases = (
             ("implementation_thread_id", "", "implementation_identity_missing"),
+            ("workspace", "missing", "workspace_preflight_missing"),
+            ("workspace", "checked_after_browser", "workspace_preflight_sequence_invalid"),
             ("account_slot", "missing", "account_slot_sequence_invalid"),
             ("browser", "uninitialized", "browser_not_initialized"),
             ("chat_login", "not_logged_in", "chat_not_logged_in"),
@@ -1545,6 +1641,7 @@ class ControllerTests(unittest.TestCase):
                 "implementation_thread_id": "implementation-task",
                 "reviewer_thread_id": "reviewer-chat",
                 "delegation_source_thread_id": "coordinator-task",
+                "workspace": "ready_before_browser",
                 "account_slot": "acquired_before_browser",
                 "browser": "initialized", "chat_login": "logged_in",
                 "chat_selection": "unique", "review_mode": "extreme",
@@ -1562,6 +1659,7 @@ class ControllerTests(unittest.TestCase):
         result = lcrl.startup_diagnostics_command(Namespace(
             implementation_thread_id="same-stable-id",
             reviewer_thread_id="same-stable-id",
+            workspace="ready_before_browser",
             account_slot="acquired_before_browser",
             browser="initialized", chat_login="logged_in",
             chat_selection="unique", review_mode="extreme",
@@ -1576,6 +1674,7 @@ class ControllerTests(unittest.TestCase):
             implementation_thread_id="coordinator-task",
             reviewer_thread_id="reviewer-chat",
             delegation_source_thread_id="coordinator-task",
+            workspace="ready_before_browser",
             account_slot="acquired_before_browser",
             browser="initialized", chat_login="logged_in",
             chat_selection="unique", review_mode="extreme",
