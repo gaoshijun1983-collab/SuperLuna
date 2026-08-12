@@ -27,10 +27,11 @@ a bounded local wait until `retry_not_before`, and reacquires before browser
 initialization. It must not create an automation or finish at the active boundary.
 Only an existing waiting occurrence may redate its same one-shot check.
 
-The registry defaults to
-`~/.codex/superluna/account-browser-gate.json` (or the configured Codex home),
-so it coordinates projects and tasks on the current machine. It cannot prove
-that another computer signed into the same ChatGPT account is idle.
+The registry defaults to a deterministic system-temporary directory scoped to
+the current OS user, so project and projectless tasks can share it without a
+manual filesystem approval. Slot acquisition happens before browser runtime
+setup or documentation access, not merely before the first URL. The gate cannot
+prove that another computer signed into the same ChatGPT account is idle.
 
 ## Fixed identity
 

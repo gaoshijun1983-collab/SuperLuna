@@ -213,6 +213,16 @@ class ControllerTests(unittest.TestCase):
             gate = lcrl.load_account_browser_gate(registry)
             self.assertEqual(len(gate["slots"]), 2)
 
+    def test_default_account_browser_gate_uses_system_temp_not_codex_home(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fake_codex_home = Path(directory) / "restricted-codex-home"
+            with mock.patch.dict(os.environ, {"CODEX_HOME": str(fake_codex_home)}):
+                gate = lcrl.default_account_browser_gate_path()
+
+            self.assertTrue(gate.is_relative_to(Path(tempfile.gettempdir()).resolve()))
+            self.assertFalse(gate.is_relative_to(fake_codex_home.resolve()))
+            self.assertEqual(gate.name, "account-browser-gate.json")
+
     def test_account_browser_gate_enforces_two_under_process_race(self):
         ctx = mp.get_context("spawn")
         with tempfile.TemporaryDirectory() as directory:

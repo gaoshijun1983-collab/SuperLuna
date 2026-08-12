@@ -139,7 +139,8 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 并强制重新目视确认评审 Chat 的推理档位；返回后必须在同一 turn 继续新目标。普通“继续”、
 状态询问、调度补跑、Chat 回复或没有稳定授权身份的外部消息不得调用它。
 
-1. 在使用 `browser:control-in-app-browser` 或进行任何网页动作前，先取得机器级共享名额：
+1. 在读取浏览器 Skill 后、调用其运行时连接/说明/标签/页面等任何工具之前，先取得机器级共享
+   名额。浏览器运行时连接本身也属于初始化，不得用“尚未打开网页”绕过：
 
 ```text
 python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \

@@ -25,6 +25,10 @@ share one ChatGPT-account browser gate. At most two tasks may initialize,
 inspect, read, send, or refresh web Chat at the same time. A third task queues
 before browser initialization. Slots are short-lived and never remain held
 while Codex implements locally or waits for the reviewer.
+The gate lives in a deterministic system-temporary directory for the current
+OS user, so project and projectless tasks share it without access to a project
+checkout or `~/.codex`. Slot acquisition precedes the first browser runtime
+connection, documentation call, tab listing, or page action.
 When one task releases a slot, another task waits through a 180-second quiet
 handoff before touching ChatGPT. Only the same task's first `startup` or
 `waiting_read` immediately after a proven healthy probe may bypass the interval,

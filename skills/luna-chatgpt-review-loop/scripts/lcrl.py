@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 66
-SKILL_REVISION = "2026-08-12.20"
+CONTROLLER_VERSION = 67
+SKILL_REVISION = "2026-08-12.21"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -598,10 +598,13 @@ def save_binding_registry(path: str | Path, value: dict[str, Any], expected_revi
 
 
 def default_account_browser_gate_path() -> Path:
-    """Return the machine-wide gate shared by every local SuperLuna run."""
-    configured_root = os.environ.get("CODEX_HOME")
-    codex_root = Path(configured_root).expanduser() if configured_root else Path.home() / ".codex"
-    return (codex_root / "superluna" / "account-browser-gate.json").resolve()
+    """Return the host-user gate reachable from project and projectless tasks."""
+    user_key = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(Path.home())).strip("-") or "default"
+    return (
+        Path(tempfile.gettempdir())
+        / f"superluna-{hashlib.sha256(user_key.encode('utf-8')).hexdigest()[:16]}"
+        / "account-browser-gate.json"
+    ).resolve()
 
 
 def empty_account_browser_gate() -> dict[str, Any]:

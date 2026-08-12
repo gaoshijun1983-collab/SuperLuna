@@ -1,5 +1,13 @@
 # Changelog
 
+- Unreleased Controller 67 / Skill revision `2026-08-12.21`: a clean
+  projectless Mac C1 task proved that browser capability may exist while the
+  default account gate under `~/.codex` still requires a manual filesystem
+  approval. The host-user gate now lives in a deterministic system-temporary
+  directory shared by project and projectless tasks. The Skill also treats
+  browser runtime connection and documentation calls as initialization, so the
+  account slot must be acquired before the first browser tool call.
+
 - Unreleased Controller 66 / Skill revision `2026-08-12.20`: after the account
   gate passed, the next Windows Python 3.13 run exposed the same sharing denial
   in the concurrent task-binding registry. The bounded two-second budget now
