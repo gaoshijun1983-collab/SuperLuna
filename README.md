@@ -19,10 +19,16 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 83 / Skill revision `2026-08-12.37`, refuses to consume a scheduled
+Controller 83 / Skill revision `2026-08-13.38`, refuses to consume a scheduled
 browser reply while the owning task still holds a live `waiting_read` account
 slot, and the rendered one-shot prompt now releases that slot before deleting
-the wait and resuming. Controller 82 gives an explicitly authorized
+the wait and resuming. Revision `.38` also makes the Browser plugin-root boundary
+explicit so an implementation task cannot incorrectly append
+`skills/control-in-app-browser/scripts/` when locating `browser-client.mjs`.
+The macOS C12 probe confirmed one fixed visible Extreme Chat and then encountered
+a real ChatGPT history rate limit before its first formal send; it failed closed
+with zero sends, zero waits, zero reads, and `active_count=0`, so it earns no
+three-round or recovery credit. Controller 82 gives an explicitly authorized
 new reviewer Chat a controller-recorded, once-only startup home-navigation grant;
 an empty task browser no longer has to misuse the health-probe path, and the same
 authorization cannot be reused after its startup slot is released. Controller 81 closes a Windows 3.13

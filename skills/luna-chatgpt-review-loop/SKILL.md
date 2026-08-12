@@ -206,7 +206,11 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
 
 2. 随后才读取并使用 `browser:control-in-app-browser`，初始化当前实现任务自己的内置浏览器
    binding；不得因为尚未调用该浏览器 Skill、当前标签列表为空或协调任务曾经打开过网页，
-   就声称 Codex 没有浏览器能力。若没有旧状态，先在这个实现任务自己的内置浏览器打开
+   就声称 Codex 没有浏览器能力。Browser Skill 中的 `<plugin root>` 是同时包含 `skills/` 与
+   `scripts/` 的共同父目录，不是 `skills/control-in-app-browser/` Skill 目录；只能按 Browser
+   Skill 的说明拼接 `<plugin root>/scripts/browser-client.mjs`，并在导入前确认该文件真实存在。
+   不得自行追加第二层 `skills/control-in-app-browser/scripts/`；路径不存在时必须停止并报告，
+   不能试探多个浏览器实现。若没有旧状态，先在这个实现任务自己的内置浏览器打开
    `https://chatgpt.com/` 并检查登录状态；这一步不发送消息、不创建 Chat、不改模型。
 3. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
    一次性新 Chat 授权，先按 `browser_chat_provisioning.md` 创建并初始化唯一 reviewer

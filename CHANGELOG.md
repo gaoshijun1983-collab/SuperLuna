@@ -1,5 +1,15 @@
 # Changelog
 
+- Unreleased Controller 83 / Skill revision `2026-08-13.38`: C12 exposed an
+  incorrect browser-runtime path expansion by treating the Browser Skill folder
+  as the plugin root. The SuperLuna startup contract now defines the plugin root
+  as the common parent containing both `skills/` and `scripts/`, requires the
+  exact `<plugin root>/scripts/browser-client.mjs`, and forbids probing alternate
+  browser implementations. C12 subsequently observed a real ChatGPT history
+  rate limit before round-one send and correctly stopped with zero sends, waits,
+  reads, or active account slots; this is fail-closed evidence, not a clean-cycle
+  or rate-limit-recovery credit.
+
 - Unreleased Controller 83 / Skill revision `2026-08-12.37`: C11 consumed its
   second scheduled reply correctly but retained the `waiting_read` account slot
   until preparing round three. The rendered one-shot prompt now orders account

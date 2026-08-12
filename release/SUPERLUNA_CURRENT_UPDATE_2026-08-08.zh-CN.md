@@ -6,7 +6,7 @@
 - 版本：`0.2.0-alpha.49`（Python 元数据：`0.2.0a49`）
 - 当前源码控制器：83（Alpha 49 公开包仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-12.37`
+- 当前源码 Skill 修订：`2026-08-13.38`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
@@ -14,6 +14,12 @@
 
 ### 0AAAAA. 同一账户网页访问最多两个并加入全局熔断
 
+- Skill revision `.38` 修复 C12 暴露的浏览器运行时路径理解错误：`<plugin root>` 现在明确为
+  同时包含 `skills/` 与 `scripts/` 的共同父目录，只允许导入
+  `<plugin root>/scripts/browser-client.mjs`，不得错误追加
+  `skills/control-in-app-browser/scripts/` 或试探替代浏览器实现。C12 随后在第1轮正式发送前
+  真实看到 ChatGPT 对话记录限流，按设计以 0 次发送、0 个等待任务、0 次回复读取和
+  `active_count=0` 失败关闭；该证据不计入三轮成功或限流恢复。
 - Controller 83 修复 C11 第 2 轮真实读取后名额释放过晚：等待提示现在明确要求保存回复后先释放
   `waiting_read` 名额，再删除一次性等待项并消费回复；若同一实施任务仍持有有效读取名额，
   `resume-from-reply` 会在状态改变前失败关闭。压缩后的完整提示仍不超过 1200-byte 上限。

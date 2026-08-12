@@ -817,6 +817,14 @@ class PackageTests(unittest.TestCase):
         self.assertIn("内置浏览器", readme)
         self.assertEqual(registry["default_transport"], "in_app_browser")
 
+    def test_skill_resolves_browser_runtime_from_plugin_root_not_skill_directory(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("同时包含 `skills/` 与", skill)
+        self.assertIn("`scripts/` 的共同父目录", skill)
+        self.assertIn("<plugin root>/scripts/browser-client.mjs", skill)
+        self.assertIn("不得自行追加第二层 `skills/control-in-app-browser/scripts/`", skill)
+        self.assertIn("导入前确认该文件真实存在", skill)
+
     def test_browser_wait_contract_reclaims_the_persisted_provider_tab_each_occurrence(self):
         schema = json.loads(
             (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(encoding="utf-8")
