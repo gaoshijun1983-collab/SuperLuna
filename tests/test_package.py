@@ -857,6 +857,8 @@ class PackageTests(unittest.TestCase):
             "provisioned_url_reopen_allowed",
             "authorize-browser-submission-reopen",
             "--browser-reopen-lease-id",
+            "--new-chat-authorization-id",
+            "provisioning_home_navigation_allowed=true",
         ):
             self.assertIn(requirement, skill)
             self.assertIn(requirement, provisioning)

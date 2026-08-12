@@ -43,11 +43,16 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 状态或 composer 可用都不能单独证明对话记录限流已经解除。该共享门
 只能协调本机任务，无法证明另一台电脑没有同时访问；跨设备同时运行仍由用户避免。
 
-全新实现任务的内置浏览器可能没有任何可认领标签。此时只有当前 lease 是 `health_probe` 且
-控制器返回 `health_probe_home_navigation_allowed=true`，才允许新建一个受控标签并导航一次
-精确 `https://chatgpt.com/`；该页面本身不是健康证明，必须继续核验侧栏或对话历史界面中至少
-一个真实既有 conversation 条目可读且未见限流提示。不得点开无关对话、创建 Chat、发送、刷新
-或把登录状态/空 composer 当成健康。完成后立即关闭本次临时探测标签并释放名额。
+全新实现任务的内置浏览器可能没有任何可认领标签。无新 Chat 授权时，只有当前 lease 是
+`health_probe` 且控制器返回 `health_probe_home_navigation_allowed=true`，才允许新建一个受控
+标签并导航一次精确 `https://chatgpt.com/`；该页面本身不是健康证明，必须继续核验侧栏或对话
+历史界面中至少一个真实既有 conversation 条目可读且未见限流提示。不得点开无关对话、创建
+Chat、发送、刷新或把登录状态/空 composer 当成健康。完成后立即关闭本次临时探测标签并释放
+名额。另一条独立路径是用户明确授权本运行创建唯一新 reviewer Chat：首次 `startup` 取名额时
+必须同时传入稳定的 `--new-chat-authorization-id`；只有返回
+`provisioning_home_navigation_allowed=true` 才可打开一次返回的 `provisioning_home_url`，并在
+同一名额内完成唯一 Chat provisioning。不得先释放 startup 名额再改用 health probe，也不得
+在失败、重试或另一个任务中复用该授权身份。
 
 自动模式活动期间不得输出三选一、任务成果卡片或把阶段性成功写成最终答复。绑定恢复、
 本地实施完成、审阅包登记和回复吸收都只是循环中的中间状态；在没有真实阻塞时继续执行
@@ -169,6 +174,18 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
   --reviewer-thread-id <当前固定评审Chat ID> \
   --operation startup|submission|waiting_read|health_probe
 ```
+
+用户已明确授权本次运行创建唯一新 Chat 时，第一次 `startup` 使用尚无 conversation id 的
+稳定占位 reviewer identity，并追加：
+
+```text
+--new-chat-authorization-id <当前用户授权或委派正文的稳定身份>
+```
+
+只有同一返回同时包含 `slot_acquired=true` 与
+`provisioning_home_navigation_allowed=true`，才可在空标签情况下打开一次返回的
+`provisioning_home_url`。这个授权在机器共享门中只消费一次；释放名额后再次使用相同授权身份、
+另一个任务复用它或非 `startup` 操作携带它都会失败关闭。
 
 只有同时得到 `slot_acquired=true`、`browser_skill_read_allowed=true` 和
 `browser_runtime_initialization_allowed=true`，才可读取 `browser:control-in-app-browser` 的

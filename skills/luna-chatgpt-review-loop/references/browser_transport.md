@@ -96,7 +96,11 @@ after that lease explicitly allows browser Skill reading and runtime
 initialization may it activate `browser:control-in-app-browser` and initialize
 its own browser. If no ChatGPT tab exists, follow the separately authorized
 health-probe or provisioning path; an empty tab list is not evidence that browser
-control is unavailable.
+control is unavailable. The provisioning path must acquire its first `startup`
+slot with `--new-chat-authorization-id` and may open the returned home URL only
+when `provisioning_home_navigation_allowed=true`. It keeps that same slot until
+the single authorized Chat is provisioned; releasing it and falling back to a
+health probe is not a valid provisioning retry.
 
 When a coordinator has already provisioned the sole Chat and durable state is
 still a pristine `local_work` / provisioned `pending_handoff`, call

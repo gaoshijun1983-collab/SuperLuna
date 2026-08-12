@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 81
-SKILL_REVISION = "2026-08-12.35"
+CONTROLLER_VERSION = 82
+SKILL_REVISION = "2026-08-12.36"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 BINDING_REGISTRY_VERSION = 1
@@ -695,6 +695,7 @@ def empty_account_browser_gate() -> dict[str, Any]:
         "last_released_task_id": "none",
         "handoff_bypass_task_id": "none",
         "handoff_bypass_operation": "none",
+        "provisioning_authorizations": [],
         "slots": [],
     }
 
@@ -724,6 +725,27 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
     handoff_bypass_operation = value.get("handoff_bypass_operation", "none")
     if handoff_bypass_operation not in VALID_ACCOUNT_BROWSER_OPERATIONS | {"none", "health_followup"}:
         errors.append("account browser handoff_bypass_operation is invalid")
+    provisioning_authorizations = value.get("provisioning_authorizations", [])
+    if not isinstance(provisioning_authorizations, list):
+        errors.append("account browser provisioning_authorizations must be a list")
+        provisioning_authorizations = []
+    if len(provisioning_authorizations) > 64:
+        errors.append("account browser provisioning_authorizations exceeds 64 entries")
+    provisioning_ids: set[str] = set()
+    for index, authorization in enumerate(provisioning_authorizations):
+        if not isinstance(authorization, dict):
+            errors.append(f"account browser provisioning authorization {index} must be an object")
+            continue
+        authorization_id = str(authorization.get("authorization_id", "")).strip()
+        task_id = str(authorization.get("implementation_thread_id", "")).strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", authorization_id) or authorization_id in provisioning_ids:
+            errors.append(f"account browser provisioning authorization {index} has an invalid or duplicate identity")
+        else:
+            provisioning_ids.add(authorization_id)
+        if not task_id or task_id == "none":
+            errors.append(f"account browser provisioning authorization {index} requires a task identity")
+        if not is_timestamp(authorization.get("authorized_at")):
+            errors.append(f"account browser provisioning authorization {index} requires authorized_at")
     slots = value.get("slots")
     if not isinstance(slots, list):
         errors.append("account browser gate slots must be a list")
@@ -776,6 +798,7 @@ def load_account_browser_gate(path: str | Path, allow_missing: bool = False) -> 
     value.setdefault("last_released_task_id", "none")
     value.setdefault("handoff_bypass_task_id", "none")
     value.setdefault("handoff_bypass_operation", "none")
+    value.setdefault("provisioning_authorizations", [])
     validate_account_browser_gate(value)
     return value
 
@@ -841,6 +864,15 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
     )
     if args.operation not in VALID_ACCOUNT_BROWSER_OPERATIONS:
         raise LCRLError("invalid account browser operation")
+    new_chat_authorization_raw = str(
+        getattr(args, "new_chat_authorization_id", "") or ""
+    ).strip()
+    if new_chat_authorization_raw and args.operation != "startup":
+        raise LCRLError("new Chat provisioning authorization requires a startup slot")
+    new_chat_authorization_id = (
+        hashlib.sha256(new_chat_authorization_raw.encode("utf-8")).hexdigest()
+        if new_chat_authorization_raw else "none"
+    )
     now = _account_gate_now(args.at)
     with acquire_state_lock(
         gate_path, timeout=ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS,
@@ -907,6 +939,10 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "browser_skill_read_allowed": True,
                 "browser_runtime_initialization_allowed": True,
                 "health_probe_home_navigation_allowed": existing["operation"] == "health_probe",
+                # The home-navigation grant exists only in the first successful
+                # acquisition response. Re-reading/reusing the same lease must
+                # not mint a second provisioning open.
+                "provisioning_home_navigation_allowed": False,
                 "lease_id": existing["lease_id"],
                 "expires_at": existing["expires_at"],
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
@@ -936,6 +972,26 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "active_count": len(gate["slots"]),
                 "retry_not_before": conflicting_reviewer_slot["expires_at"],
                 "conflicting_task_id": conflicting_reviewer_slot["implementation_thread_id"],
+                "registry": str(gate_path),
+            }
+        prior_provisioning = next(
+            (
+                authorization for authorization in gate["provisioning_authorizations"]
+                if authorization["authorization_id"] == new_chat_authorization_id
+            ),
+            None,
+        ) if new_chat_authorization_id != "none" else None
+        if prior_provisioning:
+            return {
+                "ok": True,
+                "action": "account_browser_provisioning_already_used",
+                "slot_acquired": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
+                "provisioning_home_navigation_allowed": False,
+                "new_automation_allowed": False,
+                "authorized_task_id": prior_provisioning["implementation_thread_id"],
+                "authorized_at": prior_provisioning["authorized_at"],
                 "registry": str(gate_path),
             }
         handoff_not_before = parse_time(gate.get("handoff_not_before"))
@@ -1000,14 +1056,23 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             microsecond=0
         ).isoformat().replace("+00:00", "Z")
         lease_id = "browser-slot-" + secrets.token_hex(8)
-        gate["slots"].append({
+        slot = {
             "lease_id": lease_id,
             "implementation_thread_id": task_id,
             "reviewer_thread_id": reviewer_id,
             "operation": args.operation,
             "acquired_at": acquired_at,
             "expires_at": expires_at,
-        })
+        }
+        if new_chat_authorization_id != "none":
+            slot["new_chat_authorization_id"] = new_chat_authorization_id
+            gate["provisioning_authorizations"].append({
+                "authorization_id": new_chat_authorization_id,
+                "implementation_thread_id": task_id,
+                "authorized_at": acquired_at,
+            })
+            gate["provisioning_authorizations"] = gate["provisioning_authorizations"][-64:]
+        gate["slots"].append(slot)
         _save_account_browser_gate_locked(gate_path, gate, expected_revision=revision)
         return {
             "ok": True,
@@ -1016,6 +1081,10 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             "browser_skill_read_allowed": True,
             "browser_runtime_initialization_allowed": True,
             "health_probe_home_navigation_allowed": args.operation == "health_probe",
+            "provisioning_home_navigation_allowed": new_chat_authorization_id != "none",
+            "provisioning_home_url": (
+                "https://chatgpt.com/" if new_chat_authorization_id != "none" else "none"
+            ),
             "lease_id": lease_id,
             "expires_at": expires_at,
             "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
@@ -7281,6 +7350,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     acquire_account_browser_slot.add_argument("--implementation-thread-id", required=True)
     acquire_account_browser_slot.add_argument("--reviewer-thread-id", required=True)
+    acquire_account_browser_slot.add_argument(
+        "--new-chat-authorization-id",
+        help="当前用户一次性授权新建唯一 reviewer Chat 的稳定身份",
+    )
     acquire_account_browser_slot.add_argument(
         "--operation", required=True, choices=sorted(VALID_ACCOUNT_BROWSER_OPERATIONS),
     )

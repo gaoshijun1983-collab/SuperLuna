@@ -4,9 +4,9 @@
 
 - 产品：SuperLuna
 - 版本：`0.2.0-alpha.49`（Python 元数据：`0.2.0a49`）
-- 当前源码控制器：81（Alpha 49 公开包仍为旧源码）
+- 当前源码控制器：82（Alpha 49 公开包仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-12.35`
+- 当前源码 Skill 修订：`2026-08-12.36`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
@@ -14,6 +14,10 @@
 
 ### 0AAAAA. 同一账户网页访问最多两个并加入全局熔断
 
+- Controller 82 修复 C10 的空浏览器启动阻塞：用户明确授权创建唯一新 reviewer Chat 时，
+  第一次 `startup` 名额必须携带稳定授权身份；共享门只保存其摘要，并只在该名额持有期间返回
+  一次 `provisioning_home_navigation_allowed=true`。释放后重复使用、另一任务复用或非 startup
+  操作携带同一授权都会在打开网页前失败关闭，不再把新 Chat provisioning 错当成 health probe。
 - Controller 81 修复 Controller 80 首次六平台 CI 在 Windows 3.13 复现的共享锁初始化竞态：
   多个进程同时打开新锁文件后，旧逻辑可能在写入首个可锁字节时收到短暂 `PermissionError`。
   现在会在有界重试前重新检查竞争进程是否已经完成初始化；账户浏览器共享门使用 10 秒排队预算，

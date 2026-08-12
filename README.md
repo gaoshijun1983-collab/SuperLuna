@@ -19,7 +19,10 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 81 / Skill revision `2026-08-12.35`, closes a Windows 3.13
+Controller 82 / Skill revision `2026-08-12.36`, gives an explicitly authorized
+new reviewer Chat a controller-recorded, once-only startup home-navigation grant;
+an empty task browser no longer has to misuse the health-probe path, and the same
+authorization cannot be reused after its startup slot is released. Controller 81 closes a Windows 3.13
 concurrent-start race while initializing the first byte of a shared lock file
 and gives only the account-browser registry a bounded ten-second lock queue;
 persistent permission failures and ordinary state locks remain strict.

@@ -374,6 +374,65 @@ class ControllerTests(unittest.TestCase):
             )
             self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 1)
 
+    def test_explicit_new_chat_startup_authorizes_one_home_navigation_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            authorization_id = "user-request-c10-new-reviewer-chat"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-c10",
+                reviewer_thread_id="pending-superluna-c10",
+                new_chat_authorization_id=authorization_id,
+                operation="startup", registry=str(registry),
+                at="2026-08-12T08:00:00Z",
+            ))
+
+            self.assertTrue(first["slot_acquired"])
+            self.assertTrue(first["provisioning_home_navigation_allowed"])
+            self.assertEqual(first["provisioning_home_url"], "https://chatgpt.com/")
+            gate = lcrl.load_account_browser_gate(registry)
+            self.assertEqual(len(gate["provisioning_authorizations"]), 1)
+            self.assertNotIn(authorization_id, json.dumps(gate))
+
+            reused = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-c10",
+                reviewer_thread_id="pending-superluna-c10",
+                new_chat_authorization_id=authorization_id,
+                operation="startup", registry=str(registry),
+                at="2026-08-12T08:00:00Z",
+            ))
+            self.assertEqual(reused["action"], "account_browser_slot_reused")
+            self.assertFalse(reused["provisioning_home_navigation_allowed"])
+
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-c10",
+                lease_id=first["lease_id"], outcome="completed",
+                health_proof=None, registry=str(registry),
+                at="2026-08-12T08:00:01Z",
+            ))
+            repeated = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-c10",
+                reviewer_thread_id="pending-superluna-c10",
+                new_chat_authorization_id=authorization_id,
+                operation="startup", registry=str(registry),
+                at="2026-08-12T08:03:02Z",
+            ))
+
+            self.assertEqual(repeated["action"], "account_browser_provisioning_already_used")
+            self.assertFalse(repeated["slot_acquired"])
+            self.assertFalse(repeated["provisioning_home_navigation_allowed"])
+
+    def test_new_chat_authorization_is_rejected_outside_startup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(lcrl.LCRLError, "requires a startup slot"):
+                lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id="implementation-c10",
+                    reviewer_thread_id="pending-superluna-c10",
+                    new_chat_authorization_id="user-request-c10",
+                    operation="submission",
+                    registry=str(Path(directory) / "account-browser-gate.json"),
+                    at="2026-08-12T08:00:00Z",
+                ))
+
     def test_default_account_browser_gate_uses_system_temp_not_codex_home(self):
         with tempfile.TemporaryDirectory() as directory:
             fake_codex_home = Path(directory) / "restricted-codex-home"

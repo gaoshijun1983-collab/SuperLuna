@@ -1,5 +1,13 @@
 # Changelog
 
+- Unreleased Controller 82 / Skill revision `2026-08-12.36`: the clean C10
+  macOS retest stopped at 0/3 because its task-local browser had no tabs and
+  the only machine-verifiable home-navigation grant was for a health probe.
+  A user-authorized new reviewer Chat now supplies a stable authorization id
+  with the first `startup` slot. The shared gate records only its digest and
+  allows exactly one ChatGPT home navigation while that slot is held; release,
+  reuse by another task, or use outside `startup` fails closed.
+
 - Unreleased Controller 81 / Skill revision `2026-08-12.35`: Controller 80's
   first six-platform run passed five jobs but reproduced a narrow Windows 3.13
   race: concurrent processes could all open a newly created lock sidecar, then

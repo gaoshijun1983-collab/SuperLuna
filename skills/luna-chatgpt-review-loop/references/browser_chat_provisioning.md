@@ -13,9 +13,13 @@
 
 ## Provision exactly once
 
-1. 首先使用 `browser:control-in-app-browser` 初始化当前实现任务自己的浏览器。若该浏览器
-   没有 ChatGPT 标签，主动打开 `https://chatgpt.com/`，再只读检查登录状态、首页可用性和
-   是否已有目标 conversation；空标签列表不代表浏览器能力缺失。
+1. 工作区预检后，用当前任务 identity、尚无 conversation id 的稳定占位 reviewer identity、
+   `operation=startup` 和当前用户授权正文的稳定 `--new-chat-authorization-id` 取得账户名额。
+   只有返回同时包含 `slot_acquired=true`、`browser_runtime_initialization_allowed=true` 与
+   `provisioning_home_navigation_allowed=true` 才初始化当前任务的浏览器。若该浏览器没有
+   ChatGPT 标签，只可打开一次控制器返回的 `provisioning_home_url`，再只读检查登录状态和
+   首页可用性。空标签列表不代表浏览器能力缺失；不得释放 startup 名额后改走健康探测。
+   相同授权身份释放后不能再次取得开页许可，另一个任务也不能复用。
 2. 生成一条简短初始化消息，包含项目名称、开发目标、评审角色、证据边界和“后续正式
    请求将另行提交”。初始化消息不计入正式回合，也不能被当作 PASS/REVISE 结果。
 3. 通过可见 UI 只创建一个 Chat，并只发送一次初始化消息。发送结果不确定时只在原标签
