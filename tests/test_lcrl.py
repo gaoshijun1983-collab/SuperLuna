@@ -3148,6 +3148,7 @@ class ControllerTests(unittest.TestCase):
                     submitted_at=lcrl.utc_now(),
                     browser_reopen_lease_id=authorized["lease_id"],
                     browser_id="iab-provisioned-resubmit",
+                    browser_send_authorization_revision=authorized["revision"],
                 ))
 
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
@@ -3159,6 +3160,19 @@ class ControllerTests(unittest.TestCase):
                 send_authorized["action"], "browser_submission_send_authorized"
             )
             self.assertTrue(send_authorized["send_allowed"])
+            persisted_authorization = lcrl.load_state(state_path)
+            self.assertEqual(
+                persisted_authorization["runtime"][
+                    "browser_submission_send_authorized_lease_id"
+                ],
+                authorized["lease_id"],
+            )
+            self.assertEqual(
+                persisted_authorization["runtime"][
+                    "browser_submission_send_authorized_revision"
+                ],
+                send_authorized["revision"],
+            )
 
             confirmed = lcrl.confirm_review_submission_command(Namespace(
                 state=str(state_path), reviewer_thread_id="provisioned-resubmit",
@@ -3172,6 +3186,10 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(confirmed["action"], "submission_confirmed")
             persisted = lcrl.load_state(state_path)
             self.assertEqual(persisted["runtime"]["action_lease_id"], "none")
+            self.assertEqual(
+                persisted["runtime"]["browser_submission_send_authorized_lease_id"],
+                "none",
+            )
             self.assertEqual(persisted["review"]["request_message_id"], "message-B2")
 
             ordinary_path = root / "ordinary.json"
@@ -3212,6 +3230,50 @@ class ControllerTests(unittest.TestCase):
                 send_forbidden["action"], "browser_submission_send_forbidden"
             )
             self.assertFalse(send_forbidden["send_allowed"])
+
+    def test_submission_confirmation_cannot_forge_the_fresh_send_gate_revision(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "send-gate-chat",
+                continuation_mode="foreground", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "send-gate-chat")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="send-gate-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="B4",
+                fingerprint="send-gate-B4",
+            )
+            reopened = lcrl.authorize_browser_submission_reopen_command(Namespace(
+                state=str(state_path), fingerprint="send-gate-B4",
+                browser_id="iab-send-gate",
+            ))
+
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "fresh browser submission send authorization"
+            ):
+                lcrl.confirm_review_submission_command(Namespace(
+                    state=str(state_path), reviewer_thread_id="send-gate-chat",
+                    request_turn_id="turn-B4", request_message_id="message-B4",
+                    native_app_instance_id=None, attachment_name=None,
+                    submitted_at=lcrl.utc_now(),
+                    browser_reopen_lease_id=reopened["lease_id"],
+                    browser_id="iab-send-gate",
+                    browser_send_authorization_revision=reopened["revision"],
+                ))
+            persisted = lcrl.load_state(state_path)
+            self.assertEqual(persisted["review"]["request_message_id"], "none")
+            self.assertEqual(
+                persisted["runtime"]["browser_submission_send_authorized_lease_id"],
+                "none",
+            )
 
     def test_new_implementation_task_can_authorize_and_confirm_provisioned_chat_startup_rebind(self):
         with tempfile.TemporaryDirectory() as directory:

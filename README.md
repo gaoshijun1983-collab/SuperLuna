@@ -13,8 +13,12 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.41`; the latest archive remains
-Alpha 27. Controller 49 / Skill revision `2026-08-12.3` fixes the observed
+The current source candidate is `0.2.0-alpha.42`; the latest archive remains
+Alpha 27. Controller 50 / Skill revision `2026-08-12.4` makes the fresh
+pre-send gate a persisted, single-use controller fact: the reopen revision by
+itself can no longer be passed directly to submission confirmation as forged
+proof. Clearing the reopen lease clears that authorization. This is locally
+regression-tested and does not add real-device credit. Controller 49 fixes the observed
 submission-reopen navigation-timeout stall: an uncertain first navigation is
 reconciled only on the same opened tab, and the reopen lease no longer grants
 send permission. A fresh pre-send controller gate now requires the same active

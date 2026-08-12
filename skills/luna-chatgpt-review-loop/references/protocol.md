@@ -124,8 +124,10 @@ one exact-URL reopen after both tab listings disappear. This is not a general
 browser fallback. It requires `review_submit_pending`, a matching current
 submission fingerprint, no request identity, the still-confirmed browser Chat,
 and a short `browser_submission_reopen` lease bound to the current browser id. The caller re-verifies the exact
-conversation, authenticated page, visible Extreme label, and payload identity;
-`confirm-review-submission` must prove and consume the lease. A normal
+conversation, authenticated page, visible Extreme label, and payload identity.
+The fresh pre-send gate atomically persists the matching lease and authorization
+revision; `confirm-review-submission` must consume both at the unchanged state
+revision. The reopen authorization or its revision alone is not proof. A normal
 user-selected tab or promoted provider identity never receives this authorization.
 
 If any already-bound fixed Chat later disappears from both current browser

@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 49
-SKILL_REVISION = "2026-08-12.3"
+CONTROLLER_VERSION = 50
+SKILL_REVISION = "2026-08-12.4"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -636,6 +636,8 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     runtime.setdefault("action_lease_expires_at", "none")
     runtime.setdefault("action_lease_reason", "none")
     runtime.setdefault("browser_submission_reopen_browser_id", "none")
+    runtime.setdefault("browser_submission_send_authorized_lease_id", "none")
+    runtime.setdefault("browser_submission_send_authorized_revision", 0)
     runtime.setdefault("resume_checkpoint", checkpoint_for_status(
         state.get("review", {}).get("status", "local_work")
     ))
@@ -990,6 +992,8 @@ def new_state(
             "action_lease_expires_at": "none",
             "action_lease_reason": "none",
             "browser_submission_reopen_browser_id": "none",
+            "browser_submission_send_authorized_lease_id": "none",
+            "browser_submission_send_authorized_revision": 0,
             "resume_checkpoint": "local_work",
             "resume_checkpoint_at": now,
         },
@@ -1431,6 +1435,22 @@ def validate_state(state: dict[str, Any]) -> None:
             errors.append("browser submission reopen lease requires a browser identity")
     elif reopen_browser_id not in (None, "", "none"):
         errors.append("browser submission reopen browser identity requires its lease")
+    send_authorized_lease_id = runtime.get(
+        "browser_submission_send_authorized_lease_id", "none"
+    )
+    send_authorized_revision = runtime.get(
+        "browser_submission_send_authorized_revision", 0
+    )
+    if send_authorized_lease_id not in (None, "", "none"):
+        if (
+            runtime.get("action_lease_reason") != "browser_submission_reopen"
+            or send_authorized_lease_id != lease_id
+        ):
+            errors.append("browser submission send authorization requires its reopen lease")
+        if not isinstance(send_authorized_revision, int) or send_authorized_revision < 1:
+            errors.append("browser submission send authorization requires a state revision")
+    elif send_authorized_revision != 0:
+        errors.append("browser submission send authorization revision requires its lease")
     waiting_check_active = automation.get("waiting_check_active")
     waiting_check_token = automation.get("waiting_check_token", "none")
     waiting_check_automation_id = automation.get("waiting_check_automation_id", "none")
@@ -1719,6 +1739,8 @@ def clear_action_lease(state: dict[str, Any]) -> None:
         "action_lease_expires_at": "none",
         "action_lease_reason": "none",
         "browser_submission_reopen_browser_id": "none",
+        "browser_submission_send_authorized_lease_id": "none",
+        "browser_submission_send_authorized_revision": 0,
     })
 
 
@@ -2685,7 +2707,9 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
 
 def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[str, Any]:
     """Recheck the reopen lease immediately before the one visible send."""
-    state = load_state(Path(args.state).expanduser().resolve())
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
     review = state["review"]
     runtime = state["runtime"]
     lease_id = str(getattr(args, "lease_id", "") or "").strip()
@@ -2717,6 +2741,9 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
             "send_allowed": False,
             "lease_id": "none",
         }
+    runtime["browser_submission_send_authorized_lease_id"] = lease_id
+    runtime["browser_submission_send_authorized_revision"] = revision + 1
+    save_state(path, state, expected_revision=revision)
     return {
         "ok": True,
         "action": "browser_submission_send_authorized",
@@ -4154,7 +4181,13 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
         send_authorization_revision = getattr(
             args, "browser_send_authorization_revision", None
         )
-        if send_authorization_revision != state["revision"]:
+        if not (
+            send_authorization_revision == state["revision"]
+            and runtime.get("browser_submission_send_authorized_lease_id")
+            == reopen_lease_id
+            and runtime.get("browser_submission_send_authorized_revision")
+            == send_authorization_revision
+        ):
             raise LCRLError(
                 "fresh browser submission send authorization is required"
             )

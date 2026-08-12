@@ -218,8 +218,10 @@ provider 标签只有在两个当前列表都不存在其精确 URL 时，才能
 “极高”和 composer。此协调过程 **must not open, navigate, or reload again**，也不得申请第二份
 重开授权。若原页面随后满足全部核验条件，必须在发送前立即调用
 `authorize-browser-submission-send --state <state-file> --fingerprint <本轮正文身份> --browser-id <当前browser.browserId> --lease-id <重开lease>`；
-只有返回 `browser_submission_send_authorized` 才允许沿用原 lease 发送一次，并把返回的
-`revision` 作为 `confirm-review-submission --browser-send-authorization-revision` 交回控制器。
+只有返回 `browser_submission_send_authorized` 才允许沿用原 lease 发送一次。该命令会把匹配
+lease 与一次性授权 revision 原子写入 state；把返回的 `revision` 作为
+`confirm-review-submission --browser-send-authorization-revision` 交回控制器。仅传入重开授权
+已经公开的 revision 不构成发送授权，提交确认必须消费 state 中持久化的精确授权事实。
 实现任务
 **must not close the tab merely because the navigation call timed out**。只有同一标签在有界协调后
 仍无法证明是精确固定 Chat，或明确显示网络/登录错误时，才释放 lease、关闭该未核验标签并

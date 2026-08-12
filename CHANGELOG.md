@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Closed a proof gap in controller 50 / Skill revision `2026-08-12.4`.
+  Controller 49's fresh browser pre-send gate returned the current state
+  revision without persisting that the gate had actually run, so a caller that
+  held the reopen lease could forge the proof by passing the already-known
+  revision directly to submission confirmation. The gate now atomically stores
+  its lease and authorization revision in state. Confirmation must consume that
+  exact persisted fact at the unchanged revision, and clearing the reopen lease
+  clears the authorization. A regression proves the reopen revision alone
+  cannot confirm or persist a request. This is local controller evidence only;
+  no real-device or Public Beta credit changed.
 - Fixed the real Windows submission-reopen stall in controller 49 / Skill
   revision `2026-08-12.3`. A first canonical-URL navigation call that times out
   is now treated as uncertain and reconciled only on the same opened tab,

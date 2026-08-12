@@ -378,7 +378,9 @@
         "action_lease_acquired_at",
         "action_lease_expires_at",
         "action_lease_reason",
-        "browser_submission_reopen_browser_id"
+        "browser_submission_reopen_browser_id",
+        "browser_submission_send_authorized_lease_id",
+        "browser_submission_send_authorized_revision"
       ],
       "properties": {
         "action_lease_id": {"type": "string"},
@@ -386,6 +388,15 @@
         "browser_submission_reopen_browser_id": {
           "type": "string",
           "description": "Current in-app browser identity authorized by a submission-reopen lease; cleared with that lease."
+        },
+        "browser_submission_send_authorized_lease_id": {
+          "type": "string",
+          "description": "Reopen lease that passed the fresh pre-send gate; cleared with that lease."
+        },
+        "browser_submission_send_authorized_revision": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Persisted state revision created by the fresh pre-send gate; zero when no send is authorized."
         }
       }
     }
