@@ -13,8 +13,10 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.45`; the latest archive remains
-Alpha 27. Controller 52 / Skill revision `2026-08-12.6` adds a byte-for-byte
+The current source candidate is `0.2.0-alpha.46`; the latest archive remains
+Alpha 27. Controller 53 / Skill revision `2026-08-12.7` extends the exact
+20-minute stall boundary to both active work states and makes the stable task
+identity explicit for guard recovery after context compaction. Controller 52 adds a byte-for-byte
 read-only multi-run observer with the user's exact 20-minute stall boundary,
 plus fail-closed startup diagnostics for browser, Chat identity, visible
 Extreme mode, read/send, and one-shot waiting capability. Controller 51 / Skill

@@ -68,7 +68,7 @@ next action in the same turn. An active boundary, local milestone, or statement
 that the loop remains in progress is not permission to end the turn.
 
 Every ordinary resumed turn with an existing state must run `guard --state
-<state> --reason turn_entry` as its first executable action, before project
+<state> --reason turn_entry --implementation-thread-id <current-task-id>` as its first executable action, before project
 reads, tests, browser initialization, or writes. While the saved status is
 `review_receipt_pending` or `review_waiting`, the guard returns
 `waiting_turn_blocked`, creates no action lease, and changes no state. The turn
@@ -77,6 +77,12 @@ this waiting boundary. A platform-fired waiting occurrence is the only
 exception: its first action remains `waiting-check`, followed by
 `authorize-waiting-chat-read`; an ordinary user or coordinator message cannot
 claim that source.
+
+Context compaction inside an active implementation turn is not a new external
+authorization. If the host resumes execution after compaction, it must retain
+the same stable implementation-task identity when it re-enters the guard; it
+must not omit the identity, substitute a title, or ask the coordinator to wake
+the task again.
 
 The compatibility `--replace` flag cannot preempt any active lease. A later
 serial turn may recover only an ordinary `turn_entry` or `apply_result` lease

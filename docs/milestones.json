@@ -2,7 +2,7 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.45",
+      "version": "0.2.0-alpha.46",
       "title": "Browser-first loop proof and release-contract correction",
       "upgrade_prerequisites": [
         "Run the repository test suite and controller selftest.",

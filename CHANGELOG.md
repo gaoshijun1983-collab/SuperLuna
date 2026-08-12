@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added controller 53 / Skill revision `2026-08-12.7` after the culture branch
+  exposed a same-task continuation failure. Guard documentation now requires
+  the stable implementation-task identity after context compaction, and the
+  read-only observer applies the exact 20-minute boundary to both active work
+  states instead of excluding work that is applying Chat feedback.
 - Added controller 52 / Skill revision `2026-08-12.6` with two visible-branch
   features after mainline review. `observe-run` provides a byte-for-byte
   read-only multi-run view and treats exactly 20 minutes without new evidence as

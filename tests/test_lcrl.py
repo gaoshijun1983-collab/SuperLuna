@@ -682,6 +682,42 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(result["possibly_stuck"])
             self.assertEqual(result["stall_reason"], "within_threshold")
 
+    def test_readonly_observer_marks_result_modification_at_threshold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            lcrl.record_progress_command(Namespace(
+                state=str(state_path), event_id="event-1", stage="initial",
+                active_minutes=5, meaningful_step=True,
+                evidence_fingerprint="evidence-1", at="2026-08-12T00:00:00Z",
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="initial",
+                fingerprint="submission-1",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at="2026-08-12T00:01:00Z",
+            ))
+            self.transition(
+                state_path, "review_waiting", stage="initial",
+                waiting_since="2026-08-12T00:01:00Z",
+                request_stage="initial", request_turn_id="turn-1",
+                request_message_id="message-1",
+                request_persisted_at="2026-08-12T00:01:00Z",
+            )
+            self.transition(
+                state_path, "result_received", stage="initial",
+                response_turn_id="turn-2", response_message_id="message-2",
+                response_completed_at="2026-08-12T00:02:00Z",
+                response_complete="true", response_envelope_hash="hash-2",
+            )
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T00:20:00Z",
+            ))
+            self.assertEqual(result["user_status"], "正在按 Chat 意见修改")
+            self.assertTrue(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "reached_threshold")
+
     def test_readonly_observer_never_marks_waiting_chat_as_stuck(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))

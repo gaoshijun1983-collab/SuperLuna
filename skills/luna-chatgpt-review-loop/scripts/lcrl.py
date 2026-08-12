@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 52
-SKILL_REVISION = "2026-08-12.6"
+CONTROLLER_VERSION = 53
+SKILL_REVISION = "2026-08-12.7"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -1920,14 +1920,14 @@ def readonly_run_observer_command(args: argparse.Namespace) -> dict[str, Any]:
 
     user_view = user_status_exit(state["review"]["status"])
     waiting = user_view["user_status"] == "等待 Chat"
-    developing = user_view["user_status"] == "正在开发"
+    active_work = user_view["user_status"] in {"正在开发", "正在按 Chat 意见修改"}
     if waiting:
         possible_stall = False
         stall_reason = "waiting_chat_is_not_stalled"
     elif latest is None:
         possible_stall = False
         stall_reason = "no_evidence_progress_event"
-    elif not developing:
+    elif not active_work:
         possible_stall = False
         stall_reason = "not_in_development_state"
     else:
