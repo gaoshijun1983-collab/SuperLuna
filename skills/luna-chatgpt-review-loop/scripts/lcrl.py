@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 70
-SKILL_REVISION = "2026-08-12.24"
+CONTROLLER_VERSION = 71
+SKILL_REVISION = "2026-08-12.25"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -296,6 +296,18 @@ def state_lock_path(state_path: Path) -> Path:
     return state_path.parent / f".{state_path.name}.lock"
 
 
+def open_state_lock_file(path: str | Path, timeout: float = STATE_LOCK_TIMEOUT_SECONDS) -> int:
+    """Open a lock sidecar, tolerating only a transient Windows sharing denial."""
+    deadline = time.monotonic() + max(0.0, float(timeout))
+    while True:
+        try:
+            return os.open(str(path), os.O_RDWR | os.O_CREAT, 0o644)
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(STATE_LOCK_POLL_SECONDS)
+
+
 @contextmanager
 def acquire_state_lock(
     state_path: str | Path,
@@ -311,7 +323,7 @@ def acquire_state_lock(
     path = Path(state_path).expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_file = state_lock_path(path)
-    fd = os.open(str(lock_file), os.O_RDWR | os.O_CREAT, 0o644)
+    fd = open_state_lock_file(lock_file, timeout=timeout)
     locked = False
     deadline = time.monotonic() + max(0.0, float(timeout))
     try:

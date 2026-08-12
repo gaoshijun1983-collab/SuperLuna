@@ -1,5 +1,11 @@
 # Changelog
 
+- Unreleased Controller 71 / Skill revision `2026-08-12.25`: the Controller 70
+  Windows Python 3.13 matrix showed that simultaneous processes could be denied
+  while opening the lock sidecar, before they entered the serialized registry
+  read. Lock-sidecar opening now shares the existing bounded lock-acquisition
+  budget; persistent denial still fails closed.
+
 - Unreleased Controller 70 / Skill revision `2026-08-12.24`: the first
   Controller 69 six-platform matrix exposed one more Windows Python 3.13
   sharing denial while a newly serialized account-gate reader opened the file

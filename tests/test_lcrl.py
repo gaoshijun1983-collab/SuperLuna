@@ -23,6 +23,34 @@ SPEC.loader.exec_module(lcrl)
 
 
 class AtomicReplaceTests(unittest.TestCase):
+    def test_state_lock_open_retries_transient_permission_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / ".state.lock"
+            real_open = os.open
+            attempts = 0
+
+            def flaky_open(path, flags, mode=0o777):
+                nonlocal attempts
+                attempts += 1
+                if attempts == 1:
+                    raise PermissionError(13, "transient sharing violation")
+                return real_open(path, flags, mode)
+
+            with mock.patch.object(lcrl.os, "open", side_effect=flaky_open):
+                descriptor = lcrl.open_state_lock_file(target, timeout=0.1)
+            os.close(descriptor)
+
+            self.assertEqual(attempts, 2)
+
+    def test_state_lock_open_rethrows_persistent_permission_error(self):
+        with mock.patch.object(
+            lcrl.os,
+            "open",
+            side_effect=PermissionError(13, "persistent sharing violation"),
+        ):
+            with self.assertRaises(PermissionError):
+                lcrl.open_state_lock_file(".state.lock", timeout=0)
+
     def test_shared_registry_read_retries_transient_permission_error(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "registry.json"
