@@ -9,8 +9,13 @@ but new runs use `in_app_browser`.
 
 All local runs using the same ChatGPT account share a machine-wide browser gate.
 Every browser initialization, tab list/claim/open, DOM inspection, read, send,
-or reload requires one of two short-lived slots. A third run queues without
-initializing its browser. A real conversation-history rate-limit notice releases
+or reload requires one of two short-lived slots. Every slot also carries the
+exact fixed reviewer conversation id. Two different implementation tasks may
+use the two global slots only when they target different reviewer Chats; a
+platform-duplicated task targeting an already leased reviewer gets
+`account_browser_reviewer_busy` and must stop before browser initialization or
+send. A third run queues without initializing its browser. A real
+conversation-history rate-limit notice releases
 the reporting slot, clears every other local slot, and opens a 30-minute account
 circuit; a consecutive notice opens it for 60 minutes. After cooldown only one
 read-only health probe may run, and a healthy result is required to restore the

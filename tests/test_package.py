@@ -135,6 +135,12 @@ class PackageTests(unittest.TestCase):
         self.assertIn("health_probe_home_navigation_allowed=true", transport)
         self.assertIn("must not open an unrelated conversation", transport)
 
+    def test_account_browser_gate_serializes_one_fixed_reviewer(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("--reviewer-thread-id <当前固定评审Chat ID>", skill)
+        self.assertIn("account_browser_reviewer_busy", skill)
+        self.assertIn("同一固定 Chat 在任一时刻只允许一个", skill)
+
     def test_account_slot_precedes_browser_skill_and_runtime(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(

@@ -318,6 +318,32 @@ class ControllerTests(unittest.TestCase):
             gate = lcrl.load_account_browser_gate(registry)
             self.assertEqual(len(gate["slots"]), 2)
 
+    def test_account_browser_gate_serializes_one_fixed_reviewer_across_tasks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-primary",
+                reviewer_thread_id="fixed-reviewer-chat",
+                operation="submission", registry=str(registry),
+                at="2026-08-12T08:00:00Z",
+            ))
+            duplicate = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-platform-duplicate",
+                reviewer_thread_id="fixed-reviewer-chat",
+                operation="submission", registry=str(registry),
+                at="2026-08-12T08:00:01Z",
+            ))
+
+            self.assertTrue(first["slot_acquired"])
+            self.assertEqual(duplicate["action"], "account_browser_reviewer_busy")
+            self.assertFalse(duplicate["slot_acquired"])
+            self.assertFalse(duplicate["browser_runtime_initialization_allowed"])
+            self.assertFalse(duplicate["new_automation_allowed"])
+            self.assertEqual(
+                duplicate["conflicting_task_id"], "implementation-primary"
+            )
+            self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 1)
+
     def test_default_account_browser_gate_uses_system_temp_not_codex_home(self):
         with tempfile.TemporaryDirectory() as directory:
             fake_codex_home = Path(directory) / "restricted-codex-home"

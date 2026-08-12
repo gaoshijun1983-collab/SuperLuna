@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 77
-SKILL_REVISION = "2026-08-12.31"
+CONTROLLER_VERSION = 78
+SKILL_REVISION = "2026-08-12.32"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -717,6 +717,7 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
         errors.append("account browser gate exceeds the two-slot limit")
     lease_ids: set[str] = set()
     task_ids: set[str] = set()
+    reviewer_ids: set[str] = set()
     for index, slot in enumerate(slots):
         if not isinstance(slot, dict):
             errors.append(f"account browser slot {index} must be an object")
@@ -724,6 +725,7 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
         lease_id = str(slot.get("lease_id", "")).strip()
         task_id = str(slot.get("implementation_thread_id", "")).strip()
         operation = slot.get("operation")
+        reviewer_id = str(slot.get("reviewer_thread_id", "none")).strip()
         if not lease_id or lease_id == "none" or lease_id in lease_ids:
             errors.append(f"account browser slot {index} has an invalid or duplicate lease")
         else:
@@ -734,6 +736,11 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
             task_ids.add(task_id)
         if operation not in VALID_ACCOUNT_BROWSER_OPERATIONS:
             errors.append(f"account browser slot {index} has an invalid operation")
+        if reviewer_id not in {"", "none"}:
+            if reviewer_id in reviewer_ids:
+                errors.append(f"account browser slot {index} has a duplicate reviewer identity")
+            else:
+                reviewer_ids.add(reviewer_id)
         if not is_timestamp(slot.get("acquired_at")) or not is_timestamp(slot.get("expires_at")):
             errors.append(f"account browser slot {index} requires valid timestamps")
     if errors:
@@ -811,6 +818,12 @@ def _live_account_browser_slots(gate: dict[str, Any], now: datetime) -> list[dic
 def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, Any]:
     gate_path = Path(args.registry).expanduser().resolve() if args.registry else default_account_browser_gate_path()
     task_id = title_component(args.implementation_thread_id, "implementation_thread_id", 160)
+    reviewer_id_raw = str(getattr(args, "reviewer_thread_id", "none") or "none").strip()
+    reviewer_id = (
+        title_component(reviewer_id_raw, "reviewer_thread_id", 160)
+        if reviewer_id_raw != "none"
+        else "none"
+    )
     if args.operation not in VALID_ACCOUNT_BROWSER_OPERATIONS:
         raise LCRLError("invalid account browser operation")
     now = _account_gate_now(args.at)
@@ -850,6 +863,26 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             (slot for slot in gate["slots"] if slot["implementation_thread_id"] == task_id), None
         )
         if existing:
+            existing_reviewer_id = str(existing.get("reviewer_thread_id", "none"))
+            if (
+                reviewer_id != "none"
+                and existing_reviewer_id != "none"
+                and existing_reviewer_id != reviewer_id
+            ):
+                return {
+                    "ok": True,
+                    "action": "account_browser_reviewer_identity_conflict",
+                    "slot_acquired": False,
+                    "browser_skill_read_allowed": False,
+                    "browser_runtime_initialization_allowed": False,
+                    "retry_not_before": existing["expires_at"],
+                    "registry": str(gate_path),
+                }
+            if reviewer_id != "none" and existing_reviewer_id == "none":
+                existing["reviewer_thread_id"] = reviewer_id
+                _save_account_browser_gate_locked(
+                    gate_path, gate, expected_revision=revision,
+                )
             return {
                 "ok": True,
                 "action": "account_browser_slot_reused",
@@ -861,6 +894,31 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "expires_at": existing["expires_at"],
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
                 "active_count": len(gate["slots"]),
+                "registry": str(gate_path),
+            }
+        conflicting_reviewer_slot = next(
+            (
+                slot for slot in gate["slots"]
+                if reviewer_id != "none"
+                and slot.get("reviewer_thread_id", "none") == reviewer_id
+                and slot["implementation_thread_id"] != task_id
+            ),
+            None,
+        )
+        if conflicting_reviewer_slot:
+            return {
+                "ok": True,
+                "action": "account_browser_reviewer_busy",
+                "slot_acquired": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
+                "same_turn_wait_required": args.operation in {"startup", "submission"},
+                "waiting_reschedule_allowed": args.operation == "waiting_read",
+                "new_automation_allowed": False,
+                "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                "active_count": len(gate["slots"]),
+                "retry_not_before": conflicting_reviewer_slot["expires_at"],
+                "conflicting_task_id": conflicting_reviewer_slot["implementation_thread_id"],
                 "registry": str(gate_path),
             }
         handoff_not_before = parse_time(gate.get("handoff_not_before"))
@@ -928,6 +986,7 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
         gate["slots"].append({
             "lease_id": lease_id,
             "implementation_thread_id": task_id,
+            "reviewer_thread_id": reviewer_id,
             "operation": args.operation,
             "acquired_at": acquired_at,
             "expires_at": expires_at,
@@ -2111,6 +2170,7 @@ def render_waiting_check(state_path: str | Path, validate_only: bool = False) ->
         f"python -B {json.dumps(cli)} acquire-account-browser-slot "
         f"--implementation-thread-id "
         f"{json.dumps(str(state['automation']['implementation_thread_id']))} "
+        f"--reviewer-thread-id {json.dumps(str(state['confirmation']['reviewer_thread_id']))} "
         f"--operation waiting_read"
     )
     prompt = (
@@ -7034,6 +7094,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="在任何网页 Chat 访问前取得机器级共享名额（最多两个）",
     )
     acquire_account_browser_slot.add_argument("--implementation-thread-id", required=True)
+    acquire_account_browser_slot.add_argument("--reviewer-thread-id", required=True)
     acquire_account_browser_slot.add_argument(
         "--operation", required=True, choices=sorted(VALID_ACCOUNT_BROWSER_OPERATIONS),
     )

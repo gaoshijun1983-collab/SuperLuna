@@ -1,5 +1,13 @@
 # Changelog
 
+- Unreleased Controller 78 / Skill revision `2026-08-12.32`: a Codex platform
+  create request unexpectedly produced two live implementation tasks for the
+  same fixed reviewer Chat. Both passed the global two-slot gate and the
+  duplicate sent first, contaminating the clean C8 retest. Every account-browser
+  lease now carries the fixed reviewer identity and serializes that reviewer
+  across implementation tasks, so a platform duplicate fails closed before
+  browser initialization or send even while another global slot is free.
+
 - Unreleased Controller 77 / Skill revision `2026-08-12.31`: the real macOS C7
   continuation retest completed two review cycles and reached its third wait
   without coordinator prompts. Two waiting occurrences first tried stale or

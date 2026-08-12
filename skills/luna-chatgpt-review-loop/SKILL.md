@@ -166,13 +166,16 @@ python -B <skill-root>/scripts/lcrl.py workspace-preflight \
 ```text
 python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
   --implementation-thread-id <当前实施任务ID> \
+  --reviewer-thread-id <当前固定评审Chat ID> \
   --operation startup|submission|waiting_read|health_probe
 ```
 
 只有同时得到 `slot_acquired=true`、`browser_skill_read_allowed=true` 和
 `browser_runtime_initialization_allowed=true`，才可读取 `browser:control-in-app-browser` 的
 `SKILL.md` 并调用第一条浏览器工具。`account_browser_access_queued`、
-`account_browser_handoff_quiet_period` 或 `account_browser_rate_limit_backoff` 均不得初始化浏览器。
+`account_browser_reviewer_busy`、`account_browser_handoff_quiet_period` 或
+`account_browser_rate_limit_backoff` 均不得初始化浏览器。同一固定 Chat 在任一时刻只允许一个
+实施任务持有名额；平台意外复制任务时，副本必须在浏览器初始化和发送前失败关闭。
 等待 occurrence 遇到 `waiting_reschedule_allowed=true` 时必须释放读取 lease，并把同一个单次等待
 项移到不早于 `retry_not_before`。普通 `startup`/`submission` 遇到
 `same_turn_wait_required=true` 时不得结束 turn、不得创建任何自动任务、不得输出阶段性完成；
@@ -333,7 +336,8 @@ PASS。视觉审查必须让 Chat 真正看到图片，只有本地路径不算�
 
 发送前：
 
-- 先取得 `submission` 账户名额；未取得时保持 `review_submit_pending`，不得初始化浏览器；
+- 先进入 `review_submit_pending` 并取得带当前固定 reviewer id 的 `submission` 账户名额；未取得时
+  保持该状态，不得初始化浏览器或发送；
 - 再核验同一标签、同一 conversation id、页面可读和用户确认仍有效；
 - 捕获当前可见用户消息身份基线和将发送的完整正文身份；
 - 通过该标签的可见 composer 只发送一次。
