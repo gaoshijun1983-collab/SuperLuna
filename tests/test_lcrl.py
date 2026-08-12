@@ -558,6 +558,82 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(result["next_step"])
             self.assertNotIn("lease", " ".join(str(value).lower() for value in result.values()))
 
+    def test_readonly_observer_marks_development_over_threshold_without_writing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            lcrl.record_progress_command(Namespace(
+                state=str(state_path), event_id="event-1", stage="initial",
+                active_minutes=5, meaningful_step=True,
+                evidence_fingerprint="evidence-1", at="2026-08-12T00:00:00Z",
+            ))
+            before = state_path.read_bytes()
+            revision = lcrl.load_state(state_path)["revision"]
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T00:21:00Z",
+            ))
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertEqual(lcrl.load_state(state_path)["revision"], revision)
+            self.assertEqual(result["user_status"], "正在开发")
+            self.assertEqual(result["current_stage"], "initial")
+            self.assertEqual(result["last_evidence_progress_at"], "2026-08-12T00:00:00Z")
+            self.assertEqual(result["minutes_since_last_evidence_progress"], 21)
+            self.assertTrue(result["possibly_stuck"])
+
+    def test_readonly_observer_keeps_development_under_threshold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            lcrl.record_progress_command(Namespace(
+                state=str(state_path), event_id="event-1", stage="initial",
+                active_minutes=5, meaningful_step=True,
+                evidence_fingerprint="evidence-1", at="2026-08-12T00:00:00Z",
+            ))
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T00:19:00Z",
+            ))
+            self.assertFalse(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "within_threshold")
+            self.assertEqual(result["minutes_since_last_evidence_progress"], 19)
+
+    def test_readonly_observer_never_marks_waiting_chat_as_stuck(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="initial",
+                fingerprint="submission-1",
+            )
+            lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at="2026-08-12T00:00:00Z"))
+            self.transition(
+                state_path, "review_waiting", stage="initial",
+                waiting_since="2026-08-12T00:00:00Z",
+                request_stage="initial", request_turn_id="turn-1",
+                request_message_id="message-1", request_persisted_at="2026-08-12T00:00:00Z",
+            )
+            before = state_path.read_bytes()
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T01:00:00Z",
+            ))
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertEqual(result["user_status"], "等待 Chat")
+            self.assertFalse(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "waiting_chat_is_not_stalled")
+
+    def test_readonly_observer_reports_missing_progress_evidence_without_guessing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            before = state_path.read_bytes()
+            result = lcrl.readonly_run_observer_command(Namespace(
+                state=str(state_path), threshold_minutes=20,
+                at="2026-08-12T01:00:00Z",
+            ))
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertEqual(result["last_evidence_progress_at"], "none")
+            self.assertIsNone(result["minutes_since_last_evidence_progress"])
+            self.assertFalse(result["possibly_stuck"])
+            self.assertEqual(result["stall_reason"], "no_evidence_progress_event")
+
     def test_coordination_preflight_blocks_before_dispatch_without_app_chat(self):
         result = lcrl.coordination_preflight_command(Namespace(
             implementation_thread_id="implementation-task",

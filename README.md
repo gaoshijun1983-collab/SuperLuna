@@ -17,7 +17,10 @@ The current source candidate is `0.2.0-alpha.43`; the latest archive remains
 Alpha 27. This source also publishes the bounded Pro-progress event shape and a
 machine-checked milestone/rollback guide without claiming that every nested
 state invariant is expressed in JSON Schema. Controller 50 / Skill revision
-`2026-08-12.4` makes the fresh
+`2026-08-12.5` adds the read-only `lcrl observe-run` surface: it derives the
+five user states, current stage, evidence-backed progress age, and a bounded
+possible-stall signal without writing state, reading Chat, or acquiring a lease.
+The fresh
 pre-send gate a persisted, single-use controller fact: the reopen revision by
 itself can no longer be passed directly to submission confirmation as forged
 proof. Clearing the reopen lease clears that authorization. This is locally

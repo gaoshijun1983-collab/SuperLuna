@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 50
-SKILL_REVISION = "2026-08-12.4"
+CONTROLLER_VERSION = 51
+SKILL_REVISION = "2026-08-12.5"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -1884,6 +1884,59 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
             "turn_completion_allowed": False,
         })
     return output
+
+
+def readonly_run_observer_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Expose a read-only, evidence-based view of one implementation run."""
+    state = load_state(Path(args.state).expanduser().resolve())
+    threshold_minutes = int(getattr(args, "threshold_minutes", 20))
+    if threshold_minutes < 1:
+        raise LCRLError("threshold_minutes must be at least 1")
+    observed_at = getattr(args, "at", None) or utc_now()
+    if not is_timestamp(observed_at):
+        raise LCRLError("at must be an ISO-8601 timestamp")
+
+    progress_events = state.get("model_policy", {}).get("progress", {}).get("events", [])
+    evidence_events = [
+        event for event in progress_events
+        if event.get("meaningful_step") is True
+        and event.get("evidence_fingerprint") not in (None, "", "none")
+    ]
+    latest = max(evidence_events, key=lambda event: parse_time(event["recorded_at"])) if evidence_events else None
+    latest_at = latest["recorded_at"] if latest else "none"
+    elapsed_minutes: int | None = None
+    if latest:
+        elapsed_minutes = max(
+            0,
+            int((parse_time(observed_at) - parse_time(latest_at)).total_seconds() // 60),
+        )
+
+    user_view = user_status_exit(state["review"]["status"])
+    waiting = user_view["user_status"] == "等待 Chat"
+    developing = user_view["user_status"] == "正在开发"
+    if waiting:
+        possible_stall = False
+        stall_reason = "waiting_chat_is_not_stalled"
+    elif latest is None:
+        possible_stall = False
+        stall_reason = "no_evidence_progress_event"
+    elif not developing:
+        possible_stall = False
+        stall_reason = "not_in_development_state"
+    else:
+        possible_stall = elapsed_minutes > threshold_minutes
+        stall_reason = "exceeded_threshold" if possible_stall else "within_threshold"
+
+    return {
+        "ok": True,
+        "user_status": user_view["user_status"],
+        "current_stage": state["review"].get("current_stage", "none"),
+        "last_evidence_progress_at": latest_at,
+        "minutes_since_last_evidence_progress": elapsed_minutes,
+        "stall_threshold_minutes": threshold_minutes,
+        "possibly_stuck": possible_stall,
+        "stall_reason": stall_reason,
+    }
 
 
 def _load_app_thread_snapshot(path_value: str | Path) -> dict[str, Any]:
@@ -5628,6 +5681,11 @@ def build_parser() -> argparse.ArgumentParser:
     progress_query = sub.add_parser("show-status")
     progress_query.add_argument("--state", required=True)
 
+    observer = sub.add_parser("observe-run")
+    observer.add_argument("--state", required=True)
+    observer.add_argument("--threshold-minutes", type=int, default=20)
+    observer.add_argument("--at")
+
     discover_reviewer = sub.add_parser("discover-reviewer-chat")
     discover_reviewer.add_argument("--before-snapshot", required=True)
     discover_reviewer.add_argument("--after-snapshot", required=True)
@@ -5970,6 +6028,8 @@ def main(argv: list[str] | None = None) -> int:
             result = resume_command(args)
         elif args.command == "show-status":
             result = progress_query_command(args)
+        elif args.command == "observe-run":
+            result = readonly_run_observer_command(args)
         elif args.command == "discover-reviewer-chat":
             result = discover_reviewer_chat_command(args)
         elif args.command == "prepare-main-app-submission":
