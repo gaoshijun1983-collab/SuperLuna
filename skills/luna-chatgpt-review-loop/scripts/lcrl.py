@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 61
-SKILL_REVISION = "2026-08-12.15"
+CONTROLLER_VERSION = 62
+SKILL_REVISION = "2026-08-12.16"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -99,6 +99,7 @@ BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600
 ACCOUNT_BROWSER_GATE_VERSION = 1
 ACCOUNT_BROWSER_MAX_ACTIVE = 2
 ACCOUNT_BROWSER_SLOT_SECONDS = 600
+ACCOUNT_BROWSER_CROSS_TASK_QUIET_SECONDS = 180
 ACCOUNT_BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 1800
 ACCOUNT_BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600
 VALID_ACCOUNT_BROWSER_OPERATIONS = {"startup", "submission", "waiting_read", "health_probe"}
@@ -606,6 +607,8 @@ def empty_account_browser_gate() -> dict[str, Any]:
         "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
         "cooldown_until": "none",
         "consecutive_rate_limits": 0,
+        "handoff_not_before": "none",
+        "last_released_task_id": "none",
         "slots": [],
     }
 
@@ -623,6 +626,12 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
     cooldown_until = value.get("cooldown_until")
     if cooldown_until != "none" and not is_timestamp(cooldown_until):
         errors.append("account browser cooldown_until must be none or a timestamp")
+    handoff_not_before = value.get("handoff_not_before", "none")
+    if handoff_not_before != "none" and not is_timestamp(handoff_not_before):
+        errors.append("account browser handoff_not_before must be none or a timestamp")
+    last_released_task_id = value.get("last_released_task_id", "none")
+    if not isinstance(last_released_task_id, str) or not last_released_task_id.strip():
+        errors.append("account browser last_released_task_id must be none or a task identity")
     slots = value.get("slots")
     if not isinstance(slots, list):
         errors.append("account browser gate slots must be a list")
@@ -664,6 +673,8 @@ def load_account_browser_gate(path: str | Path, allow_missing: bool = False) -> 
         value = json.loads(gate_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise LCRLError(f"invalid account browser gate {gate_path}: {exc}") from exc
+    value.setdefault("handoff_not_before", "none")
+    value.setdefault("last_released_task_id", "none")
     validate_account_browser_gate(value)
     return value
 
@@ -758,6 +769,24 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "active_count": len(gate["slots"]),
                 "registry": str(gate_path),
             }
+        handoff_not_before = parse_time(gate.get("handoff_not_before"))
+        last_released_task_id = str(gate.get("last_released_task_id", "none"))
+        if (
+            not recovery_probe_required
+            and handoff_not_before
+            and handoff_not_before > now
+            and last_released_task_id not in {"none", task_id}
+        ):
+            return {
+                "ok": True,
+                "action": "account_browser_handoff_quiet_period",
+                "slot_acquired": False,
+                "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                "active_count": len(gate["slots"]),
+                "retry_not_before": gate["handoff_not_before"],
+                "handoff_from_task_id": last_released_task_id,
+                "registry": str(gate_path),
+            }
         if recovery_probe_required and gate["slots"]:
             return {
                 "ok": True,
@@ -837,6 +866,8 @@ def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 microsecond=0
             ).isoformat().replace("+00:00", "Z")
             gate["cooldown_until"] = retry_not_before
+            gate["handoff_not_before"] = "none"
+            gate["last_released_task_id"] = task_id
             action = "account_browser_circuit_opened"
         elif args.outcome == "healthy":
             health_proof = str(getattr(args, "health_proof", "") or "").strip()
@@ -851,8 +882,16 @@ def release_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 raise LCRLError("account browser health cannot clear an active cooldown")
             gate["cooldown_until"] = "none"
             gate["consecutive_rate_limits"] = 0
+            gate["last_released_task_id"] = task_id
+            gate["handoff_not_before"] = (
+                now + timedelta(seconds=ACCOUNT_BROWSER_CROSS_TASK_QUIET_SECONDS)
+            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             action = "account_browser_health_confirmed"
         else:
+            gate["last_released_task_id"] = task_id
+            gate["handoff_not_before"] = (
+                now + timedelta(seconds=ACCOUNT_BROWSER_CROSS_TASK_QUIET_SECONDS)
+            ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             action = "account_browser_slot_released"
         _save_account_browser_gate_locked(gate_path, gate, expected_revision=revision)
         return {
@@ -880,6 +919,13 @@ def show_account_browser_gate_command(args: argparse.Namespace) -> dict[str, Any
         "cooldown_active": bool(cooldown_until and cooldown_until > now),
         "retry_not_before": gate["cooldown_until"] if cooldown_until and cooldown_until > now else "none",
         "consecutive_rate_limits": gate["consecutive_rate_limits"],
+        "handoff_not_before": (
+            gate.get("handoff_not_before", "none")
+            if parse_time(gate.get("handoff_not_before"))
+            and parse_time(gate.get("handoff_not_before")) > now
+            else "none"
+        ),
+        "last_released_task_id": gate.get("last_released_task_id", "none"),
         "slots": deepcopy(live_slots),
         "registry": str(gate_path),
     }

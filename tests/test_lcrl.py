@@ -247,6 +247,55 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(len(queued), 4, payloads)
             self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 2)
 
+    def test_account_browser_gate_paces_cross_task_handoff_after_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="submission",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="completed", registry=str(registry), at="2026-08-12T08:00:10Z",
+                health_proof=None,
+            ))
+
+            other_task = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-two", operation="startup",
+                registry=str(registry), at="2026-08-12T08:00:11Z",
+            ))
+            same_task = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="waiting_read",
+                registry=str(registry), at="2026-08-12T08:00:12Z",
+            ))
+
+            self.assertEqual(other_task["action"], "account_browser_handoff_quiet_period")
+            self.assertFalse(other_task["slot_acquired"])
+            self.assertEqual(other_task["retry_not_before"], "2026-08-12T08:03:10Z")
+            self.assertEqual(other_task["handoff_from_task_id"], "task-one")
+            self.assertEqual(same_task["action"], "account_browser_slot_acquired")
+
+    def test_account_browser_gate_allows_other_task_after_handoff_quiet_period(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="submission",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="completed", registry=str(registry), at="2026-08-12T08:00:10Z",
+                health_proof=None,
+            ))
+
+            second = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-two", operation="startup",
+                registry=str(registry), at="2026-08-12T08:03:10Z",
+            ))
+
+            self.assertEqual(second["action"], "account_browser_slot_acquired")
+            self.assertTrue(second["slot_acquired"])
+
     def test_account_rate_limit_opens_global_circuit_and_clears_slots(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "account-browser-gate.json"

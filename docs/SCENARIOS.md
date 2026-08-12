@@ -25,6 +25,9 @@ share one ChatGPT-account browser gate. At most two tasks may initialize,
 inspect, read, send, or refresh web Chat at the same time. A third task queues
 before browser initialization. Slots are short-lived and never remain held
 while Codex implements locally or waits for the reviewer.
+When one task releases a slot, another task waits through a 180-second quiet
+handoff before touching ChatGPT. The same task may reacquire immediately to
+finish one recovery/startup chain. This pacing is separate from the two-task cap.
 
 ## Long reviewer reasoning
 

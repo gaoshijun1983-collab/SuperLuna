@@ -19,10 +19,12 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source is
-Controller 61 / Skill revision `2026-08-12.15` requires a post-cooldown health
-probe to prove an existing conversation or conversation history is actually
-readable before clearing the account circuit; a healthy-looking homepage,
-login state or empty composer is no longer sufficient. Controller 60 / Skill revision `2026-08-12.14` adds a machine-wide ChatGPT
+Controller 62 / Skill revision `2026-08-12.16` preserves the two-task limit but
+adds a 180-second account-level quiet handoff between different tasks' browser
+actions. It also retains Controller 61's requirement that a post-cooldown health
+probe prove an existing conversation or conversation history is actually readable
+before clearing the account circuit; a healthy-looking homepage, login state or
+empty composer is no longer sufficient. Controller 60 / Skill revision `2026-08-12.14` adds a machine-wide ChatGPT
 account gate after a real three-task macOS test triggered a conversation-history
 security rate limit. Local development remains parallel, but only two tasks may
 touch web Chat at once; a third queues before browser initialization. Any real

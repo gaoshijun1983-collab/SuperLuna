@@ -1,5 +1,13 @@
 # Changelog
 
+- Unreleased Controller 62 / Skill revision `2026-08-12.16`: a real macOS
+  two-task retest proved that the two-slot ceiling alone does not prevent rapid
+  cross-task conversation-history requests from retriggering ChatGPT's account
+  limit. The shared gate now preserves the two-task cap but queues a different
+  task for a 180-second quiet handoff after every completed or healthy release;
+  the releasing task may continue its own recovery/startup chain immediately.
+  Two deterministic regressions cover the blocked handoff and exact expiry.
+
 - Unreleased Controller 61 / Skill revision `2026-08-12.15`: a real macOS
   retest showed that the ChatGPT homepage could appear healthy while opening
   conversation history still returned the account rate-limit notice. Clearing

@@ -15,6 +15,10 @@ the reporting slot, clears every other local slot, and opens a 30-minute account
 circuit; a consecutive notice opens it for 60 minutes. After cooldown only one
 read-only health probe may run, and a healthy result is required to restore the
 two-slot limit. Slots never span local implementation or reviewer waiting.
+After a slot is released, a different task must observe a 180-second account-level
+quiet handoff before acquiring browser access. The releasing task may continue its
+own health-probe/startup chain immediately. This keeps the two-task product limit
+while preventing rapid cross-task conversation-history requests.
 
 The registry defaults to
 `~/.codex/superluna/account-browser-gate.json` (or the configured Codex home),

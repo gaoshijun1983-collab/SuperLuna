@@ -30,7 +30,9 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 同一台机器、同一 ChatGPT 账户的网页 Chat 访问由共享账户门统一限制为**最多 2 个**。
 本地开发任务可以超过两个，但初始化浏览器、列举/认领/打开标签、读取 DOM、发送或刷新前
 都必须先取得一个短期账户名额；第三个任务只排队，不能触碰浏览器。名额不得跨本地开发、
-模型思考或等待期长期持有，网页动作结束后必须立即释放。
+模型思考或等待期长期持有，网页动作结束后必须立即释放。一个任务释放名额后，另一个任务
+必须等待 180 秒的账户级静默交接期才可取得名额；原任务可立即完成同一恢复链中的下一项
+网页动作。任务上限仍为两个，但不同任务不能紧邻访问同一账户。
 
 任何任务看到 ChatGPT 的“请求过于频繁 / 已暂时限制访问对话记录”等真实限流提示，必须用
 本次名额报告 `rate_limited`。控制器会清空所有本机名额并打开账户级熔断：首次 30 分钟，
@@ -144,8 +146,8 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
   --operation startup|submission|waiting_read|health_probe
 ```
 
-只有 `slot_acquired=true` 才可继续。`account_browser_access_queued` 或
-`account_browser_rate_limit_backoff` 均不得初始化浏览器；等待 occurrence 必须释放其读取 lease，
+只有 `slot_acquired=true` 才可继续。`account_browser_access_queued`、
+`account_browser_handoff_quiet_period` 或 `account_browser_rate_limit_backoff` 均不得初始化浏览器；等待 occurrence 必须释放其读取 lease，
 并把同一个单次等待项移到不早于 `retry_not_before`，普通启动/提交则保持原状态静默结束。
 网页动作结束后必须用匹配任务和 `lease_id` 运行 `release-account-browser-slot`；正常结束使用
 `--outcome completed`。到期后的唯一只读健康探测只有在既有固定对话/对话记录真实可读且未见
