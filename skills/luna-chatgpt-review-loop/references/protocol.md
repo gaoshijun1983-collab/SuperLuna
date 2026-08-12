@@ -237,14 +237,20 @@ authorized the occurrence. Do not read Chat or rotate its token; update the same
 platform heartbeat to one `RDATE` at or after `retry_not_before`, with the same
 token and automation id.
 
-Each due occurrence must pass `waiting-check` and then
-`authorize-waiting-chat-read`. The second authorization rechecks status, token,
-stable id, claim, and lease immediately before browser access. Stale or duplicate
-occurrences do not read the page or mutate the project.
+Each due occurrence must pass `waiting-check`, acquire a live shared account
+browser slot with operation `waiting_read`, and only then call
+`authorize-waiting-chat-read --account-slot-lease-id <lease>`. The second
+authorization rechecks status, token, stable id, claim, waiting lease, and that
+the account slot still belongs to the same implementation task with the exact
+`waiting_read` operation immediately before browser access. Missing, expired,
+wrong-task, or wrong-operation slots return `account_browser_slot_required` and
+do not authorize browser initialization. Stale or duplicate occurrences do not
+read the page or mutate the project.
 The first executable action of a due heartbeat must be the local `waiting-check`
 CLI. Browser runtime setup, tab listing/claiming, or DOM access before its saved
-`review_poll`/`receipt_reconcile` result and the second authorization is a failed
-cycle; any content observed through that bypass must not be consumed or applied.
+`review_poll`/`receipt_reconcile` result, successful `waiting_read` account-slot
+acquisition, and the second authorization is a failed cycle; any content observed
+through that bypass must not be consumed or applied.
 
 For `browser_read_authorized`, inspect the same tab without a reload. If the
 page reports a network/load failure, release the lease and call

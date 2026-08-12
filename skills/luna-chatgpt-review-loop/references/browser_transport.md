@@ -178,15 +178,22 @@ submitting occurrence.
 SuperLuna uses the existing single future waiting-check gate. There is no second
 scheduler and no global recurring browser poller.
 
-1. Authorize the due occurrence with `authorize-waiting-chat-read`.
-2. The authorization returns the persisted browser/provider identity. If the
+1. After the due occurrence has returned `review_poll` or `receipt_reconcile`,
+   acquire the shared account browser slot with operation `waiting_read`.
+   Until `slot_acquired=true`, do not initialize the browser runtime or inspect
+   any tab.
+2. Authorize the due occurrence with `authorize-waiting-chat-read`, passing the
+   waiting-check lease and `--account-slot-lease-id` from the exact live
+   `waiting_read` slot. The controller rejects a missing, expired, wrong-task,
+   or wrong-operation slot before browser initialization.
+3. The authorization returns the persisted browser/provider identity. If the
    earlier tab object is stale or absent, reuse the existing browser binding,
    call `user.openTabs()`, uniquely match `providerTabId` plus the exact bound
    URL, and pass that returned object to `user.claimTab(tab)`. Never call
    `tabs.get()` with a `Tab.id` saved by an earlier occurrence. If claiming says
    the tab is already controlled, use only a unique exact-URL entry from the
    current occurrence's `tabs.list()`; ambiguity or absence fails closed.
-3. If the action is `browser_read_authorized`, inspect that reclaimed same tab
+4. If the action is `browser_read_authorized`, inspect that reclaimed same tab
    without reloading it. If its binding still says `pending_handoff`, promote
    the newly exposed real provider identity first, then re-authorize the read.
    When no provider identity exists and the authorization explicitly allows the
@@ -196,15 +203,15 @@ scheduler and no global recurring browser poller.
    `browser_binding.conversation_url` once in that same browser binding. Verify
    exact canonical URL, login, ChatGPT page, and the paired request identity
    before reading; do not send or persist the occurrence-local handle.
-4. After releasing the lease, report a load failure with
+5. After releasing the lease, report a load failure with
    `browser-network-observation --outcome network_error`. This schedules the next
    authorized occurrence for 180 seconds later and preserves the same stable
    waiting-check identity.
-5. Rearm that one future occurrence with `rearm-waiting-check`.
-6. If the next authorization returns `browser_refresh_authorized` and
+6. Rearm that one future occurrence with `rearm-waiting-check`.
+7. If the next authorization returns `browser_refresh_authorized` and
    `reload_same_tab_once=true`, reload the same tab exactly once, wait for the
    document to load, verify the same conversation id, and inspect it.
-7. Record a readable page with `browser-network-observation --outcome loaded`.
+8. Record a readable page with `browser-network-observation --outcome loaded`.
    If no complete reply exists, rearm the same waiting gate for another future
    check. Before that occurrence ends, the final browser action keeps the same
    tab as `status: "handoff"`; the next occurrence reclaims it rather than

@@ -262,6 +262,32 @@ class ControllerTests(unittest.TestCase):
         lcrl.save_state(state_path, state)
         return state_path
 
+    def authorize_waiting_read(
+        self,
+        state_path: Path,
+        token: str,
+        automation_id: str,
+        waiting_lease_id: str,
+    ):
+        state = lcrl.load_state(state_path)
+        registry = state_path.parent / "account-browser-gate.json"
+        slot = lcrl.acquire_account_browser_slot_command(Namespace(
+            implementation_thread_id=state["automation"]["implementation_thread_id"],
+            operation="waiting_read",
+            registry=str(registry),
+            at=None,
+        ))
+        self.assertTrue(slot["slot_acquired"], slot)
+        return lcrl.authorize_waiting_chat_read_command(Namespace(
+            state=str(state_path),
+            token=token,
+            automation_id=automation_id,
+            lease_id=waiting_lease_id,
+            account_slot_lease_id=slot["lease_id"],
+            account_browser_registry=str(registry),
+            at=None,
+        ))
+
     def test_account_browser_gate_allows_two_and_queues_third(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "account-browser-gate.json"
@@ -2199,6 +2225,79 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(authorization["action"], "waiting_check_expired")
             self.assertEqual(before, state_path.read_bytes())
 
+    def test_browser_waiting_read_requires_the_exact_live_account_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "web-chat-slot-gate",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "web-chat-slot-gate")
+            self.transition(
+                state_path, "review_submit_pending", stage="WAIT-SLOT",
+                fingerprint="wait-slot-gate",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="web-chat-slot-gate", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="wait-slot-turn",
+                request_message_id="wait-slot-message", request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            wait_id = "wait-slot-check"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=wait_id,
+            ))
+            claimed = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=wait_id,
+            ))
+            state_before = state_path.read_bytes()
+
+            missing = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=wait_id,
+                lease_id=claimed["lease_id"], account_slot_lease_id="none",
+                account_browser_registry=str(root / "missing-gate.json"), at=None,
+            ))
+            wrong_registry = root / "wrong-operation-gate.json"
+            wrong_slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", operation="startup",
+                registry=str(wrong_registry), at=None,
+            ))
+            wrong_operation = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=wait_id,
+                lease_id=claimed["lease_id"],
+                account_slot_lease_id=wrong_slot["lease_id"],
+                account_browser_registry=str(wrong_registry), at=None,
+            ))
+            valid_registry = root / "valid-gate.json"
+            valid_slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", operation="waiting_read",
+                registry=str(valid_registry), at=None,
+            ))
+            allowed = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=wait_id,
+                lease_id=claimed["lease_id"],
+                account_slot_lease_id=valid_slot["lease_id"],
+                account_browser_registry=str(valid_registry), at=None,
+            ))
+
+            for blocked in (missing, wrong_operation):
+                self.assertEqual(blocked["action"], "account_browser_slot_required")
+                self.assertFalse(blocked["chat_read_allowed"])
+                self.assertFalse(blocked["browser_runtime_initialization_allowed"])
+                self.assertEqual(blocked["required_operation"], "waiting_read")
+            self.assertEqual(allowed["action"], "browser_read_authorized")
+            self.assertTrue(allowed["chat_read_allowed"])
+            self.assertEqual(state_before, state_path.read_bytes())
+
     def test_mac_queue_replay_gate_records_zero_side_effects(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4121,10 +4220,9 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id=wait_id,
             ))
-            authorization = lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=token, automation_id=wait_id,
-                lease_id=claimed["lease_id"],
-            ))
+            authorization = self.authorize_waiting_read(
+                state_path, token, wait_id, claimed["lease_id"],
+            )
 
             self.assertEqual(authorization["action"], "browser_read_authorized")
             self.assertFalse(authorization["provisioned_url_reopen_allowed"])
@@ -4247,10 +4345,9 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id=wait_id,
             ))
-            first_auth = lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=token, automation_id=wait_id,
-                lease_id=claimed["lease_id"],
-            ))
+            first_auth = self.authorize_waiting_read(
+                state_path, token, wait_id, claimed["lease_id"],
+            )
             self.assertEqual(
                 first_auth["browser_binding"]["provider_tab_id"], "pending_handoff"
             )
@@ -4266,10 +4363,9 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(
                 promoted["browser_binding"]["provider_tab_id"], "provider-after-handoff"
             )
-            second_auth = lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=token, automation_id=wait_id,
-                lease_id=claimed["lease_id"],
-            ))
+            second_auth = self.authorize_waiting_read(
+                state_path, token, wait_id, claimed["lease_id"],
+            )
             self.assertEqual(
                 second_auth["browser_binding"]["provider_tab_id"],
                 "provider-after-handoff",
@@ -4608,10 +4704,9 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id="url-only-wait",
             ))
-            read_auth = lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=token, automation_id="url-only-wait",
-                lease_id=claimed["lease_id"],
-            ))
+            read_auth = self.authorize_waiting_read(
+                state_path, token, "url-only-wait", claimed["lease_id"],
+            )
             self.assertTrue(read_auth["canonical_url_only_binding"])
             self.assertTrue(read_auth["provisioned_url_fallback_allowed"])
             self.assertTrue(read_auth["provisioned_url_reopen_allowed"])
@@ -4747,10 +4842,9 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=first_token, automation_id=stable_wait_id,
             ))
-            authorization = lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=first_token, automation_id=stable_wait_id,
-                lease_id=claimed["lease_id"],
-            ))
+            authorization = self.authorize_waiting_read(
+                state_path, first_token, stable_wait_id, claimed["lease_id"],
+            )
             self.assertEqual(authorization["action"], "browser_read_authorized")
             lcrl.release_action(Namespace(
                 state=str(state_path), lease_id=claimed["lease_id"], force=False,
@@ -4777,10 +4871,9 @@ class ControllerTests(unittest.TestCase):
             second = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=second_token, automation_id=stable_wait_id,
             ))
-            refresh = lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=second_token, automation_id=stable_wait_id,
-                lease_id=second["lease_id"],
-            ))
+            refresh = self.authorize_waiting_read(
+                state_path, second_token, stable_wait_id, second["lease_id"],
+            )
             self.assertEqual(refresh["action"], "browser_refresh_authorized")
             self.assertTrue(refresh["reload_same_tab_once"])
             lcrl.release_action(Namespace(
@@ -4828,10 +4921,9 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id=wait_id,
             ))
-            lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=token, automation_id=wait_id,
-                lease_id=claimed["lease_id"],
-            ))
+            self.authorize_waiting_read(
+                state_path, token, wait_id, claimed["lease_id"],
+            )
             lcrl.release_action(Namespace(
                 state=str(state_path), lease_id=claimed["lease_id"], force=False,
             ))
@@ -4856,10 +4948,9 @@ class ControllerTests(unittest.TestCase):
             second_claim = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=second_token, automation_id=wait_id,
             ))
-            second_auth = lcrl.authorize_waiting_chat_read_command(Namespace(
-                state=str(state_path), token=second_token, automation_id=wait_id,
-                lease_id=second_claim["lease_id"],
-            ))
+            second_auth = self.authorize_waiting_read(
+                state_path, second_token, wait_id, second_claim["lease_id"],
+            )
             self.assertEqual(second_auth["action"], "browser_read_authorized")
             self.assertFalse(second_auth["reload_same_tab_once"])
             lcrl.release_action(Namespace(

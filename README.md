@@ -19,7 +19,10 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 74 / Skill revision `2026-08-12.28`, gives the serialized binding
+Controller 75 / Skill revision `2026-08-12.29`, makes a live account-browser
+slot for the exact task and `waiting_read` operation a controller-enforced
+input to every browser wait authorization; a prompt that omits the slot can no
+longer initialize or read Chat. Controller 74 gives the serialized binding
 registry a dedicated bounded queue budget so six simultaneous Windows tasks do
 not fail while merely waiting to open the shared lock sidecar. It retains
 Controller 73's rule that the current task first verifies its

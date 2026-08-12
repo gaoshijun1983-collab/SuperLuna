@@ -460,7 +460,10 @@ python -B <skill-root>/scripts/lcrl.py observe-runs \
 1. 用 `waiting-check` 领取本次 occurrence；
 2. 用 `acquire-account-browser-slot --operation waiting_read` 取得本机共享账户名额；未取得时不得
    初始化浏览器，释放读取 lease，并把同一个等待项错峰移动到返回时间；
-3. 用 `authorize-waiting-chat-read` 再核验状态、token、稳定等待任务 ID、claim 和 lease；
+3. 用 `authorize-waiting-chat-read --account-slot-lease-id <waiting_read 返回的 lease_id>`
+   再核验状态、token、稳定等待任务 ID、claim、等待读取 lease 与账户名额；控制器会从本机共享
+   账户门重新验证该名额属于当前实施任务且 operation 恰为 `waiting_read`，缺失、过期、错任务或
+   错 operation 均返回 `account_browser_slot_required`，不得初始化浏览器；
 4. 若返回 `browser_read_authorized`，在同一个内置浏览器标签读取 DOM，不刷新；
    授权结果会返回持久化的 browser/provider identity。若上一轮标签对象已经失效，使用现有
    浏览器 binding 调用 `user.openTabs()`，唯一匹配 `providerTabId` 与固定 URL 后把该原始

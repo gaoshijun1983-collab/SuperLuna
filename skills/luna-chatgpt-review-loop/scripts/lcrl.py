@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 74
-SKILL_REVISION = "2026-08-12.28"
+CONTROLLER_VERSION = 75
+SKILL_REVISION = "2026-08-12.29"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -2106,12 +2106,20 @@ def render_waiting_check(state_path: str | Path, validate_only: bool = False) ->
         f"--state {json.dumps(str(path))} --token {json.dumps(str(token))} "
         f"--automation-id {json.dumps(str(automation_id))}"
     )
+    account_command = (
+        f"python -B {json.dumps(cli)} acquire-account-browser-slot "
+        f"--implementation-thread-id "
+        f"{json.dumps(str(state['automation']['implementation_thread_id']))} "
+        f"--operation waiting_read"
+    )
     prompt = (
         "SuperLuna 单次等待检查。第一条可执行动作必须原样运行：\n"
         f"{command}\n"
-        "只有保存返回且 action 为 review_poll 或 receipt_reconcile，才可运行 "
-        "authorize-waiting-chat-read，并使用同一 token、automation id 和返回的 lease_id。"
-        "获得 browser_read_authorized 前禁止初始化或访问浏览器。只读取已绑定固定 Chat，"
+        "仅当 action 为 review_poll/receipt_reconcile，第二步运行：\n"
+        f"{account_command}\n"
+        "仅当 slot_acquired=true，才运行 authorize-waiting-chat-read，并传同一 token、automation id、"
+        "waiting-check lease_id 与 --account-slot-lease-id <账户返回 lease_id>。获得 "
+        "browser_read_authorized 前禁止初始化或访问浏览器。只读取已绑定固定 Chat，"
         "完成真实请求/回复身份配对；消费回复前先删除本 automation，随后 resume-from-reply，"
         "并在同一实施任务继续。其他 action 静默结束。不得创建循环规则或替代 Chat。"
     )
@@ -3487,6 +3495,40 @@ def authorize_waiting_chat_read_command(args: argparse.Namespace) -> dict[str, A
     if not authorized:
         return {"ok": True, "action": "waiting_check_expired", "chat_read_allowed": False}
     browser_transport = state["review"].get("transport") == "in_app_browser"
+    if browser_transport:
+        account_gate_override = getattr(args, "account_browser_registry", None)
+        account_gate_path = (
+            Path(account_gate_override).expanduser().resolve()
+            if account_gate_override
+            else default_account_browser_gate_path()
+        )
+        account_slot_lease_id = str(
+            getattr(args, "account_slot_lease_id", "none") or "none"
+        )
+        try:
+            account_gate = load_account_browser_gate(account_gate_path)
+            live_slots = _live_account_browser_slots(
+                account_gate,
+                _account_gate_now(getattr(args, "at", None)),
+            )
+        except (LCRLError, OSError, ValueError):
+            live_slots = []
+        implementation_thread_id = state["automation"]["implementation_thread_id"]
+        account_slot_authorized = any(
+            slot.get("lease_id") == account_slot_lease_id
+            and slot.get("implementation_thread_id") == implementation_thread_id
+            and slot.get("operation") == "waiting_read"
+            for slot in live_slots
+        )
+        if not account_slot_authorized:
+            return {
+                "ok": True,
+                "action": "account_browser_slot_required",
+                "chat_read_allowed": False,
+                "browser_skill_read_allowed": False,
+                "browser_runtime_initialization_allowed": False,
+                "required_operation": "waiting_read",
+            }
     reload_required = (
         browser_transport
         and state["recovery"].get("browser_reload_same_tab_required") is True
@@ -6765,6 +6807,7 @@ def build_parser() -> argparse.ArgumentParser:
     authorize_waiting_read.add_argument("--token", required=True)
     authorize_waiting_read.add_argument("--automation-id", required=True)
     authorize_waiting_read.add_argument("--lease-id", required=True)
+    authorize_waiting_read.add_argument("--account-slot-lease-id", required=True)
 
     authorize_submission_reopen = sub.add_parser("authorize-browser-submission-reopen")
     authorize_submission_reopen.add_argument("--state", required=True)

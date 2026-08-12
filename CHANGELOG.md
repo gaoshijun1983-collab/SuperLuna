@@ -1,5 +1,14 @@
 # Changelog
 
+- Unreleased Controller 75 / Skill revision `2026-08-12.29`: a real macOS
+  waiting occurrence passed the wait claim and browser-read authorization but
+  then initialized the browser without first acquiring the shared
+  `waiting_read` account slot. Browser wait authorization now requires the live
+  account-slot lease and independently verifies the exact implementation task,
+  operation, and expiry. Missing or mismatched slots fail before browser
+  initialization. The controller-rendered one-shot prompt and normative
+  protocol now include the same enforced order.
+
 - Unreleased Controller 74 / Skill revision `2026-08-12.28`: a documentation-
   only follow-up commit reproduced a Windows Python 3.13 failure when one of six
   concurrent task-binding registrations spent the ordinary two-second state

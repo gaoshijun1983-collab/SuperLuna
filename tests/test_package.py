@@ -158,6 +158,29 @@ class PackageTests(unittest.TestCase):
             transport.index("activate `browser:control-in-app-browser`"),
         )
 
+    def test_waiting_read_authorization_requires_a_live_account_slot_lease(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+        self.assertIn(
+            "先取得 `waiting_read` 账户名额，再取得\n`authorize-waiting-chat-read`",
+            skill,
+        )
+        self.assertIn(
+            "account\nbrowser slot with operation `waiting_read`, and only then call\n"
+            "`authorize-waiting-chat-read",
+            protocol,
+        )
+        self.assertIn(
+            "acquire the shared account browser slot with operation `waiting_read`",
+            transport,
+        )
+        self.assertIn("--account-slot-lease-id", source)
+        self.assertIn('"account_browser_slot_required"', source)
+
     def test_published_state_schema_accepts_every_runtime_reasoning_source(self):
         schema = json.loads(
             (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(encoding="utf-8")
