@@ -85,6 +85,9 @@ VALID_PAYLOAD_MODES = {"inline_packet", "app_attachment", "mcp_readonly"}
 VALID_ATTACHMENT_CAPABILITIES = {"native", "manual", "unavailable"}
 VALID_FILESYSTEM_CAPABILITIES = {"inline", "mcp_verified", "unavailable"}
 VALID_COORDINATION_CAPABILITIES = {"available", "unavailable", "unknown"}
+VALID_STARTUP_BROWSER_STATES = {"initialized", "uninitialized"}
+VALID_STARTUP_CHAT_LOGIN_STATES = {"logged_in", "not_logged_in"}
+VALID_STARTUP_CHAT_SELECTION_STATES = {"unique", "not_unique"}
 VALID_COORDINATION_MODES = {"foreground", "automatic"}
 VALID_GOAL_MODES = {"continuous", "single_stage"}
 VALID_COORDINATION_REVIEW_MODES = {"unconfirmed", "extreme", "pro"}
@@ -2359,6 +2362,98 @@ def autonomous_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
         "user_status": "正在开发",
         "user_message": "启动前条件已经确认，可以开始执行。",
         "user_next_choice": "无需操作。",
+    }
+
+
+def startup_diagnostics_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Diagnose startup from caller-provided facts without touching runtime state.
+
+    This is deliberately separate from autonomous-preflight: it is the gate
+    before a new implementation task initializes SuperLuna.  It performs no
+    browser, Chat, state, or automation operation and reports only the first
+    blocking fact in a stable order.
+    """
+    implementation_thread_id = str(args.implementation_thread_id or "").strip()
+    reviewer_thread_id = str(args.reviewer_thread_id or "").strip()
+    facts = {
+        "browser": args.browser,
+        "chat_login": args.chat_login,
+        "chat_selection": args.chat_selection,
+        "chat_read": args.chat_read,
+        "chat_send": args.chat_send,
+        "one_shot_wait": args.one_shot_wait,
+        "implementation_thread_id": implementation_thread_id,
+        "reviewer_thread_id": reviewer_thread_id,
+    }
+    checks = (
+        (
+            args.browser != "initialized",
+            "browser_not_initialized",
+            "当前实施任务的内置浏览器尚未初始化。",
+            "请先初始化当前实施任务自己的内置浏览器，再重新运行启动自检。",
+        ),
+        (
+            args.chat_login != "logged_in",
+            "chat_not_logged_in",
+            "固定 Chat 页面尚未确认登录。",
+            "请在当前实施任务的内置浏览器登录 ChatGPT，并重新运行启动自检。",
+        ),
+        (
+            args.chat_selection != "unique",
+            "chat_not_unique",
+            "当前没有唯一可用的 reviewer Chat。",
+            "请只选择一个固定的 ChatGPT reviewer Chat，再重新运行启动自检。",
+        ),
+        (
+            args.chat_read != "available",
+            "chat_read_unavailable",
+            "当前不具备读取 reviewer Chat 的能力。",
+            "请恢复当前实施任务的 Chat 读取能力，再重新运行启动自检。",
+        ),
+        (
+            args.chat_send != "available",
+            "chat_send_unavailable",
+            "当前不具备向 reviewer Chat 发送的能力。",
+            "请恢复当前实施任务的 Chat 发送能力，再重新运行启动自检。",
+        ),
+        (
+            args.one_shot_wait != "available",
+            "one_shot_wait_unavailable",
+            "当前不具备单次等待任务能力。",
+            "请提供一个可绑定且不重复执行的单次等待任务能力，再重新运行启动自检。",
+        ),
+        (
+            bool(implementation_thread_id)
+            and bool(reviewer_thread_id)
+            and implementation_thread_id == reviewer_thread_id,
+            "identity_conflict",
+            "实施任务 identity 与 reviewer Chat identity 相同，角色发生冲突。",
+            "请为实施任务和 reviewer Chat 提供两个不同的稳定 identity，再重新运行启动自检。",
+        ),
+    )
+    for blocked, code, reason, next_step in checks:
+        if blocked:
+            return {
+                "ok": False,
+                "action": "startup_blocked",
+                "ready": False,
+                "reason_code": code,
+                "reason": reason,
+                "user_status": "需要你决定",
+                "user_message": reason,
+                "user_next_choice": next_step,
+                "facts": facts,
+            }
+
+    return {
+        "ok": True,
+        "action": "startup_ready",
+        "ready": True,
+        "reason": "可以开始",
+        "user_status": "正在开发",
+        "user_message": "可以开始",
+        "user_next_choice": "无需操作。",
+        "facts": facts,
     }
 
 
@@ -5707,6 +5802,31 @@ def build_parser() -> argparse.ArgumentParser:
         default="in_app_browser",
     )
 
+    startup_diagnostics = sub.add_parser(
+        "startup-diagnostics",
+        help="只读检查新实施任务初始化前的宿主能力事实",
+    )
+    startup_diagnostics.add_argument("--implementation-thread-id", required=True)
+    startup_diagnostics.add_argument("--reviewer-thread-id", required=True)
+    startup_diagnostics.add_argument(
+        "--browser", required=True, choices=sorted(VALID_STARTUP_BROWSER_STATES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-login", required=True, choices=sorted(VALID_STARTUP_CHAT_LOGIN_STATES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-selection", required=True, choices=sorted(VALID_STARTUP_CHAT_SELECTION_STATES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-read", required=True, choices=sorted(VALID_COORDINATION_CAPABILITIES),
+    )
+    startup_diagnostics.add_argument(
+        "--chat-send", required=True, choices=sorted(VALID_COORDINATION_CAPABILITIES),
+    )
+    startup_diagnostics.add_argument(
+        "--one-shot-wait", required=True, choices=sorted(VALID_COORDINATION_CAPABILITIES),
+    )
+
     network = sub.add_parser("record-network-error")
     network.add_argument("--state", required=True)
     network.add_argument("--message", required=True)
@@ -5980,6 +6100,8 @@ def main(argv: list[str] | None = None) -> int:
             result = coordination_preflight_command(args)
         elif args.command == "autonomous-preflight":
             result = autonomous_preflight_command(args)
+        elif args.command == "startup-diagnostics":
+            result = startup_diagnostics_command(args)
         elif args.command == "record-network-error":
             result = record_network_error_command(args)
         elif args.command == "set-monitor-mode":

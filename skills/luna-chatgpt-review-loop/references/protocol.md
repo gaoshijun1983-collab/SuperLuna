@@ -40,7 +40,15 @@ same claimed tab is readable, its URL still identifies the bound conversation,
 and its page is ChatGPT. A network error, login boundary, ambiguous tab, or
 changed conversation fails closed before local work begins.
 
-`autonomous-preflight --transport in_app_browser` verifies distinct
+Before that preflight, the caller runs the read-only `startup-diagnostics`
+entrypoint with facts from the implementation task's own host capability. It
+checks, in order, browser initialization, authenticated ChatGPT, one unique
+reviewer Chat, Chat read, Chat send, one-shot waiting, and distinct stable
+identities. It never opens a browser, creates a Chat, creates a wait task, or
+initializes state. It returns either `可以开始` or exactly one reason and a
+user next step; missing facts fail closed.
+
+`autonomous-preflight --transport in_app_browser` then verifies distinct
 implementation/reviewer identities, browser binding/read/send capability, and
 one-shot waiting capability. Automatic initialization must use
 `--review-transport in_app_browser --continuation-mode automatic --goal-mode continuous`, producing

@@ -618,6 +618,66 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result["continuation_owner"], "implementation_task")
         self.assertEqual(result["coordinator_role"], "exception_only")
 
+    def test_startup_diagnostics_reports_ready_when_all_caller_facts_are_present(self):
+        result = lcrl.startup_diagnostics_command(Namespace(
+            implementation_thread_id="implementation-task",
+            reviewer_thread_id="reviewer-chat",
+            browser="initialized",
+            chat_login="logged_in",
+            chat_selection="unique",
+            chat_read="available",
+            chat_send="available",
+            one_shot_wait="available",
+        ))
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["ready"])
+        self.assertEqual(result["action"], "startup_ready")
+        self.assertEqual(result["reason"], "可以开始")
+
+    def test_startup_diagnostics_returns_only_the_first_failure(self):
+        cases = (
+            ("browser", "uninitialized", "browser_not_initialized"),
+            ("chat_login", "not_logged_in", "chat_not_logged_in"),
+            ("chat_selection", "not_unique", "chat_not_unique"),
+            ("chat_read", "unavailable", "chat_read_unavailable"),
+            ("chat_send", "unavailable", "chat_send_unavailable"),
+            ("one_shot_wait", "unavailable", "one_shot_wait_unavailable"),
+        )
+        for field, value, expected_code in cases:
+            facts = {
+                "implementation_thread_id": "implementation-task",
+                "reviewer_thread_id": "reviewer-chat",
+                "browser": "initialized",
+                "chat_login": "logged_in",
+                "chat_selection": "unique",
+                "chat_read": "available",
+                "chat_send": "available",
+                "one_shot_wait": "available",
+            }
+            facts[field] = value
+            with self.subTest(field=field):
+                result = lcrl.startup_diagnostics_command(Namespace(**facts))
+                self.assertFalse(result["ok"])
+                self.assertFalse(result["ready"])
+                self.assertEqual(result["action"], "startup_blocked")
+                self.assertEqual(result["reason_code"], expected_code)
+                self.assertTrue(result["user_next_choice"])
+
+    def test_startup_diagnostics_blocks_identity_conflict_without_raising(self):
+        result = lcrl.startup_diagnostics_command(Namespace(
+            implementation_thread_id="same-stable-id",
+            reviewer_thread_id="same-stable-id",
+            browser="initialized",
+            chat_login="logged_in",
+            chat_selection="unique",
+            chat_read="available",
+            chat_send="available",
+            one_shot_wait="available",
+        ))
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason_code"], "identity_conflict")
+        self.assertIn("不同", result["user_next_choice"])
+
     def test_automatic_preflight_cannot_initialize_a_foreground_only_state(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -113,6 +113,20 @@ turn 的自阻塞，不是并发抢占。
    SuperLuna 不替用户切换。
 6. 运行只读能力预检：
 
+新实施任务在真正初始化 SuperLuna 之前，先由调用方提供事实并运行一次独立的只读启动自检。
+该命令不打开浏览器、不创建或读取 Chat、不创建等待任务、不初始化 state；它只输出“可以开始”
+或一个按固定优先级排列的单点原因与用户下一步：
+
+```text
+python -B <skill-root>/scripts/lcrl.py startup-diagnostics \
+  --implementation-thread-id <实施任务ID> --reviewer-thread-id <网页conversation-id> \
+  --browser initialized --chat-login logged_in --chat-selection unique \
+  --chat-read available --chat-send available --one-shot-wait available
+```
+
+自检失败关闭，不能通过自行打开浏览器、切换模型、创建 Chat、降级 App Chat 或改变 state
+来绕过。通过后才运行下面的 `autonomous-preflight`，再初始化 state。
+
 ```text
 python -B <skill-root>/scripts/lcrl.py autonomous-preflight \
   --implementation-thread-id <实施任务ID> --reviewer-thread-id <网页conversation-id> \
