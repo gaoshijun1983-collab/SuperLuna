@@ -4,8 +4,8 @@
   "controller_version": 56,
   "schema_version": 7,
   "skill_revision": "2026-08-12.10",
-  "source_contains_unreleased_hotfix": true,
-  "dist_archive_matches_current_source": false,
+  "source_contains_unreleased_hotfix": false,
+  "dist_archive_matches_current_source": true,
   "compatibility_entrypoints": {
     "plugin": "luna-review-loop",
     "skill": "luna-chatgpt-review-loop",

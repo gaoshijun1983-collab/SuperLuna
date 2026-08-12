@@ -1,5 +1,9 @@
 # SuperLuna
 
+[![CI](https://github.com/gaoshijun1983-collab/SuperLuna/actions/workflows/ci.yml/badge.svg)](https://github.com/gaoshijun1983-collab/SuperLuna/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/gaoshijun1983-collab/SuperLuna?include_prereleases)](https://github.com/gaoshijun1983-collab/SuperLuna/releases)
+
 SuperLuna is a Codex plugin for a browser-first development review loop:
 
 ```text
@@ -13,8 +17,9 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.49`; the latest archive remains
-Alpha 27. Controller 56 / Skill revision `2026-08-12.10` adds a bounded retry
+The first public open-source release is `0.2.0-alpha.49`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 56 / Skill revision
+`2026-08-12.10` adds a bounded retry
 for transient Windows sharing violations during atomic durable-file replacement;
 permanent permission failures still fail closed. Controller 55 adds a fail-closed,
 read-only multi-run overview. Controller 54 makes the guard fail
