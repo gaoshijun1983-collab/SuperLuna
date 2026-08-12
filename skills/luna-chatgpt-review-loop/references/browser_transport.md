@@ -21,6 +21,12 @@ same-task `startup` or `waiting_read` acquisition directly after a proven health
 `health_probe`; either acquisition consumes the bypass. This keeps the two-task
 product limit without letting one task starve another through repeated polling.
 
+A quiet handoff during active `startup` or `submission` is not a waiting-state
+schedule. The implementation task keeps the same foreground turn alive, performs
+a bounded local wait until `retry_not_before`, and reacquires before browser
+initialization. It must not create an automation or finish at the active boundary.
+Only an existing waiting occurrence may redate its same one-shot check.
+
 The registry defaults to
 `~/.codex/superluna/account-browser-gate.json` (or the configured Codex home),
 so it coordinates projects and tasks on the current machine. It cannot prove

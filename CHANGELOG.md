@@ -1,5 +1,14 @@
 # Changelog
 
+- Unreleased Controller 64 / Skill revision `2026-08-12.18`: A2 completed its
+  first autonomous reply cycle and prepared round two, but ended at
+  `review_submit_pending` when the 180-second handoff blocked submission. Since
+  execution states intentionally have no timer, that left no wake source. Active
+  startup/submission handoffs now return an explicit same-turn wait contract;
+  the implementation keeps the foreground turn alive, waits locally to the
+  exact retry time, and continues without creating an automation. Existing
+  waiting occurrences alone may redate their one-shot check.
+
 - Unreleased Controller 63 / Skill revision `2026-08-12.17`: the first real A2
   post-cooldown waiting occurrence proved that a healthy probe may need to
   continue directly into `waiting_read`, not only `startup`. The single-use

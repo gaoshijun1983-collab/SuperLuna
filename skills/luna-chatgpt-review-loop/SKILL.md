@@ -148,8 +148,12 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
 ```
 
 只有 `slot_acquired=true` 才可继续。`account_browser_access_queued`、
-`account_browser_handoff_quiet_period` 或 `account_browser_rate_limit_backoff` 均不得初始化浏览器；等待 occurrence 必须释放其读取 lease，
-并把同一个单次等待项移到不早于 `retry_not_before`，普通启动/提交则保持原状态静默结束。
+`account_browser_handoff_quiet_period` 或 `account_browser_rate_limit_backoff` 均不得初始化浏览器。
+等待 occurrence 遇到 `waiting_reschedule_allowed=true` 时必须释放读取 lease，并把同一个单次等待
+项移到不早于 `retry_not_before`。普通 `startup`/`submission` 遇到
+`same_turn_wait_required=true` 时不得结束 turn、不得创建任何自动任务、不得输出阶段性完成；
+必须在原执行 turn 中做有界本地等待，到达 `retry_not_before` 后重新取得名额并继续。真实
+30/60 分钟账户熔断不使用此前台等待规则，仍安全停止。
 网页动作结束后必须用匹配任务和 `lease_id` 运行 `release-account-browser-slot`；正常结束使用
 `--outcome completed`。到期后的唯一只读健康探测只有在既有固定对话/对话记录真实可读且未见
 限流提示时，才使用 `--outcome healthy --health-proof conversation_history_accessible`；健康

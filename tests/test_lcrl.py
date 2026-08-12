@@ -273,8 +273,13 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(other_task["slot_acquired"])
             self.assertEqual(other_task["retry_not_before"], "2026-08-12T08:03:10Z")
             self.assertEqual(other_task["handoff_from_task_id"], "task-one")
+            self.assertTrue(other_task["same_turn_wait_required"])
+            self.assertFalse(other_task["waiting_reschedule_allowed"])
+            self.assertFalse(other_task["new_automation_allowed"])
             self.assertEqual(same_task["action"], "account_browser_handoff_quiet_period")
             self.assertFalse(same_task["slot_acquired"])
+            self.assertFalse(same_task["same_turn_wait_required"])
+            self.assertTrue(same_task["waiting_reschedule_allowed"])
 
     def test_account_health_probe_allows_one_immediate_same_task_startup(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -349,6 +354,29 @@ class ControllerTests(unittest.TestCase):
 
             self.assertEqual(second["action"], "account_browser_slot_acquired")
             self.assertTrue(second["slot_acquired"])
+
+    def test_submission_quiet_period_requires_same_turn_wait_without_automation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="startup",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="completed", registry=str(registry), at="2026-08-12T08:00:10Z",
+                health_proof=None,
+            ))
+
+            result = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="submission",
+                registry=str(registry), at="2026-08-12T08:00:11Z",
+            ))
+
+            self.assertEqual(result["action"], "account_browser_handoff_quiet_period")
+            self.assertTrue(result["same_turn_wait_required"])
+            self.assertFalse(result["waiting_reschedule_allowed"])
+            self.assertFalse(result["new_automation_allowed"])
 
     def test_account_rate_limit_opens_global_circuit_and_clears_slots(self):
         with tempfile.TemporaryDirectory() as directory:

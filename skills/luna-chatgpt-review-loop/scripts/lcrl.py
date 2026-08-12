@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 63
-SKILL_REVISION = "2026-08-12.17"
+CONTROLLER_VERSION = 64
+SKILL_REVISION = "2026-08-12.18"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -796,6 +796,9 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                 "ok": True,
                 "action": "account_browser_handoff_quiet_period",
                 "slot_acquired": False,
+                "same_turn_wait_required": args.operation in {"startup", "submission"},
+                "waiting_reschedule_allowed": args.operation == "waiting_read",
+                "new_automation_allowed": False,
                 "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
                 "active_count": len(gate["slots"]),
                 "retry_not_before": gate["handoff_not_before"],

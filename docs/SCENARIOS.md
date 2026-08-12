@@ -31,6 +31,11 @@ handoff before touching ChatGPT. Only the same task's first `startup` or
 and that bypass is consumed on acquisition. This pacing is separate from the
 two-task cap.
 
+If the quiet handoff is encountered during startup or formal submission, the
+same implementation turn remains active and waits locally until the exact retry
+time. No automation is created outside `等待 Chat`. A waiting-read occurrence may
+redate only its already-bound one-shot check.
+
 ## Long reviewer reasoning
 
 While the reply visibly streams, do not refresh. The current authorized check
