@@ -90,6 +90,17 @@ fails closed even when no lease is currently active; it cannot bootstrap access
 to the state. Same-task serial recovery remains limited to an ordinary
 `turn_entry` or `apply_result` lease.
 
+An explicitly terminated retest does not escape this established state by
+choosing a new filename. After the old state is `external_blocked`, every
+waiting identity and action lease is retired, and a current user authorization
+identity is available, `reset-for-retest` may archive the old cycle and
+atomically hand that same state to one exact implementation task. It clears
+task-local browser, request/response, attachment, and operation-package evidence
+while retaining the fixed reviewer conversation identity. The replacement task
+must still enter through `guard`, rebind its own browser, and reconfirm visible
+Extreme mode. Waiting states, live leases, ambiguous identities, and blank
+authorization fail closed without mutation.
+
 Context compaction inside an active implementation turn is not a new external
 authorization. If the host resumes execution after compaction, it must retain
 the same stable implementation-task identity when it re-enters the guard; it

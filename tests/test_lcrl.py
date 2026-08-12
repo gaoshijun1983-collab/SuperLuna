@@ -495,6 +495,114 @@ class ControllerTests(unittest.TestCase):
                     lcrl.begin_new_goal_command(Namespace(**(base | override)))
                 self.assertEqual(state_path.read_bytes(), before)
 
+    def test_user_authorized_retest_reset_hands_blocked_state_to_exact_new_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "review-chat")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="review-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "external_blocked",
+                stage="old-stalled-cycle", recovery_action="user_terminated_old_cycle",
+                recovery_override=True,
+            )
+
+            reset = lcrl.reset_for_retest_command(Namespace(
+                state=str(state_path),
+                previous_implementation_thread_id="implementation",
+                implementation_thread_id="replacement-implementation",
+                authorization_id="user-message-clean-retest",
+                stage="clean-retest", goal_mode="continuous",
+            ))
+
+            self.assertEqual(reset["action"], "retest_reset_authorized")
+            self.assertTrue(reset["same_state_reused"])
+            self.assertTrue(reset["browser_rebind_required"])
+            updated = lcrl.load_state(state_path)
+            self.assertEqual(updated["review"]["status"], "local_work")
+            self.assertEqual(updated["review"]["current_stage"], "clean-retest")
+            self.assertEqual(
+                updated["automation"]["implementation_thread_id"],
+                "replacement-implementation",
+            )
+            self.assertEqual(updated["browser_binding"]["status"], "unbound")
+            self.assertFalse(updated["confirmation"]["reviewer_reasoning_confirmed"])
+            self.assertEqual(updated["confirmation"]["reviewer_thread_id"], "review-chat")
+            self.assertFalse(updated["automation"]["waiting_check_active"])
+            self.assertEqual(updated["review_history"][-1]["event"], "user_authorized_retest_reset")
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "different implementation task"):
+                lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                    implementation_thread_id="implementation",
+                ))
+            entered = lcrl.guard_action(Namespace(
+                state=str(state_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="replacement-implementation",
+            ))
+            self.assertTrue(entered["execution_allowed"])
+
+    def test_retest_reset_cannot_bypass_waiting_or_unreleased_execution(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            waiting_path = self.make_state(root / "waiting")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(waiting_path), mode="extreme", at=None,
+            ))
+            self.transition(
+                waiting_path, "review_submit_pending",
+                stage="waiting", fingerprint="waiting-request",
+            )
+            now = lcrl.utc_now()
+            self.transition(
+                waiting_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-waiting", request_message_id="message-waiting",
+                request_persisted_at=now,
+            )
+            waiting_before = waiting_path.read_bytes()
+            with self.assertRaisesRegex(lcrl.LCRLError, "externally blocked"):
+                lcrl.reset_for_retest_command(Namespace(
+                    state=str(waiting_path),
+                    previous_implementation_thread_id="implementation",
+                    implementation_thread_id="replacement",
+                    authorization_id="user-reset", stage="retest",
+                    goal_mode="continuous",
+                ))
+            self.assertEqual(waiting_path.read_bytes(), waiting_before)
+
+            blocked_path = self.make_state(root / "blocked")
+            self.transition(
+                blocked_path, "external_blocked", stage="blocked",
+                recovery_action="user_terminated", recovery_override=True,
+            )
+            lease = lcrl.guard_action(Namespace(
+                state=str(blocked_path), minutes=20, reason="turn_entry", replace=False,
+                implementation_thread_id="implementation",
+            ))
+            blocked_before = blocked_path.read_bytes()
+            with self.assertRaisesRegex(lcrl.LCRLError, "action leases"):
+                lcrl.reset_for_retest_command(Namespace(
+                    state=str(blocked_path),
+                    previous_implementation_thread_id="implementation",
+                    implementation_thread_id="replacement",
+                    authorization_id="user-reset", stage="retest",
+                    goal_mode="continuous",
+                ))
+            self.assertEqual(blocked_path.read_bytes(), blocked_before)
+            lcrl.release_action(Namespace(
+                state=str(blocked_path), lease_id=lease["lease_id"], force=False,
+            ))
+
     def test_same_task_guard_reclaims_an_orphaned_ordinary_lease(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))

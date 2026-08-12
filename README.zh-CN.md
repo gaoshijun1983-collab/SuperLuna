@@ -21,7 +21,10 @@ Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 ## 当前源码状态
 
 首个公开开源版本是 `0.2.0-alpha.49`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。当前未发布源码为控制器 57 / Skill revision `2026-08-12.11`：已经绑定的单次
+Public Beta。当前未发布源码为控制器 58 / Skill revision `2026-08-12.12`：已经明确终止且
+不存在等待身份/执行权的旧状态，现在可以在用户授权下原子交接给唯一的新实施任务；仍复用同一
+state 文件并归档旧 cycle，等待中的工作不能使用这条路径。控制器 57 / Skill revision
+`2026-08-12.11`：已经绑定的单次
 等待必须使用控制器生成的完整 occurrence 提示，其中包含精确 state、token 和 automation identity，
 不再允许手写提示漏掉恢复所需字段。委派启动也会拒绝子任务把协调任务的 `source_thread_id`
 冒充为自身实施 identity。控制器 56 / Skill revision

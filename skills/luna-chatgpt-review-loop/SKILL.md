@@ -79,6 +79,24 @@ python -B <skill-root>/scripts/lcrl.py guard \
 `--replace` 是兼容参数，不能绕过等待门，也不能抢占不同任务、等待读取或浏览器重开 lease。
 只有用户明确终止/重置当前闭环并由控制器完成状态迁移后，普通
 turn 才能重新取得执行权。
+
+旧闭环已经由控制器转为 `external_blocked`、等待 token/任务/claim 全部清空、所有执行 lease
+均已释放，并且用户明确授权干净复测时，协调任务可在唤醒新实施任务之前运行一次：
+
+```text
+python -B <skill-root>/scripts/lcrl.py reset-for-retest \
+  --state <旧state-file> \
+  --previous-implementation-thread-id <旧实施任务ID> \
+  --implementation-thread-id <本次实施任务ID> \
+  --authorization-id <当前用户授权的稳定身份/正文指纹> \
+  --stage <复测首阶段> --goal-mode continuous
+```
+
+它复用同一个精确 state 文件并归档旧 cycle，原子更新唯一实施任务身份，清空旧请求/回复、
+operation package、附件与任务本地浏览器绑定，同时保留固定 reviewer Chat identity；新任务必须
+先对同一 state 运行 `guard`，再用自己的浏览器重新绑定并重新目视确认“极高”。该命令不能在
+等待态、存在任一等待身份、存在执行 lease、旧身份不匹配或没有明确授权时运行；不得用删除
+旧 state 或改用未登记的新文件绕过入口门。
 同一实施任务若上一 turn 已结束、但遗留普通 `turn_entry` 或 `apply_result` lease，新的串行
 turn 可用同一个持久实施任务 ID 原子回收并重建 lease；不同任务、等待读取 lease、浏览器重开
 lease 或未提供精确任务 ID 时仍失败关闭；传入 `--replace` 也不会改变该判定。这只消除已结束

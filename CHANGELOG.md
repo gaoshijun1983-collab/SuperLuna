@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added controller 58 / Skill revision `2026-08-12.12` after the UNSEEN Memory
+  retest showed that a terminated historical state remained permanently bound
+  to its old implementation task. The new `reset-for-retest` transition accepts
+  only an externally blocked state with no wait identity or action lease, an
+  exact old/new task identity, and explicit current user authorization. It
+  archives the old cycle and hands the same state to the replacement task; live
+  waiting work still cannot be bypassed. Local evidence only, pending real Mac
+  retest.
 - Added controller 57 / Skill revision `2026-08-12.11` after the first real
   macOS wait occurrence was created with a hand-written prompt that omitted its
   required token and automation id. The new `render-waiting-check` command only

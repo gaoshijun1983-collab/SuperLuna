@@ -19,7 +19,11 @@ controller, not a standalone desktop application.
 
 The first public open-source release is `0.2.0-alpha.49`. It is an early
 technical-testing Alpha, not a Public Beta. Current unreleased source is
-Controller 57 / Skill revision `2026-08-12.11`: a bound one-shot wait now has a
+Controller 58 / Skill revision `2026-08-12.12`: an explicitly terminated,
+wait-free state can now be atomically handed from its historical implementation
+task to one exact replacement task for a user-authorized retest. The same state
+file is reused and the old cycle is archived; live waiting work cannot use this
+path. Controller 57 / Skill revision `2026-08-12.11`: a bound one-shot wait has a
 controller-rendered occurrence prompt containing its exact state, token, and
 automation identity, so a hand-written prompt cannot silently omit the fields
 required to resume. Delegated startup also rejects a child task that reuses its
