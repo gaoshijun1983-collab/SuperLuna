@@ -13,8 +13,11 @@ controller, not a standalone desktop application.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.46`; the latest archive remains
-Alpha 27. Controller 53 / Skill revision `2026-08-12.7` extends the exact
+The current source candidate is `0.2.0-alpha.47`; the latest archive remains
+Alpha 27. Controller 54 / Skill revision `2026-08-12.8` makes the guard fail
+closed for missing or cross-task implementation identities before granting a
+work lease, while preserving same-task serial recovery only for ordinary
+`turn_entry` and `apply_result` leases. Controller 53 / Skill revision `2026-08-12.7` extends the exact
 20-minute stall boundary to both active work states and makes the stable task
 identity explicit for guard recovery after context compaction. Controller 52 adds a byte-for-byte
 read-only multi-run observer with the user's exact 20-minute stall boundary,

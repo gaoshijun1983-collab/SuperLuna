@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 53
-SKILL_REVISION = "2026-08-12.7"
+CONTROLLER_VERSION = 54
+SKILL_REVISION = "2026-08-12.8"
 MAX_HEARTBEAT_BYTES = 1200
 BINDING_REGISTRY_VERSION = 1
 NAMING_TEMPLATE_VERSION = 3
@@ -4169,6 +4169,12 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
     state = load_state(path)
     revision = state["revision"]
     status = state["review"]["status"]
+    implementation_thread_id = str(
+        getattr(args, "implementation_thread_id", None) or "none"
+    ).strip()
+    expected_implementation_thread_id = state["automation"].get(
+        "implementation_thread_id", "none"
+    )
     if status in MONITOR_STATUSES:
         return add_user_status_exit({
             "ok": True,
@@ -4184,17 +4190,22 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         })
     recovered_same_task_lease = False
     if active_action_lease(state):
-        implementation_thread_id = str(
-            getattr(args, "implementation_thread_id", None) or "none"
-        ).strip()
+        if implementation_thread_id == "none":
+            raise LCRLError("guard requires the exact implementation task identity")
         same_task_recovery = bool(
             implementation_thread_id != "none"
-            and implementation_thread_id == state["automation"].get("implementation_thread_id")
             and state["runtime"].get("action_lease_reason") in {"turn_entry", "apply_result"}
         )
-        if not same_task_recovery:
+        if (
+            implementation_thread_id != expected_implementation_thread_id
+            or not same_task_recovery
+        ):
             raise LCRLError("an unexpired action lease already exists")
         recovered_same_task_lease = True
+    elif implementation_thread_id == "none":
+        raise LCRLError("guard requires the exact implementation task identity")
+    elif implementation_thread_id != expected_implementation_thread_id:
+        raise LCRLError("guard belongs to a different implementation task")
     clear_action_lease(state)
     lease_id = claim_action_lease(state, args.reason, args.minutes)
     save_state(path, state, expected_revision=revision)
@@ -4205,6 +4216,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         "lease_id": lease_id,
         "expires_at": state["runtime"]["action_lease_expires_at"],
         "recovered_same_task_lease": recovered_same_task_lease,
+        "implementation_thread_id": implementation_thread_id,
     }
 
 

@@ -78,6 +78,12 @@ exception: its first action remains `waiting-check`, followed by
 `authorize-waiting-chat-read`; an ordinary user or coordinator message cannot
 claim that source.
 
+The guard also requires the exact implementation-task identity before granting
+any ordinary work lease. A missing identity or one belonging to another task
+fails closed even when no lease is currently active; it cannot bootstrap access
+to the state. Same-task serial recovery remains limited to an ordinary
+`turn_entry` or `apply_result` lease.
+
 Context compaction inside an active implementation turn is not a new external
 authorization. If the host resumes execution after compaction, it must retain
 the same stable implementation-task identity when it re-enters the guard; it
