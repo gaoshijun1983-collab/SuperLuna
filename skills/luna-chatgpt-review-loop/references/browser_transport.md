@@ -7,6 +7,16 @@ but new runs use `in_app_browser`.
 
 ## Shared account access gate
 
+When this source repository tests SuperLuna itself, browser access additionally
+requires the `superluna_repo_retest_v1` scope. The exact implementation identity
+must resolve to its repository-local
+`.superluna/retest-runs/<task-hash>/project` and sibling `state.json`. Scope is
+validated before the workspace probe and again at state load/save and account
+slot acquisition, so an out-of-scope or profile-drifted run cannot create the
+shared registry, initialize the browser, or inspect Chat. The normal installed
+workflow continues to use `generic`; this development-only restriction does not
+remove support for a user-selected external project.
+
 All local runs using the same ChatGPT account share a machine-wide browser gate.
 Every browser initialization, tab list/claim/open, DOM inspection, read, send,
 or reload requires one of two short-lived slots. Every slot also carries the
@@ -132,7 +142,8 @@ replacement Chat, or generic retry.
 
 When a coordinator has already provisioned the sole Chat and durable state is
 still a pristine `local_work` / provisioned `pending_handoff`, call
-`authorize-browser-startup-reopen` with the current task-local browser id. Only
+`authorize-browser-startup-reopen` with the current task-local browser id and
+the live `startup` account-slot lease. Only
 `browser_startup_reopen_authorized` permits one open of the returned canonical
 URL, with sending forbidden. After verifying the exact URL, authenticated
 ChatGPT page, and conversation, call `confirm-browser-startup-rebind` with the
@@ -180,8 +191,8 @@ If a later submission reuses any fixed Chat already bound by the same durable
 state and the platform has removed its exact URL from both listings, the caller
 must not claim an empty result or open the URL on its own. While status is
 `review_submit_pending` and no request identity exists, call
-`authorize-browser-submission-reopen` with the current submission fingerprint
-and current in-app browser id.
+`authorize-browser-submission-reopen` with the current submission fingerprint,
+current in-app browser id, and live `submission` account-slot lease.
 Only `browser_submission_reopen_authorized` grants a ten-minute lease for one canonical-URL open in the
 authorized browser. If the app restarted and issued a new browser id, the lease
 records that one candidate without changing durable state. Verify the exact
@@ -285,9 +296,13 @@ scheduler and no global recurring browser poller.
    `reload_same_tab_once=true`, reload the same tab exactly once, wait for the
    document to load, verify the same conversation id, and inspect it.
 8. Record a readable page with `browser-network-observation --outcome loaded`.
-   If no complete reply exists, release the account slot and rearm the same
-   waiting gate with the current read lease before updating another future
-   check. Before that occurrence ends, the final browser action keeps the same
+   If a real page read finds no complete reply, first persist that fact with
+   `record-browser-no-complete-reply`, including the bound browser id, visible
+   current request message id, and latest assistant message id. Then release the
+   account slot and run `rearm-waiting-check --reason no_complete_reply` with the
+   current read lease before updating another future check. Without that durable
+   observation, the controller reports “not checked” and never “no reply”. Before
+   that occurrence ends, the final browser action keeps the same
    tab as `status: "handoff"`; the next occurrence reclaims it rather than
    reusing a stale control handle. Leaving the waiting phase retires the gate
    and stops browser checks.

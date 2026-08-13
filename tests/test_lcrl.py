@@ -22,6 +22,92 @@ assert SPEC and SPEC.loader
 SPEC.loader.exec_module(lcrl)
 
 
+def _repo_retest_paths(checkout: Path, implementation_thread_id: str) -> tuple[Path, Path, Path]:
+    run_id = hashlib.sha256(implementation_thread_id.encode("utf-8")).hexdigest()[:16]
+    run_root = checkout.resolve() / ".superluna" / "retest-runs" / run_id
+    return run_root, run_root / "project", run_root / "state.json"
+
+
+class ProjectContextPacketTests(unittest.TestCase):
+    def test_renders_all_selected_core_files_without_a_file_count_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selected = []
+            for index in range(20):
+                path = root / "docs" / f"core-{index:02d}.md"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"core fact {index}\n", encoding="utf-8")
+                selected.append(str(path.relative_to(root)))
+
+            packet = lcrl.render_project_context_command(Namespace(
+                project_path=str(root), files=selected,
+            ))
+
+            self.assertIn("FILE_COUNT: 20", packet)
+            self.assertIn("--- BEGIN PROJECT FILE: docs/core-00.md ---", packet)
+            self.assertIn("core fact 19", packet)
+            self.assertTrue(packet.endswith("[/SUPERLUNA_PROJECT_CONTEXT]\n"))
+
+    def test_duplicate_selection_is_rendered_once_with_relative_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "README.md"
+            source.write_text("project truth\n", encoding="utf-8")
+
+            packet = lcrl.render_project_context_command(Namespace(
+                project_path=str(root), files=["README.md", "README.md"],
+            ))
+
+            self.assertIn("FILE_COUNT: 1", packet)
+            self.assertEqual(packet.count("BEGIN PROJECT FILE: README.md"), 1)
+            self.assertNotIn(str(root), packet)
+
+    def test_rejects_outside_and_symlink_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            root = base / "project"
+            root.mkdir()
+            outside = base / "outside.md"
+            outside.write_text("outside\n", encoding="utf-8")
+            link = root / "linked.md"
+            link.symlink_to(outside)
+
+            for selected in ([str(outside)], ["linked.md"]):
+                with self.subTest(selected=selected):
+                    with self.assertRaises(lcrl.LCRLError):
+                        lcrl.render_project_context_command(Namespace(
+                            project_path=str(root), files=selected,
+                        ))
+
+    def test_rejects_sensitive_paths_and_credential_like_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".env").write_text("API_KEY=value\n", encoding="utf-8")
+            source = root / "notes.md"
+            source.write_text("token sk-abcdefghijklmnopqrstuvwxyz012345\n", encoding="utf-8")
+
+            for selected in ([".env"], ["notes.md"]):
+                with self.subTest(selected=selected):
+                    with self.assertRaises(lcrl.LCRLError):
+                        lcrl.render_project_context_command(Namespace(
+                            project_path=str(root), files=selected,
+                        ))
+
+    def test_total_byte_budget_limits_content_not_file_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selected = []
+            for index in range(3):
+                path = root / f"part-{index}.md"
+                path.write_text("x" * 24_000, encoding="utf-8")
+                selected.append(path.name)
+
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.render_project_context_command(Namespace(
+                    project_path=str(root), files=selected,
+                ))
+
+
 class AtomicReplaceTests(unittest.TestCase):
     def test_state_lock_open_retries_transient_permission_error(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -478,6 +564,198 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(result["provisioning_home_navigation_allowed"])
             self.assertFalse(registry.exists())
 
+    def test_repo_retest_account_slot_rejects_external_scope_before_registry_creation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-account"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.mkdir(parents=True)
+            external_project = checkout / "ordinary-subdirectory"
+            external_project.mkdir()
+            registry = checkout / "gate-not-yet-created" / "account-browser-gate.json"
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+                self.assertRaisesRegex(lcrl.LCRLError, "SuperLuna repository retest scope"),
+            ):
+                lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id=thread_id,
+                    reviewer_thread_id="reviewer-retest-account",
+                    operation="startup",
+                    profile="superluna_repo_retest_v1",
+                    project_path=str(external_project),
+                    state=str(state_path),
+                    registry=str(registry),
+                    at="2026-08-13T02:00:00Z",
+                ))
+
+            self.assertFalse(registry.exists())
+            self.assertFalse(registry.parent.exists())
+
+    def test_repo_retest_account_slot_persists_scope_and_rejects_profile_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-scope"
+            run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.mkdir(parents=True)
+            registry = checkout / "account-browser-gate.json"
+
+            (checkout / ".codex-plugin").mkdir()
+            (checkout / ".codex-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "luna-review-loop"}), encoding="utf-8",
+            )
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+            ):
+                acquired = lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id=thread_id,
+                    reviewer_thread_id="reviewer-retest-scope",
+                    operation="startup",
+                    profile="superluna_repo_retest_v1",
+                    project_path=str(project),
+                    state=str(state_path),
+                    registry=str(registry),
+                    at="2026-08-13T02:00:00Z",
+                ))
+                drifted = lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id=thread_id,
+                    reviewer_thread_id="reviewer-retest-scope",
+                    operation="startup",
+                    profile="generic",
+                    project_path=None,
+                    state=None,
+                    registry=str(registry),
+                    at="2026-08-13T02:00:01Z",
+                ))
+                gate = lcrl.load_account_browser_gate(registry)
+
+            self.assertEqual(acquired["action"], "account_browser_slot_acquired")
+            self.assertEqual(drifted["action"], "account_browser_scope_conflict")
+            self.assertFalse(drifted["slot_acquired"])
+            self.assertEqual(gate["slots"][0]["scope"], {
+                "profile": "superluna_repo_retest_v1",
+                "source_checkout": str(checkout.resolve()),
+                "run_id": run_root.name,
+                "project_path": str(project.resolve()),
+                "state_path": str(state_path.resolve()),
+            })
+
+    def test_repo_retest_account_slot_recovers_scope_from_exact_state(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-state-slot"
+            run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            registry = checkout / "account-browser-gate.json"
+
+            (checkout / ".codex-plugin").mkdir()
+            (checkout / ".codex-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "luna-review-loop"}), encoding="utf-8",
+            )
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-retest-state-slot",
+                    profile="superluna_repo_retest_v1",
+                    state_path=str(state_path),
+                )
+                lcrl.save_state(state_path, state)
+                acquired = lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id=thread_id,
+                    reviewer_thread_id="reviewer-retest-state-slot",
+                    operation="waiting_read",
+                    profile=None,
+                    project_path=None,
+                    state=str(state_path),
+                    registry=str(registry),
+                    at="2026-08-13T02:00:00Z",
+                ))
+
+            self.assertEqual(acquired["action"], "account_browser_slot_acquired")
+            self.assertEqual(acquired["scope"], {
+                "profile": "superluna_repo_retest_v1",
+                "source_checkout": str(checkout.resolve()),
+                "run_id": run_root.name,
+                "project_path": str(project.resolve()),
+                "state_path": str(state_path.resolve()),
+            })
+
+    def test_account_slot_state_scope_rejects_a_different_task_before_registry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-state-owner"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            registry = checkout / "gate-not-created" / "account-browser-gate.json"
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-retest-state-owner",
+                    profile="superluna_repo_retest_v1",
+                    state_path=str(state_path),
+                )
+                lcrl.save_state(state_path, state)
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "state task identity does not match",
+                ):
+                    lcrl.acquire_account_browser_slot_command(Namespace(
+                        implementation_thread_id="different-task",
+                        reviewer_thread_id="reviewer-retest-state-owner",
+                        operation="waiting_read",
+                        profile=None,
+                        project_path=None,
+                        state=str(state_path),
+                        registry=str(registry),
+                        at="2026-08-13T02:00:00Z",
+                    ))
+
+            self.assertFalse(registry.exists())
+            self.assertFalse(registry.parent.exists())
+
+    def test_retest_slot_record_from_another_checkout_does_not_poison_generic_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkout_a = root / "SuperLuna-A"
+            checkout_b = root / "SuperLuna-B"
+            for checkout in (checkout_a, checkout_b):
+                (checkout / ".codex-plugin").mkdir(parents=True)
+                (checkout / ".codex-plugin" / "plugin.json").write_text(
+                    json.dumps({"name": "luna-review-loop"}), encoding="utf-8",
+                )
+            thread_id = "implementation-checkout-a"
+            run_root, project, state_path = _repo_retest_paths(checkout_a, thread_id)
+            registry = root / "account-browser-gate.json"
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout_a.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+            ):
+                acquired = lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id=thread_id,
+                    reviewer_thread_id="reviewer-checkout-a", operation="startup",
+                    profile="superluna_repo_retest_v1", project_path=str(project),
+                    state=str(state_path), registry=str(registry),
+                    at="2026-08-13T02:00:00Z",
+                ))
+            self.assertTrue(acquired["slot_acquired"])
+
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout_b.resolve(),
+            ):
+                gate = lcrl.load_account_browser_gate(registry)
+
+            self.assertEqual(gate["slots"][0]["scope"]["source_checkout"], str(checkout_a.resolve()))
+            self.assertEqual(gate["slots"][0]["scope"]["run_id"], run_root.name)
+
     def test_new_chat_authorization_is_rejected_outside_startup(self):
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(lcrl.LCRLError, "requires a startup slot"):
@@ -928,6 +1206,37 @@ class ControllerTests(unittest.TestCase):
             operation="submission", registry=str(registry), at=None,
         ))
 
+    def authorize_submission_reopen(
+        self, state_path: Path, fingerprint: str, browser_id: str,
+    ):
+        registry = state_path.parent / "reopen-account-browser-gate.json"
+        slot = self.acquire_submission_slot(state_path, registry)
+        self.assertTrue(slot["slot_acquired"], slot)
+        result = lcrl.authorize_browser_submission_reopen_command(Namespace(
+            state=str(state_path), fingerprint=fingerprint, browser_id=browser_id,
+            account_slot_lease_id=slot["lease_id"],
+            account_browser_registry=str(registry), at=None,
+        ))
+        result["_test_account_registry"] = str(registry)
+        return result
+
+    def authorize_startup_reopen(self, state_path: Path, browser_id: str):
+        state = lcrl.load_state(state_path)
+        registry = state_path.parent / "startup-reopen-account-browser-gate.json"
+        slot = lcrl.acquire_account_browser_slot_command(Namespace(
+            implementation_thread_id=state["automation"]["implementation_thread_id"],
+            reviewer_thread_id=state["confirmation"]["reviewer_thread_id"],
+            operation="startup", registry=str(registry), at=None,
+        ))
+        self.assertTrue(slot["slot_acquired"], slot)
+        result = lcrl.authorize_browser_startup_reopen_command(Namespace(
+            state=str(state_path), browser_id=browser_id,
+            account_slot_lease_id=slot["lease_id"],
+            account_browser_registry=str(registry), at=None,
+        ))
+        result["_test_account_registry"] = str(registry)
+        return result
+
     def test_retired_heartbeat_prompt_is_short_and_does_not_embed_mutable_state(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))
@@ -963,7 +1272,15 @@ class ControllerTests(unittest.TestCase):
             self.assertIn(f"--token {json.dumps(token)}", rendered)
             self.assertIn('--automation-id "wait-render-1"', rendered)
             self.assertIn(f"--state {json.dumps(str(state_path.resolve()))}", rendered)
-            self.assertIn("首条动作", rendered)
+            self.assertIn("SuperLuna 正在等待评审回复。", rendered)
+            self.assertIn("SuperLuna is waiting for the reviewer.", rendered)
+            self.assertIn("无需操作", rendered)
+            self.assertIn("No action needed;", rendered)
+            self.assertIn("内部单次检查", rendered)
+            self.assertIn("Internal one-time check", rendered)
+            self.assertNotIn("slot后才authorize", rendered)
+            self.assertNotIn("回复文件→", rendered)
+            self.assertNotIn("acquire-account-browser-slot", rendered)
             self.assertNotIn("--token TOKEN", rendered)
             self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
 
@@ -971,6 +1288,52 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(metadata["token_present"])
             self.assertEqual(metadata["automation_id"], "wait-render-1")
             self.assertEqual(len(metadata["prompt_sha256"]), 64)
+
+    def test_repo_retest_waiting_prompt_recovers_the_persisted_browser_scope(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-waiting-prompt"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-retest-waiting",
+                    profile="superluna_repo_retest_v1",
+                    state_path=str(state_path),
+                )
+                rendered = lcrl._waiting_check_prompt(
+                    state_path, state, "wait-retest-scope", "wait-retest-1",
+                )
+
+            account_request = lcrl._waiting_check_account_request(state_path, state)
+            self.assertEqual(account_request["state"], str(state_path))
+            self.assertNotIn("project_path", account_request)
+            self.assertNotIn("profile", account_request)
+            self.assertLessEqual(
+                len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES,
+            )
+
+    def test_generic_waiting_prompt_does_not_add_state_scope_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation-generic-waiting", str(root),
+                "reviewer-generic-waiting",
+            )
+
+            rendered = lcrl._waiting_check_prompt(
+                state_path, state, "wait-generic", "wait-generic-1",
+            )
+            account_request = lcrl._waiting_check_account_request(state_path, state)
+
+            self.assertNotIn("state", account_request)
+            self.assertNotIn("project_path", account_request)
+            self.assertNotIn("profile", account_request)
 
     def test_bound_one_shot_wait_renders_under_limit_for_c9_length_path(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1012,17 +1375,54 @@ class ControllerTests(unittest.TestCase):
                 ),
                 lcrl.MAX_HEARTBEAT_BYTES,
             )
-            self.assertIn("授权前禁浏览器", rendered)
-            self.assertIn("operation_conflict先释放返回的旧lease", rendered)
-            self.assertIn("传上述token/automation", rendered)
-            self.assertIn(
-                "回复文件→stage-browser-reply→释放账户→删本任务→resume-from-reply",
-                rendered,
+            self.assertIn("先执行以上检查", rendered)
+            self.assertIn("Run this check first.", rendered)
+            self.assertIn("按控制器返回步骤", rendered)
+            self.assertIn("follow the controller steps", rendered)
+            self.assertIn("同一回合继续", rendered)
+            self.assertIn("continue in the same turn", rendered)
+            self.assertNotIn("operation_conflict", rendered)
+            self.assertNotIn("stage-browser-reply", rendered)
+
+    def test_claimed_wait_cannot_end_before_same_turn_reply_continuation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(
+                state_path, "review_submit_pending", stage="WAIT-CONTINUE",
+                fingerprint="waiting-continuation",
             )
-            self.assertIn("禁用resume", rendered)
-            self.assertLess(
-                rendered.index("释放账户"),
-                rendered.index("resume"),
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-wait-continuation",
+                request_message_id="message-wait-continuation",
+                request_persisted_at=now,
+            )
+            state = lcrl.load_state(state_path)
+            token = state["automation"]["waiting_check_token"]
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="wait-continuation",
+            ))
+
+            claimed = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="wait-continuation",
+            ))
+
+            self.assertEqual(claimed["action"], "review_poll")
+            self.assertTrue(claimed["continuation_required"])
+            self.assertFalse(claimed["turn_completion_allowed"])
+            self.assertFalse(claimed["user_choice_required"])
+            self.assertEqual(
+                claimed["mandatory_next_action_sequence"][-2:],
+                [
+                    "resume_from_reply_and_continue_same_turn",
+                    "apply_result_and_prepare_next_submission",
+                ],
             )
 
     def test_waiting_check_rejects_oversized_automation_identity(self):
@@ -1078,18 +1478,19 @@ class ControllerTests(unittest.TestCase):
                 registry=str(account_registry), at=None,
             ))
 
-            result = lcrl.authorize_browser_submission_send_command(Namespace(
-                state=str(state_path), fingerprint="capacity-submit-S1",
-                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
-                browser_id="iab-session-1", lease_id=entry["lease_id"],
-                account_slot_lease_id=account_slot["lease_id"],
-                account_browser_registry=str(account_registry), at=None,
-            ))
+            with mock.patch.object(lcrl, "MAX_HEARTBEAT_BYTES", 500):
+                result = lcrl.authorize_browser_submission_send_command(Namespace(
+                    state=str(state_path), fingerprint="capacity-submit-S1",
+                    review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                    browser_id="iab-session-1", lease_id=entry["lease_id"],
+                    account_slot_lease_id=account_slot["lease_id"],
+                    account_browser_registry=str(account_registry), at=None,
+                ))
 
             self.assertEqual(result["action"], "waiting_prompt_capacity_exceeded")
             self.assertFalse(result["send_allowed"])
             self.assertGreater(
-                result["projected_waiting_prompt_bytes"], lcrl.MAX_HEARTBEAT_BYTES,
+                result["projected_waiting_prompt_bytes"], 500,
             )
             persisted = lcrl.load_state(state_path)
             self.assertEqual(
@@ -1118,8 +1519,9 @@ class ControllerTests(unittest.TestCase):
 
             rendered = lcrl.render_waiting_check(state_path)
 
-            self.assertIn("重取本轮标签句柄", rendered)
-            self.assertIn("禁用旧 Tab/id", rendered)
+            self.assertIn("原固定 Chat", rendered)
+            self.assertIn("use the bound Chat only", rendered)
+            self.assertNotIn("Tab/id", rendered)
             self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
 
     def test_network_disconnect_is_counted_once_then_success_recovers(self):
@@ -2182,6 +2584,116 @@ class ControllerTests(unittest.TestCase):
             for probe in project.glob(".superluna-write-probe-*"):
                 probe.unlink()
 
+    def test_repo_retest_workspace_preflight_accepts_only_exact_thread_sandbox(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-workspace"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.mkdir(parents=True)
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+            ):
+                result = lcrl.workspace_preflight_command(Namespace(
+                    project_path=str(project),
+                    state=str(state_path),
+                    profile="superluna_repo_retest_v1",
+                    implementation_thread_id=thread_id,
+                ))
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["retest_run_root"], str(project.parent.resolve()))
+            self.assertEqual(result["expected_state_path"], str(state_path.resolve()))
+            self.assertEqual(list(project.glob(".superluna-write-probe-*")), [])
+
+    def test_repo_retest_workspace_rejects_wrong_paths_before_write_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-invalid-workspace"
+            run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.mkdir(parents=True)
+            ordinary = checkout / "ordinary-subdirectory"
+            ordinary.mkdir()
+            _other_root, other_project, _other_state = _repo_retest_paths(
+                checkout, "neighboring-implementation-thread",
+            )
+            other_project.mkdir(parents=True)
+
+            invalid_projects = (checkout, ordinary, run_root, other_project)
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.object(lcrl.tempfile, "mkstemp") as mkstemp,
+            ):
+                for invalid_project in invalid_projects:
+                    with self.subTest(project=invalid_project):
+                        result = lcrl.workspace_preflight_command(Namespace(
+                            project_path=str(invalid_project),
+                            state=str(state_path),
+                            profile="superluna_repo_retest_v1",
+                            implementation_thread_id=thread_id,
+                        ))
+                        self.assertFalse(result["ok"])
+                        self.assertEqual(result["reason_code"], "retest_scope_invalid")
+
+            mkstemp.assert_not_called()
+
+    def test_repo_retest_workspace_rejects_symlink_escape_before_write_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-symlink"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.parent.mkdir(parents=True)
+            outside = Path(directory) / "outside-project"
+            outside.mkdir()
+            try:
+                project.symlink_to(outside, target_is_directory=True)
+            except OSError as exc:  # pragma: no cover - host policy dependent
+                self.skipTest(f"symlink creation unavailable: {exc}")
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.object(lcrl.tempfile, "mkstemp") as mkstemp,
+            ):
+                result = lcrl.workspace_preflight_command(Namespace(
+                    project_path=str(project),
+                    state=str(state_path),
+                    profile="superluna_repo_retest_v1",
+                    implementation_thread_id=thread_id,
+                ))
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["reason_code"], "retest_scope_invalid")
+            mkstemp.assert_not_called()
+
+    def test_repo_retest_preflight_rejects_host_task_impersonation_before_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            supplied_thread_id = "different-retest-task"
+            _run_root, project, state_path = _repo_retest_paths(
+                checkout, supplied_thread_id,
+            )
+            project.mkdir(parents=True)
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "actual-host-task"}),
+                mock.patch.object(lcrl.tempfile, "mkstemp") as mkstemp,
+            ):
+                result = lcrl.workspace_preflight_command(Namespace(
+                    project_path=str(project), state=str(state_path),
+                    profile="superluna_repo_retest_v1",
+                    implementation_thread_id=supplied_thread_id,
+                ))
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["reason_code"], "retest_scope_invalid")
+            mkstemp.assert_not_called()
+
     def test_startup_diagnostics_reports_ready_when_all_facts_are_present(self):
         result = lcrl.startup_diagnostics_command(Namespace(
             implementation_thread_id="implementation-task",
@@ -2568,8 +3080,47 @@ class ControllerTests(unittest.TestCase):
                 busy["retry_not_before"],
                 lcrl.load_state(state_path)["runtime"]["action_lease_expires_at"],
             )
+            self.assertEqual(busy["platform_rdate"], busy["retry_platform_rdate"])
+            self.assertEqual(busy["mandatory_next_tool"], "codex_app__automation_update")
+            self.assertEqual(busy["mandatory_next_tool_mode"], "update")
+            self.assertFalse(busy["chat_read_observed"])
+            self.assertFalse(busy["turn_completion_allowed"])
             self.assertNotIn("user_status", busy)
             self.assertEqual(lcrl.load_state(state_path)["runtime"]["action_lease_id"], lease_id)
+
+    def test_expired_waiting_read_claim_is_recovered_by_the_same_one_shot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            self.transition(state_path, "review_submit_pending", stage="W-recover", fingerprint="waiting-recover")
+            lcrl.confirm_review_mode(Namespace(state=str(state_path), mode="extreme", at=None))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-recover", request_message_id="request-recover",
+                request_persisted_at=now,
+            )
+            waiting = lcrl.load_state(state_path)
+            token = waiting["automation"]["waiting_check_token"]
+            automation_id = "wait-job-recover"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            first = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            claimed = lcrl.load_state(state_path)
+            revision = claimed["revision"]
+            claimed["runtime"]["action_lease_expires_at"] = "2000-01-01T00:00:00Z"
+            lcrl.save_state(state_path, claimed, expected_revision=revision)
+
+            recovered = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+
+            self.assertEqual(recovered["action"], "review_poll")
+            self.assertNotEqual(recovered["lease_id"], first["lease_id"])
+            self.assertTrue(recovered["expired_waiting_claim_recovered"])
+            self.assertFalse(recovered["turn_completion_allowed"])
 
     def test_wait_schedule_outputs_forbid_recurring_platform_rules(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -4971,6 +5522,329 @@ class ControllerTests(unittest.TestCase):
             {"default": "luna_medium", "current": "luna_medium"},
         )
 
+    def test_repo_retest_new_state_and_recovery_require_exact_state_and_project_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-state"
+            run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.mkdir(parents=True)
+
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-retest-state",
+                    profile="superluna_repo_retest_v1",
+                    continuation_mode="automatic",
+                    review_transport="in_app_browser",
+                    state_path=str(state_path),
+                )
+                lcrl.save_state(state_path, state)
+                recovered = lcrl.load_state(state_path)
+
+                self.assertEqual(
+                    recovered["automation"]["retest_scope"]["state_path"],
+                    str(state_path.resolve()),
+                )
+
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "SuperLuna repository retest scope",
+                ):
+                    lcrl.new_state(
+                        "none", thread_id, str(checkout), "reviewer-retest-state",
+                        profile="superluna_repo_retest_v1",
+                        state_path=str(state_path),
+                    )
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "SuperLuna repository retest scope",
+                ):
+                    lcrl.new_state(
+                        "none", thread_id, str(project), "reviewer-retest-state",
+                        profile="superluna_repo_retest_v1",
+                    )
+
+                adjacent_state = run_root.parent / "adjacent-run" / "state.json"
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "SuperLuna repository retest scope",
+                ):
+                    lcrl.save_state(adjacent_state, recovered)
+
+            self.assertEqual(
+                recovered["automation"]["project_path"], str(project.resolve()),
+            )
+            self.assertFalse(adjacent_state.exists())
+
+    def test_repo_retest_init_accepts_missing_exact_paths_without_external_side_effects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-first-init"
+            run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-retest-first-init",
+                    profile="superluna_repo_retest_v1",
+                    state_path=str(state_path),
+                )
+                lcrl.save_state(state_path, state)
+
+            self.assertTrue(state_path.is_file())
+            self.assertFalse(project.exists())
+            self.assertEqual(
+                set(run_root.iterdir()), {state_path, lcrl.state_lock_path(state_path)},
+            )
+
+    def test_repo_retest_cli_init_uses_the_exact_derived_state_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-cli-init"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+
+            with (
+                mock.patch.object(
+                    lcrl, "source_checkout_root", return_value=checkout.resolve(),
+                ),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+                mock.patch.object(lcrl, "output") as output,
+            ):
+                exit_code = lcrl.main([
+                    "init",
+                    "--state", str(state_path),
+                    "--implementation-thread-id", thread_id,
+                    "--project-path", str(project),
+                    "--reviewer-thread-id", "reviewer-retest-cli-init",
+                    "--profile", "superluna_repo_retest_v1",
+                    "--continuation-mode", "automatic",
+                    "--review-transport", "in_app_browser",
+                ])
+
+            self.assertEqual(exit_code, 0)
+            self.assertTrue(state_path.is_file())
+            output.assert_called_once()
+
+    def test_source_checkout_root_verifies_the_superluna_plugin_manifest(self):
+        self.assertEqual(lcrl.source_checkout_root(), ROOT.resolve())
+
+    def test_source_checkout_root_rejects_a_different_plugin_identity(self):
+        with mock.patch.object(
+            Path, "read_text", autospec=True,
+            return_value=json.dumps({"name": "not-superluna"}),
+        ):
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "identity must be luna-review-loop",
+            ):
+                lcrl.source_checkout_root()
+
+    def test_installed_generic_state_does_not_require_a_source_checkout_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "generic-state.json"
+            with mock.patch.object(
+                lcrl, "source_checkout_root",
+                side_effect=lcrl.LCRLError("installed Skill has no source manifest"),
+            ):
+                state = lcrl.new_state(
+                    "a1", "generic-installed-task", str(root), "reviewer-generic",
+                )
+                lcrl.save_state(state_path, state)
+                recovered = lcrl.load_state(state_path)
+
+            self.assertEqual(recovered["automation"]["profile"], "generic")
+
+    def test_repo_retest_load_rejects_tampered_project_and_profile_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-recovery"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.mkdir(parents=True)
+
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-retest-recovery",
+                    profile="superluna_repo_retest_v1",
+                    state_path=str(state_path),
+                )
+                lcrl.save_state(state_path, state)
+                original_payload = state_path.read_text(encoding="utf-8")
+
+                tampered = json.loads(original_payload)
+                tampered["automation"]["project_path"] = str(checkout)
+                state_path.write_text(
+                    json.dumps(tampered, ensure_ascii=False), encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "SuperLuna repository retest scope",
+                ):
+                    lcrl.load_state(state_path)
+
+                drifted = json.loads(original_payload)
+                drifted["automation"]["profile"] = "generic"
+                state_path.write_text(
+                    json.dumps(drifted, ensure_ascii=False), encoding="utf-8",
+                )
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "profile drift",
+                ):
+                    lcrl.load_state(state_path)
+
+    def test_repo_retest_reserved_state_symlink_is_rejected_before_read_or_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-state-symlink"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            state_path.parent.mkdir(parents=True)
+            external_state = Path(directory) / "external-state.json"
+            generic = lcrl.new_state(
+                "none", "external-generic-task", directory, "external-reviewer",
+            )
+            lcrl.save_state(external_state, generic)
+            external_before = external_state.read_bytes()
+            try:
+                state_path.symlink_to(external_state)
+            except OSError as exc:  # pragma: no cover - host policy dependent
+                self.skipTest(f"symlink creation unavailable: {exc}")
+
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "state path cannot contain a symlink",
+                ):
+                    lcrl.load_state(state_path)
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "state path cannot contain a symlink",
+                ):
+                    lcrl.save_state(state_path, generic)
+
+            self.assertEqual(external_state.read_bytes(), external_before)
+
+    def test_repo_retest_same_state_reset_fails_closed_without_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-reset-owner"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-retest-reset",
+                    profile="superluna_repo_retest_v1",
+                    state_path=str(state_path),
+                )
+                state["review"]["status"] = "external_blocked"
+                state["review"]["recovery_action"] = "test_blocked"
+                lcrl.save_state(state_path, state)
+                before = state_path.read_bytes()
+                with self.assertRaisesRegex(
+                    lcrl.LCRLError, "new task-local sandbox and state",
+                ):
+                    lcrl.reset_for_retest_command(Namespace(
+                        state=str(state_path),
+                        previous_implementation_thread_id=thread_id,
+                        implementation_thread_id="replacement-retest-task",
+                        authorization_id="authorized-retest-replacement",
+                        stage="replacement-stage", goal_mode="continuous",
+                    ))
+
+            self.assertEqual(state_path.read_bytes(), before)
+
+    def test_unknown_profile_never_downgrades_to_generic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "reserved SuperLuna retest profile",
+            ):
+                lcrl.new_state(
+                    "none", "implementation", directory, "reviewer",
+                    profile="superluna_repo_retest_typo",
+                )
+
+            parser = lcrl.build_parser()
+            args = parser.parse_args([
+                "workspace-preflight", "--project-path", directory,
+                "--profile", "superluna_repo_retest_typo",
+            ])
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "reserved SuperLuna retest profile",
+            ):
+                lcrl.resolve_cli_profile(args)
+
+    def test_legacy_custom_project_profile_remains_generic_compatible(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = Path(directory) / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation-custom-profile", directory,
+                "reviewer-custom-profile", profile="womendezhejiae-npc-ai",
+            )
+            lcrl.save_state(state_path, state)
+            recovered = lcrl.load_state(state_path)
+
+            self.assertEqual(
+                recovered["automation"]["profile"], "womendezhejiae-npc-ai",
+            )
+            self.assertEqual(
+                lcrl.account_browser_scope_for_state(recovered, state_path)["profile"],
+                "generic",
+            )
+
+            parser = lcrl.build_parser()
+            args = parser.parse_args([
+                "workspace-preflight", "--project-path", directory,
+                "--profile", "ecosystem_culture",
+            ])
+            self.assertEqual(lcrl.resolve_cli_profile(args), "ecosystem_culture")
+
+    def test_source_checkout_cli_omitted_profile_forces_repository_retest(self):
+        parser = lcrl.build_parser()
+        args = parser.parse_args([
+            "workspace-preflight", "--project-path", str(ROOT),
+        ])
+        with mock.patch.object(
+            lcrl, "source_checkout_development_mode", return_value=True,
+        ):
+            self.assertEqual(
+                lcrl.resolve_cli_profile(args), "superluna_repo_retest_v1",
+            )
+
+        with mock.patch.object(
+            lcrl, "source_checkout_development_mode", return_value=False,
+        ):
+            self.assertEqual(lcrl.resolve_cli_profile(args), "generic")
+
+    def test_repo_retest_cli_exposes_scope_inputs_for_preflight_and_account_gate(self):
+        parser = lcrl.build_parser()
+        workspace = parser.parse_args([
+            "workspace-preflight",
+            "--project-path", "/tmp/project",
+            "--state", "/tmp/state.json",
+            "--profile", "superluna_repo_retest_v1",
+            "--implementation-thread-id", "implementation-retest-cli",
+        ])
+        account = parser.parse_args([
+            "acquire-account-browser-slot",
+            "--implementation-thread-id", "implementation-retest-cli",
+            "--reviewer-thread-id", "reviewer-retest-cli",
+            "--operation", "startup",
+            "--profile", "superluna_repo_retest_v1",
+            "--project-path", "/tmp/project",
+            "--state", "/tmp/state.json",
+        ])
+
+        self.assertEqual(workspace.profile, "superluna_repo_retest_v1")
+        self.assertEqual(workspace.implementation_thread_id, "implementation-retest-cli")
+        self.assertEqual(account.profile, "superluna_repo_retest_v1")
+        self.assertEqual(account.state, "/tmp/state.json")
+
     def test_new_state_accepts_explicit_terra_medium_without_switching(self):
         state = lcrl.new_state(
             "a1", "implementation", ".", "review-chat",
@@ -5469,10 +6343,9 @@ class ControllerTests(unittest.TestCase):
                 fingerprint="bound-existing-chat-B2",
             )
 
-            reopened = lcrl.authorize_browser_submission_reopen_command(Namespace(
-                state=str(state_path), fingerprint="bound-existing-chat-B2",
-                browser_id="iab-restarted-instance",
-            ))
+            reopened = self.authorize_submission_reopen(
+                state_path, "bound-existing-chat-B2", "iab-restarted-instance",
+            )
             self.assertEqual(
                 reopened["action"], "browser_submission_reopen_authorized"
             )
@@ -5614,10 +6487,9 @@ class ControllerTests(unittest.TestCase):
                 fingerprint="provisioned-resubmit-B2",
             )
 
-            authorized = lcrl.authorize_browser_submission_reopen_command(Namespace(
-                state=str(state_path), fingerprint="provisioned-resubmit-B2",
-                browser_id="iab-provisioned-resubmit",
-            ))
+            authorized = self.authorize_submission_reopen(
+                state_path, "provisioned-resubmit-B2", "iab-provisioned-resubmit",
+            )
             self.assertEqual(authorized["action"], "browser_submission_reopen_authorized")
             self.assertTrue(authorized["open_canonical_url_once"])
             self.assertFalse(authorized["send_allowed_after_verification"])
@@ -5713,10 +6585,9 @@ class ControllerTests(unittest.TestCase):
                 ordinary_path, "review_submit_pending", stage="B2",
                 fingerprint="ordinary-B2",
             )
-            recovered_existing = lcrl.authorize_browser_submission_reopen_command(Namespace(
-                state=str(ordinary_path), fingerprint="ordinary-B2",
-                browser_id="iab-ordinary",
-            ))
+            recovered_existing = self.authorize_submission_reopen(
+                ordinary_path, "ordinary-B2", "iab-ordinary",
+            )
             self.assertEqual(
                 recovered_existing["action"],
                 "browser_submission_reopen_authorized",
@@ -5762,10 +6633,9 @@ class ControllerTests(unittest.TestCase):
                 state_path, "review_submit_pending", stage="B4",
                 fingerprint="send-gate-B4",
             )
-            reopened = lcrl.authorize_browser_submission_reopen_command(Namespace(
-                state=str(state_path), fingerprint="send-gate-B4",
-                browser_id="iab-send-gate",
-            ))
+            reopened = self.authorize_submission_reopen(
+                state_path, "send-gate-B4", "iab-send-gate",
+            )
 
             with self.assertRaisesRegex(
                 lcrl.LCRLError, "fresh browser submission send authorization"
@@ -5803,9 +6673,9 @@ class ControllerTests(unittest.TestCase):
                 observed_title="Provisioned reviewer", provisioned_chat=True, at=None,
             ))
 
-            authorized = lcrl.authorize_browser_startup_reopen_command(Namespace(
-                state=str(state_path), browser_id="implementation-browser",
-            ))
+            authorized = self.authorize_startup_reopen(
+                state_path, "implementation-browser",
+            )
             self.assertEqual(authorized["action"], "browser_startup_reopen_authorized")
             self.assertTrue(authorized["open_canonical_url_once"])
             self.assertEqual(
@@ -5846,6 +6716,7 @@ class ControllerTests(unittest.TestCase):
 
             denied = lcrl.authorize_browser_startup_reopen_command(Namespace(
                 state=str(state_path), browser_id="another-browser",
+                account_slot_lease_id="none", account_browser_registry=None, at=None,
             ))
             self.assertEqual(denied["action"], "browser_startup_reopen_forbidden")
             self.assertFalse(denied["open_canonical_url_once"])
@@ -5859,6 +6730,49 @@ class ControllerTests(unittest.TestCase):
                     observed_title="Wrong path", at=None,
                 ))
             self.assertEqual(state_path.read_bytes(), before)
+
+    def test_browser_reopen_requires_the_matching_live_account_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "reopen-slot-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            lcrl.bind_browser_tab_command(Namespace(
+                state=str(state_path), browser_id="old-browser",
+                provider_tab_id="pending_handoff",
+                url="https://chatgpt.com/c/reopen-slot-chat",
+                observed_title="Reopen reviewer", provisioned_chat=True, at=None,
+            ))
+
+            no_slot = lcrl.authorize_browser_startup_reopen_command(Namespace(
+                state=str(state_path), browser_id="new-browser",
+                account_slot_lease_id="none", account_browser_registry=None, at=None,
+            ))
+            self.assertEqual(no_slot["action"], "browser_startup_reopen_forbidden")
+            self.assertFalse(no_slot["open_canonical_url_once"])
+
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="reopen-slot-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="REOPEN",
+                fingerprint="reopen-slot-fingerprint",
+            )
+            no_submission_slot = lcrl.authorize_browser_submission_reopen_command(Namespace(
+                state=str(state_path), fingerprint="reopen-slot-fingerprint",
+                browser_id="new-browser", account_slot_lease_id="none",
+                account_browser_registry=None, at=None,
+            ))
+            self.assertEqual(
+                no_submission_slot["action"], "browser_submission_reopen_forbidden",
+            )
+            self.assertFalse(no_submission_slot["open_canonical_url_once"])
 
     def test_explicit_canonical_url_can_bind_without_provider_identity_and_reopen_for_wait(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -5893,10 +6807,9 @@ class ControllerTests(unittest.TestCase):
                 state_path, "review_submit_pending", stage="B1",
                 fingerprint="existing-chat-B1",
             )
-            reopened = lcrl.authorize_browser_submission_reopen_command(Namespace(
-                state=str(state_path), fingerprint="existing-chat-B1",
-                browser_id="implementation-browser",
-            ))
+            reopened = self.authorize_submission_reopen(
+                state_path, "existing-chat-B1", "implementation-browser",
+            )
             self.assertEqual(reopened["action"], "browser_submission_reopen_authorized")
             self.assertTrue(reopened["open_canonical_url_once"])
             account_registry = root / "account-browser-gate.json"
@@ -5988,10 +6901,9 @@ class ControllerTests(unittest.TestCase):
                 fingerprint="restarted-browser-B3",
             )
 
-            authorized = lcrl.authorize_browser_submission_reopen_command(Namespace(
-                state=str(state_path), fingerprint="restarted-browser-B3",
-                browser_id="iab-new-instance",
-            ))
+            authorized = self.authorize_submission_reopen(
+                state_path, "restarted-browser-B3", "iab-new-instance",
+            )
             self.assertEqual(authorized["action"], "browser_submission_reopen_authorized")
             self.assertTrue(authorized["browser_rebind_required"])
             self.assertEqual(authorized["authorized_browser_id"], "iab-new-instance")
@@ -6222,6 +7134,85 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertTrue(continued["execution_allowed"])
             self.assertTrue(continued["recovered_same_task_lease"])
+
+    def test_browser_no_reply_rearm_requires_durable_read_observation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry = root / "account-browser-gate.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "web-chat-no-reply",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "web-chat-no-reply")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="web-chat-no-reply", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_submit_pending", stage="B-no-reply",
+                fingerprint="no-reply-fingerprint",
+            )
+            self.transition(
+                state_path, "review_waiting", stage="B-no-reply", waiting_since=now,
+                request_turn_id="request-turn-no-reply",
+                request_message_id="request-message-no-reply",
+                request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            automation_id = "wait-no-reply"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            claimed = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="web-chat-no-reply", operation="waiting_read",
+                registry=str(registry), at=None,
+            ))
+            authorized = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=claimed["lease_id"], account_slot_lease_id=slot["lease_id"],
+                account_browser_registry=str(registry), at=None,
+            ))
+            self.assertEqual(authorized["action"], "browser_read_authorized")
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "durable browser read observation"):
+                lcrl.rearm_waiting_check_command(Namespace(
+                    state=str(state_path), token=token, automation_id=automation_id,
+                    lease_id=claimed["lease_id"], reason="no_complete_reply",
+                ))
+
+            observed = lcrl.record_browser_no_complete_reply_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=claimed["lease_id"], account_slot_lease_id=slot["lease_id"],
+                account_browser_registry=str(registry), at=None,
+                browser_id="iab-session-1",
+                observed_request_message_id="request-message-no-reply",
+                latest_assistant_message_id="assistant-before-request",
+            ))
+            self.assertEqual(observed["action"], "browser_no_complete_reply_observed")
+            self.assertTrue(observed["chat_read_observed"])
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", lease_id=slot["lease_id"],
+                outcome="completed", health_proof=None, registry=str(registry), at=None,
+            ))
+            rearmed = lcrl.rearm_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=claimed["lease_id"], reason="no_complete_reply",
+            ))
+            self.assertEqual(rearmed["action"], "update_once")
+            self.assertTrue(rearmed["chat_read_observed"])
+            self.assertEqual(rearmed["user_message"], "已检查固定 Chat，本次未发现完整回复。")
+            status = lcrl.progress_query_command(Namespace(state=str(state_path)))
+            self.assertTrue(status["chat_read_observed"])
+            self.assertEqual(status["last_chat_check_outcome"], "no_complete_reply")
 
     def test_browser_waiting_resume_requires_staging_before_wait_deletion(self):
         with tempfile.TemporaryDirectory() as directory:

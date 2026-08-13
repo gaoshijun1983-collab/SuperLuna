@@ -19,6 +19,26 @@ the conversation id in `https://chatgpt.com/c/<conversation-id>` plus the claime
 browser tab; title and focus are display hints only. `app_chat_review` remains a
 saved-state compatibility transport, not the default for new work.
 
+### Repository self-retest profile
+
+SuperLuna's own source-repository development and real-loop retests use the
+dedicated `superluna_repo_retest_v1` profile. For implementation task identity
+`<task-id>`, the controller derives one deterministic task hash and accepts only
+`.superluna/retest-runs/<task-hash>/project` as the mutable project plus
+`.superluna/retest-runs/<task-hash>/state.json` as its state. The repository
+root, ordinary source children, adjacent runs, symlink escapes, and external
+absolute paths fail closed before a write probe, state use,
+the machine account gate, or browser initialization. Account-slot state records
+the same scope so a lease cannot drift from one profile or project sandbox to
+another.
+
+The repository's `.codex/config.toml` supplies a host `workspace-write` boundary
+for newly started trusted-project tasks and excludes system temporary paths.
+That host setting is not claimed to retroactively constrain an already-open
+task. This profile is only for developing and retesting SuperLuna itself. The
+installed product's `generic` profile remains compatible with a user's
+explicitly selected, host-authorized external project.
+
 By default the workflow never creates a Chat. One explicit user request for a
 new reviewer conversation authorizes exactly one visible browser Chat plus one
 initialization message, as defined in `browser_chat_provisioning.md`; that setup
@@ -131,6 +151,12 @@ this waiting boundary. A platform-fired waiting occurrence is the only
 exception: its first action remains `waiting-check`, followed by
 `authorize-waiting-chat-read`; an ordinary user or coordinator message cannot
 claim that source.
+
+Only the newest event's platform heartbeat wrapper can identify a scheduled
+waiting occurrence. A waiting prompt, token, or automation id preserved in an
+older turn or context-compaction summary is historical data and must never
+override a newer ordinary user or coordinator wakeup. Such an ordinary wakeup
+always uses `guard`, never the stale `waiting-check` command.
 
 There is one narrower pre-wait condition: a confirmed submission whose
 controller token exists but whose platform automation id is still `none` is not
@@ -301,6 +327,10 @@ prompt contains the current state path, token, and automation id. A hand-written
 summarized, or partially copied occurrence prompt is invalid; failure to update
 the same future task requires deleting it and failing closed before the submit
 occurrence ends.
+Because Codex Desktop may show that prompt to the user, its leading status and
+no-action guidance are written in concise Chinese and English. Required commands
+remain under an explicitly labeled internal one-time section; controller safety
+fields must not be presented as ordinary user instructions.
 `confirm-review-submission` exposes this as a host barrier, not prose advice:
 `mandatory_next_tool=codex_app__automation_update`, mode `create`, an exact
 single-RDATE `platform_wait_create` object, and a fixed
@@ -318,8 +348,10 @@ the later complete prompt at that maximum id length. If it returns
 before the click rather than submit a request that cannot receive a safe wait.
 When `waiting-check` returns `waiting_check_busy`, it has not consumed or
 authorized the occurrence. Do not read Chat or rotate its token; update the same
-platform heartbeat to one `RDATE` at or after `retry_not_before`, with the same
-token and automation id.
+platform heartbeat from the returned `platform_wait_update`, with the same token
+and automation id; its exact RDATE is derived from `retry_not_before`. Busy is
+explicit proof that this occurrence did not read Chat,
+so it must never be reported as “no reply yet”.
 
 Each due occurrence must pass `waiting-check`, acquire a live shared account
 browser slot with operation `waiting_read`, and only then call

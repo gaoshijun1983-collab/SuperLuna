@@ -6,6 +6,17 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 
 ## 0.2: reliable browser-first loop
 
+- Keep SuperLuna's own development and real-loop retests inside one deterministic
+  repository fixture per implementation task using `superluna_repo_retest_v1`:
+  `.superluna/retest-runs/<task-hash>/project` plus sibling `state.json`.
+  Reject repository-root, ordinary source-child, adjacent-run, symlink-escape,
+  and external paths before probes, state use, the account gate, or browser
+  startup. Keep installed `generic` runs compatible with user-selected,
+  host-authorized external projects.
+- Use the tracked project `.codex/config.toml` as the host sandbox boundary for
+  newly started trusted-project development tasks; never claim that it
+  dynamically changes an already-open task's permissions.
+
 - Prove the task's already assigned workspace writable with a disposable
   create/read/remove probe before browser initialization or Chat provisioning;
   projectless runs must use their assigned output directory rather than a
@@ -18,6 +29,11 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 - Let an explicit per-run request provision exactly one new reviewer Chat and
   one setup exchange before binding; never turn recovery into automatic Chat
   proliferation or automatic model switching.
+- Bootstrap that new Chat with a controller-rendered packet containing the real
+  contents and hashes of all goal-relevant core text files selected by the task.
+  Do not impose a fixed file-count limit; enforce project-root, symlink, secret,
+  per-file 32 KiB, and aggregate 64 KiB boundaries instead. Local paths alone
+  are never reviewer context.
 - Start every implementation task by activating its own in-app browser. When a
   coordinator provisioned the sole Chat, authorize one send-forbidden exact-URL
   startup open and revision-bound task-local rebind before project work; never

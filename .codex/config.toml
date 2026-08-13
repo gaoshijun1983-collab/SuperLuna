@@ -1,0 +1,10 @@
+# Keep SuperLuna development and release testing inside this repository.
+# Project-scoped configuration is loaded only for a trusted checkout.
+sandbox_mode = "workspace-write"
+approval_policy = "never"
+
+[sandbox_workspace_write]
+network_access = false
+exclude_slash_tmp = true
+exclude_tmpdir_env_var = true
+writable_roots = []

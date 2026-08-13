@@ -11,6 +11,17 @@ description: 运行、恢复或诊断“Codex 实施 + 内置浏览器固定 Cha
 `luna-chatgpt-review-loop`，命令继续使用 `lcrl`，插件 ID 继续使用
 `luna-review-loop`。不得把它改造成独立桌面软件。
 
+SuperLuna 源码仓库自身的开发、回归和真实闭环复测必须使用专用
+`superluna_repo_retest_v1` profile。该 profile 将每个实施任务锁定到源码仓库内唯一目录：
+`.superluna/retest-runs/<task-hash>/project`，state 只能位于同一 run 根目录的
+`state.json`。路径不精确、仓库根目录、相邻 run、符号链接逃逸或仓库外路径都必须在工作区
+探针、state 使用、账户浏览器门和浏览器初始化之前失败关闭。源码仓库根目录的
+`.codex/config.toml` 还为**新启动且信任该项目的 Codex 任务**提供宿主级
+`workspace-write` 边界；当前已经打开的任务不得宣称该配置会动态收紧既有宿主权限。
+这只是 SuperLuna 自身的开发复测边界。公开安装后的正常运行继续使用 `generic` profile，
+仍可操作用户明确选择且由宿主授权的外部项目；既有项目专用 profile 名称继续按 generic
+权限语义兼容，但任何以 `superluna_repo_retest` 开头的近似名称都失败关闭，不能绕过专用门。
+
 新流程只有一个正式审阅通道：用户在 Codex 内置浏览器中选择的一个 ChatGPT 网页
 Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通道。
 
@@ -25,7 +36,9 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 
 用户只需要看到五种状态：`正在开发`、`等待 Chat`、`正在按 Chat 意见修改`、
 `需要你决定`、`已完成`。内部 token、lease、revision、消息身份和刷新标记不应成为
-日常操作词汇。
+日常操作词汇。平台必须展示等待任务正文时，先用简短中文和英文说明“正在等待、无需操作、
+回复后自动继续”；必要命令只能放在明确标注“内部单次步骤／无需手动执行”的区域，不得把
+缩写串和内部状态机术语混成面向用户的说明。
 
 同一台机器、同一 ChatGPT 账户的网页 Chat 访问由共享账户门统一限制为**最多 2 个**。
 本地开发任务可以超过两个，但初始化浏览器、列举/认领/打开标签、读取 DOM、发送或刷新前
@@ -147,6 +160,9 @@ turn 的自阻塞，不是并发抢占。
 唯一例外是平台到期的合法等待 occurrence：它的第一条动作仍必须是下文规定的
 `waiting-check`，而不是 `guard`。只有 `waiting-check` 与随后
 `authorize-waiting-chat-read` 双重通过，才能读取 Chat。普通外部消息不能冒充等待 occurrence。
+是否属于平台到期 occurrence，只由**当前最新事件**的 heartbeat 包装决定；上下文压缩摘要、
+较早 turn 留下的 waiting prompt、旧 token 或旧 automation ID 都只是历史记录。当前最新事件是
+普通用户/协调恢复消息时，必须忽略那些旧 waiting 命令并运行 `guard`，即使它们仍出现在上下文中。
 
 若门禁放行后发现旧状态是 `completed`，普通外部消息仍不能把它自动改回开发。只有当前用户
 消息或明确的用户授权委派本身提出了一个**新的总体目标**，同一实施任务才可在当前
@@ -175,7 +191,9 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 
 ```text
 python -B <skill-root>/scripts/lcrl.py workspace-preflight \
-  --project-path <当前任务被分配的现有工作目录>
+  --project-path <当前任务被分配的现有工作目录> \
+  [--state <state-file> --profile superluna_repo_retest_v1 \
+   --implementation-thread-id <当前实施任务ID>]
 ```
 
    只有返回 `action=workspace_ready`、`workspace_ready=true` 且 `probe_removed=true` 才继续。
@@ -196,7 +214,8 @@ python -B <skill-root>/scripts/lcrl.py workspace-preflight \
 python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
   --implementation-thread-id <当前实施任务ID> \
   --reviewer-thread-id <当前固定评审Chat ID> \
-  --operation startup|submission|waiting_read|health_probe
+  --operation startup|submission|waiting_read|health_probe \
+  [--state <state-file>]
 ```
 
 用户已明确授权本次运行创建唯一新 Chat 时，第一次 `startup` 使用尚无 conversation id 的
@@ -253,7 +272,10 @@ Chat。只有同一返回同时包含 `slot_acquired=true` 与
 3. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
    一次性新 Chat 授权，先确认上述第一项真实本地改动及其最小验证已经完成，再按
    `browser_chat_provisioning.md` 创建并初始化唯一 reviewer
-   conversation；初始化消息不计入正式回合。新建对话若暂时显示 `/c/WEB:<uuid>`，该值只是
+   conversation。创建前必须用 `render-project-context` 把与总体目标相关的真实项目规则、说明、
+   状态、清单、入口和源码渲染成一个初始化上下文区块；文件数量不设固定上限，只服从单文件
+   32 KiB、合计 64 KiB、项目根与敏感内容安全门。初始化消息必须包含该区块的完整原文，不能只
+   列本地路径；初始化消息不计入正式回合。新建对话若暂时显示 `/c/WEB:<uuid>`，该值只是
    平台临时路由，禁止写入 state。必须从同一页面/侧栏唯一解析真实 `/c/<conversation-id>`，
    在原标签核验初始化请求与回复后才可 `init`；不得新建第二个 Chat 或要求用户二选一。
    否则继续认领用户已有 Chat。
@@ -275,7 +297,7 @@ python -B <skill-root>/scripts/lcrl.py browser-startup-plan \
    失败关闭。不得因为已有标签暂时未聚焦、标题变化或 DOM 文案不熟悉而另开同 URL。
 4. 若旧状态已保存明确 provisioned Chat 且仍为 `pending_handoff`，新任务不得要求用户再次
    手动打开，也不得另建 Chat。用当前 `browser.browserId` 调用
-   `authorize-browser-startup-reopen`；只有返回 `browser_startup_reopen_authorized`，才在
+   `authorize-browser-startup-reopen --account-slot-lease-id <startup账户名额lease>`；只有返回 `browser_startup_reopen_authorized`，才在
    **新实现任务自己的内置浏览器**中打开一次返回的精确 canonical URL。核验已登录、URL
    和 ChatGPT 页面后，调用 `confirm-browser-startup-rebind` 写入当前 browser identity 与本次
    `providerTabId`；平台仍未提供 provider identity 时保留 `pending_handoff`。该授权禁止发送。
@@ -432,7 +454,7 @@ Git 元数据不可写时仍可在项目工作树可写、改动与测试可读�
 任何已经绑定的固定 Chat 若在后续新一轮提交前已从 `user.openTabs()` 和 `tabs.list()` 同时
 消失，只能在原 state 仍保存同一精确 conversation URL、当前状态为
 `review_submit_pending` 且本轮尚无请求身份时，先调用
-`authorize-browser-submission-reopen --fingerprint <本轮正文身份> --browser-id <当前browser.browserId>`。只有返回
+`authorize-browser-submission-reopen --fingerprint <本轮正文身份> --browser-id <当前browser.browserId> --account-slot-lease-id <submission账户名额lease>`。只有返回
 `browser_submission_reopen_authorized` 才可在同一 browser binding 打开固定 canonical URL
 一次；发送前必须再次核验精确 conversation、已登录页面、可见“极高”和正文身份，确认提交时
 必须把返回的 `lease_id` 作为 `--browser-reopen-lease-id`、并把同一当前 browser id 作为
@@ -519,8 +541,9 @@ automation id。等待任务 id 必须是非空、单行且不超过 64 个字�
 路径重新开始干净测试，不能先发送再补救。平台更新成功后才允许结束提交 occurrence。若无法完成绑定、渲染或更新，必须
 删除刚创建的平台等待项并保持失败关闭，不能声称已经安排等待。
 如果 `waiting-check` 返回 `waiting_check_busy`，不得读取 Chat，也不得轮换 token；必须保留
-返回的 token 和等待任务 ID，把同一个平台 heartbeat 更新为不早于 `retry_not_before` 的一次
-未来 `RDATE`。这仍然只是单次碰撞补跑，不得改成循环规则。
+返回的 token 和等待任务 ID，严格按 `platform_wait_update` 把同一个平台 heartbeat 移到控制器
+给出的未来 `RDATE`。`busy` 明确表示本轮**没有读取 Chat**，不得向用户声称“回复尚未到达”。
+这仍然只是单次碰撞补跑，不得改成循环规则。
 
 若 state 仍记录已绑定等待任务，但协调任务通过平台自动任务工具按该精确 ID 查询并真实得到
 `not_found`，不得继续假装处于有效等待，也不得由实施任务自行声称任务不存在。取得用户明确
@@ -611,9 +634,11 @@ python -B <skill-root>/scripts/lcrl.py browser-network-observation \
    不创建第二个调度器；
 7. 下一次授权若返回 `browser_refresh_authorized` 且
    `reload_same_tab_once=true`，只刷新同一标签一次，等待页面加载并复核同一 Chat，再读取；
-8. 页面恢复后记录 `browser-network-observation --outcome loaded`。如果仍没有完整回复，先释放
-   账户名额，再用带本次读取 lease 的 `rearm-waiting-check` 原子重排 state，成功后才把同一等待门
-   更新为下一次单一未来检查；
+8. 页面恢复后记录 `browser-network-observation --outcome loaded`。如果真实读取后仍没有完整回复，
+   必须先运行 `record-browser-no-complete-reply` 登记本轮浏览器、请求 message identity 和最新
+   assistant identity，再释放账户名额，并用
+   `rearm-waiting-check --lease-id <本次lease> --reason no_complete_reply` 原子重排 state；只有登记
+   成功后才能对用户显示“本次未发现完整回复”，随后才把同一等待门更新为下一次单一未来检查；
 9. 离开等待状态立即退休检查。健康页面不刷新，回复正在流式生成时不刷新。
    尚需后续检查时，浏览器最后一个动作必须保留原标签为 `status: "handoff"`，让下一次
    occurrence 重新认领同一个用户标签；若平台不保留明确授权的自建标签，则下一次只可走

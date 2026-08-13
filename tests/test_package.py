@@ -18,6 +18,17 @@ LCRL_SPEC.loader.exec_module(lcrl)
 
 
 class PackageTests(unittest.TestCase):
+    def test_project_codex_config_keeps_development_inside_repository(self):
+        config = tomllib.loads((ROOT / ".codex" / "config.toml").read_text(encoding="utf-8"))
+
+        self.assertEqual(config["sandbox_mode"], "workspace-write")
+        self.assertEqual(config["approval_policy"], "never")
+        workspace = config["sandbox_workspace_write"]
+        self.assertFalse(workspace["network_access"])
+        self.assertTrue(workspace["exclude_slash_tmp"])
+        self.assertTrue(workspace["exclude_tmpdir_env_var"])
+        self.assertEqual(workspace["writable_roots"], [])
+
     def test_release_version_is_consistent_across_metadata_and_readmes(self):
         manifest = json.loads((ROOT / ".codex-plugin" / "plugin.json").read_text(encoding="utf-8"))
         report = json.loads((ROOT / "release" / "alpha_release_report.json").read_text(encoding="utf-8"))
@@ -77,6 +88,8 @@ class PackageTests(unittest.TestCase):
             "action=waiting_turn_blocked",
             "不得读取项目",
             "普通外部消息不能冒充等待 occurrence",
+            "只由**当前最新事件**的 heartbeat 包装决定",
+            "必须忽略那些旧 waiting 命令并运行 `guard`",
             "`--replace` 是兼容参数",
             "传入 `--replace` 也不会改变该判定",
         ):
@@ -88,6 +101,8 @@ class PackageTests(unittest.TestCase):
             "cannot\nclaim that source",
             "cannot preempt any active lease",
             "Cross-task,\nwaiting-read, and browser-reopen leases remain non-reclaimable",
+            "Only the newest event's platform heartbeat wrapper",
+            "always uses `guard`, never the stale `waiting-check` command",
         ):
             self.assertIn(requirement, protocol)
         for requirement in (
@@ -357,6 +372,29 @@ class PackageTests(unittest.TestCase):
             "browser_submission_send_authorized_fingerprint",
             "browser_submission_send_authorized_revision",
         }.issubset(runtime_required))
+
+    def test_published_automation_schema_carries_the_repo_retest_scope(self):
+        schema = json.loads(
+            (SKILL_ROOT / "references" / "state_schema_v7.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        automation = schema["properties"]["automation"]
+        self.assertIn("retest_scope", automation["required"])
+        variants = automation["properties"]["retest_scope"]["oneOf"]
+        scope = next(variant for variant in variants if variant.get("type") == "object")
+        self.assertEqual(
+            set(scope["required"]),
+            {
+                "profile", "source_checkout", "run_id", "run_root",
+                "project_path", "state_path",
+            },
+        )
+        self.assertFalse(scope["additionalProperties"])
+        self.assertEqual(
+            scope["properties"]["profile"]["const"],
+            "superluna_repo_retest_v1",
+        )
 
     def test_published_policy_schema_matches_runtime_role_and_transport_locks(self):
         schema = json.loads(
@@ -671,6 +709,7 @@ class PackageTests(unittest.TestCase):
                 rule["then"]["properties"]["interval_minutes"]["const"],
             )
             for rule in automation["allOf"]
+            if "heartbeat_mode" in rule.get("if", {}).get("properties", {})
         }
         self.assertEqual(
             pairs,
@@ -1178,13 +1217,23 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(report["package_version"], manifest["version"])
         self.assertEqual(report["controller_version"], registry["controller_version"])
         self.assertEqual(report["skill_revision"], registry["skill_revision"])
-        self.assertFalse(report["source_contains_unreleased_hotfix"])
-        self.assertTrue(report["dist_archive_matches_current_source"])
+        if report["release_validation_pending"]:
+            self.assertTrue(report["source_contains_unreleased_hotfix"])
+            self.assertFalse(report["dist_archive_matches_current_source"])
+        else:
+            self.assertFalse(report["source_contains_unreleased_hotfix"])
+            self.assertTrue(report["dist_archive_matches_current_source"])
         archive = report["dist_archive"]
         self.assertEqual(archive["filename"], f"SuperLuna-{manifest['version']}.zip")
         self.assertGreater(archive["tracked_source_files"], 50)
-        self.assertTrue(archive["embedded_manifest_verified"])
-        self.assertTrue(archive["deterministic_rebuild_verified"])
+        self.assertEqual(
+            archive["embedded_manifest_verified"],
+            not report["release_validation_pending"],
+        )
+        self.assertEqual(
+            archive["deterministic_rebuild_verified"],
+            not report["release_validation_pending"],
+        )
         self.assertEqual(report["compatibility_entrypoints"]["skill"], "luna-chatgpt-review-loop")
         self.assertEqual(report["compatibility_entrypoints"]["plugin"], "luna-review-loop")
         closure = report["automated_evidence"]["controller_closure_check"]

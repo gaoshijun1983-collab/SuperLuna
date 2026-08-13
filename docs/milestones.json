@@ -2,12 +2,13 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.51",
-      "title": "Real project-write gate before one-time reviewer Chat provisioning",
+      "version": "0.2.0-alpha.52",
+      "title": "Repository-local self-retest sandbox before browser access",
       "upgrade_prerequisites": [
         "Run the repository test suite, controller selftest, and release archive verifier.",
         "Confirm the current candidate remains Alpha and Public Beta is blocked.",
-        "For a newly provisioned reviewer Chat, confirm the first real project change and its minimal validation occur before Browser Skill access."
+        "Confirm SuperLuna repository self-retests use superluna_repo_retest_v1 with the exact task-hash project and state paths.",
+        "Confirm generic-profile compatibility remains available for user-selected, host-authorized external projects."
       ],
       "rollback_triggers": [
         "A focused regression test fails.",
@@ -23,7 +24,8 @@
         "Repository tests, selftest, and closure-check pass independently.",
         "Two builds from the same source produce the same SHA-256 digest.",
         "Local checks remain labelled as local-only evidence.",
-        "The packaged Skill stops a host-approval run before browser startup and leaves zero Chat side effects."
+        "The packaged controller rejects repository-root, adjacent-run, symlink-escape, and external retest paths before any probe, state use, account gate, or browser access.",
+        "The tracked project sandbox configuration is documented as applying to newly started trusted-project tasks only."
       ],
       "evidence_scope": "local_only",
       "real_device_evidence": false,

@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.2.0-alpha.52 - 2026-08-13
+
+- Source advances to Controller 108 / Skill revision `2026-08-13.65`; the Alpha 52
+  archive remains pending rebuild and verification.
+- Distinguishes a real browser read from a queued or compacted occurrence. A
+  `waiting_check_busy` result now carries an exact same-task retry update and
+  explicitly proves that Chat was not read, so callers cannot report “no reply”.
+- Recovers an expired waiting-read claim with the same one-shot task, requires a
+  durable `record-browser-no-complete-reply` receipt before a true no-reply rearm,
+  and exposes read outcome plus stale-claim health in the read-only status view.
+- Fixes a claimed one-shot wait incorrectly inheriting the normal
+  `review_waiting` permission to end the turn. After a complete reply, the
+  controller now requires same-turn resume, result application, and preparation
+  of the next review submission; visible guidance remains concise and bilingual.
+- Makes event precedence explicit after context compaction: only the newest
+  platform heartbeat can invoke `waiting-check`; a newer ordinary wakeup must
+  ignore historical waiting commands and enter through `guard`.
+- Adds `render-project-context` for new reviewer Chat bootstrap. It includes the
+  real UTF-8 contents, relative paths, sizes, per-file hashes, and an aggregate
+  context identity for every selected core file. File count is not capped;
+  per-file/aggregate byte budgets and project-root, symlink, binary, build-
+  output, and credential guards remain fail-closed.
+- Restores existing project-specific profile labels as generic-compatible
+  metadata while reserving every `superluna_repo_retest*` spelling except the
+  exact sandbox profile. Existing real-project states therefore remain
+  recoverable without letting a typo bypass the repository self-test gate.
+- Rewrites visible one-shot wait prompts with concise Chinese and English
+  guidance. Users see that no action is needed; exact commands remain in a
+  clearly labeled internal section instead of mixed state-machine shorthand.
+- Adds the development-only `superluna_repo_retest_v1` profile for SuperLuna's
+  own repository tests. Each implementation task has one deterministic
+  `.superluna/retest-runs/<task-hash>/project` fixture and sibling `state.json`.
+- Rejects the repository root, ordinary source children, adjacent run folders,
+  symlink escapes, and external paths before a write probe, state use,
+  account-browser slot acquisition, or browser initialization.
+- Binds account slots to the same profile/project scope, preventing an acquired
+  browser lease from drifting into another run.
+- Adds a tracked project `.codex/config.toml` that gives newly started trusted-
+  project tasks a `workspace-write` host boundary, excludes system temporary
+  paths, and disables shell-network access. It is not claimed to retroactively
+  constrain a task that was already open when the file changed.
+- Preserves the installed product's `generic` profile for user-selected,
+  host-authorized external projects. No existing real-device or Public Beta
+  evidence is promoted by these local safety changes.
+
 ## 0.2.0-alpha.51 - 2026-08-13
 
 - Packages Controller 104 / Skill revision `2026-08-13.61`.
