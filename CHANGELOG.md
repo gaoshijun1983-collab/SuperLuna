@@ -2,8 +2,8 @@
 
 ## 0.2.0-alpha.52 - 2026-08-13
 
-- Source advances to Controller 108 / Skill revision `2026-08-13.65`; the Alpha 52
-  archive remains pending rebuild and verification.
+- Packages Controller 108 / Skill revision `2026-08-13.65` in a deterministic
+  tracked-source archive with an embedded SHA-256 manifest and standalone checksum.
 - Distinguishes a real browser read from a queued or compacted occurrence. A
   `waiting_check_busy` result now carries an exact same-task retry update and
   explicitly proves that Chat was not read, so callers cannot report “no reply”.

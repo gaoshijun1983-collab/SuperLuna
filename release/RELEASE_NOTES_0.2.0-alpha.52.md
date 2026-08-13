@@ -1,7 +1,8 @@
 # SuperLuna 0.2.0-alpha.52
 
-This technical-testing Alpha source now contains Controller 108 and Skill revision
-`2026-08-13.65`; the existing archive remains pending rebuild and verification.
+This technical-testing Alpha packages Controller 108 and Skill revision
+`2026-08-13.65` in a deterministic tracked-source archive with an embedded
+SHA-256 manifest and standalone checksum.
 
 Visible one-shot wait prompts now lead with concise Chinese and English status
 guidance. Users are told that no action is needed; required controller commands
@@ -46,11 +47,9 @@ real-project cycle, a Windows/macOS compatibility result, or real ChatGPT
 network/rate-limit recovery evidence. Public Beta remains blocked and
 `public_beta_ready` remains `false`.
 
-The current source has passed 324 of 325 repository checks; the only remaining
-failure is the intentionally pending final archive/source match. The controller's
-15 selftests and closure check pass. Both Codex validators and the milestone
-validator were completed earlier. Final archive
-validation remains pending: the candidate is expected to contain 66 tracked
-source files plus its embedded SHA-256 manifest, but the ZIP must be rebuilt
-and independently verified after the final source list is staged. These are
-local release-candidate facts and do not promote the Public Beta gate.
+The current source passes all 327 repository checks. The controller's 15
+selftests and closure check pass, and both Codex validators pass. The final
+archive contains 66 tracked source files plus its embedded SHA-256 manifest;
+two independent builds are byte-identical and the archive verifies against the
+current source. These are local release-candidate facts and do not promote the
+Public Beta gate.
