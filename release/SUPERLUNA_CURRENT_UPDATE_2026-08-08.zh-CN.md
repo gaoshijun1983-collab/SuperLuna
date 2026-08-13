@@ -3,10 +3,10 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.49`（Python 元数据：`0.2.0a49`）
-- 当前源码控制器：98（Alpha 49 公开包仍为旧源码）
+- 版本：`0.2.0-alpha.50`（Python 元数据：`0.2.0a50`）
+- 当前源码控制器：103（Alpha 49 公开包仍为旧源码）
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-13.53`
+- 当前源码 Skill 修订：`2026-08-13.60`
 - 打包日期：2026-08-09
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
@@ -28,6 +28,43 @@
   单次等待删除与回复消费，原任务无需协调者追加消息即可进入下一轮；第 3 轮按 Reviewer 意见补齐
   `id` 字段级 diff 后进入 `completed`，最终无活动等待项。该结果属于隔离 fixture 的 Alpha 传输证据，
   不冒充真实项目 10/10 Beta 门槛。
+- C28 首次使用 Controller 98 对真实 UNSEEN 工作树启动三轮闭环时，账户门、登录页和 composer
+  填充均成功，修正后的浏览器调用还明确返回发送按钮 `enabled=true`；任务却只因该成功调用耗时
+  约十秒便误报“浏览器无响应”，在点击发送和创建 state 前安全停止，实际 0/3 且零项目/Chat
+  副作用。Skill revision `2026-08-13.54` 现在要求按工具 `completed` 状态与已验证后置条件判断，
+  禁止按耗时猜测失败；仅允许对明确无副作用的本地 JavaScript/locator 错误修正一次，修正后
+  后置条件成立必须继续。真实超时或发送不确定仍走同标签协调，不允许盲目重试。
+- C29 已证明 `.54` 越过 C28：唯一 Reviewer Chat 初始化并重命名成功，可见“极高”，首轮真实
+  UNSEEN 改动与统一测试也完成；但任务把“提交审阅包”自行收紧为必须先 `git commit`，而 Codex
+  可见 worktree 的 Git 索引位于主仓库管理目录，触发额外权限审批并在 0/3 阻塞。Skill revision
+  `2026-08-13.55` 明确 Chat 提交不等于 Git commit/push：除非用户或项目验收明确要求 commit
+  identity，经过验证的工作树 diff、文件与测试就是审阅证据；外部 Git 索引不可写只能记入证据
+  边界，不得产生审批或阻断闭环。
+- C30 在 `.55` 上继续越过启动、唯一 Chat 初始化、“极高”确认、首轮真实 UNSEEN 改动与测试，
+  但内置浏览器先返回 `/c/WEB:<uuid>` 临时路由，稍后侧栏才暴露同一 Chat 的真实 canonical URL；
+  旧流程过早把临时身份写入 state，正式提交重开时因 URL 不一致安全停止，实际 0/3、正式发送 0、
+  等待任务 0。Controller 99 / Skill revision `2026-08-13.56` 现在在 state 初始化前拒绝临时身份，
+  要求在同一页面/侧栏唯一解析真实 `/c/<conversation-id>` 并核验原初始化往返；不能要求用户
+  二选一、创建第二个 Chat 或重复发送。
+- C31 已在 Controller 99 上证明临时 URL 能自动解析为真实 canonical Chat，并成功确认“极高”；
+  但 state 的实施身份错误复用了委派包装中的协调来源 ID，而非 C31 自身任务 ID。该运行在正式
+  发送前由安全核查终止，不计闭环证据。Controller 100 / Skill revision `2026-08-13.57` 现在让
+  `init` 将显式实施身份与宿主 `CODEX_THREAD_ID` 强制比对；不一致会在写 state 前失败关闭，
+  `source_thread_id` 不能再成为 writer、账户门、run binding 或等待任务身份。
+- C32 已在 Controller 100 上完成一次真实 UNSEEN 提交、两次平台自动唤醒和一次唯一回复读取；
+  其明确 REVISE 只要求证明“无其他新增、修改或删除路径”，但控制器未识别“唯一最小后续动作”标题，
+  又把负面证据中的“删除”误判成真实删除指令。Controller 101 / Skill revision
+  `2026-08-13.58` 现在识别该窄标题并过滤这类无删除证据；真正删除项目文件仍必须等待用户决定。
+- C32 第 2 轮随后只发送一次，但任务交给 `confirm-review-submission` 的 request UUID 少了一个字符，
+  旧控制器仍把它写进 state，因页面真实消息身份不一致而不能安全创建等待。Controller 102 /
+  Skill revision `2026-08-13.59` 会在状态切换前拒绝畸形 request turn/message UUID，并要求重新读取
+  已发送消息节点的完整身份；不得重发。
+- C34 启动时遇到平台 browser id 以连字符开头，分离参数值被 argparse 当成新选项；控制器安全拒绝，
+  未重复发送。Controller 103 / Skill revision `2026-08-13.60` 现在规范化该 opaque value，并要求
+  优先使用 `--browser-id=<完整值>`。
+- C34 随后完成首个受控 UNSEEN 文档修改，但 Codex Desktop 把任务置为 `waitingOnApproval`；首次授权
+  明确禁止权限审批，因此没有正式发送。账户门已回到 0/2。该宿主文件修改权限是 Public Beta 的
+  外部阻塞，控制器不会自行批准或绕过。
 - Controller 97 修复 C25 第 1 轮真实等待回复消费后的续接阻塞：单次等待完成读取、身份登记、
   名额释放和删除后，原 `review_poll` 租约过去仍存活，导致同一任务随后的强制入口门控被当成
   并发操作拒绝。现在只在回复已验证且操作包已持久化的 `result_received` 边界，将原租约原子
@@ -907,7 +944,8 @@
 - 随后的 `.12` 诊断又在两个标签列表都为空的真实前提下完成自动打开、单次提交、独立 waiting
   配对读取、一次消费与重复消费 no-op；Windows 传输功能闭环成立，但人工唤醒且无平台
   automation，仍不计自主发布门。
-- Alpha 27 ZIP 与独立 SHA-256 文件已在 `dist/` 生成；校验值以同名 `.sha256.txt` 为准。该归档早于本节未发布热修复，与当前源码不一致，本次普通修复不重新压包。
+- Alpha 50 ZIP 与独立 SHA-256 文件已按当前 Controller 103 源码在 `dist/` 重新生成；归档仅含
+  63 个 Git 跟踪源码文件和内嵌清单，当前校验值以同名 `.sha256.txt` 为准。
 
 ## 仍未完成
 

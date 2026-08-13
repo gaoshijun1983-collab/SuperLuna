@@ -24,9 +24,33 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The first public open-source release is `0.2.0-alpha.49`. It is an early
-technical-testing Alpha, not a Public Beta. Current unreleased source,
-Controller 98 / Skill revision `2026-08-13.53` removes an ambiguous waiting
+The current public open-source candidate is `0.2.0-alpha.50`. It is an early
+technical-testing Alpha, not a Public Beta. This packaged source,
+Controller 103 / Skill revision `2026-08-13.60` also accepts a platform browser
+identity beginning with a hyphen without mistaking it for an option and documents
+the unambiguous equals form. Controller 102 rejects a truncated browser
+request UUID before state transition and requires rereading the already-sent
+message without resending. Controller 101 additionally keeps an explicit
+low-risk REVISE actionable when Chat asks for proof that no other path was
+added, modified, or deleted under a “唯一最小后续动作” heading; an affirmative
+project deletion remains gated. Controller 100 binds state initialization to
+the host-provided `CODEX_THREAD_ID`, so a delegated task cannot accidentally
+reuse its coordinator's `source_thread_id` as writer, account, run, or wait
+identity. Controller 99 rejects the transient
+`/c/WEB:<uuid>` route that Codex's in-app browser can expose immediately after
+creating a Chat. The task must resolve the unique canonical conversation link
+for the same initialization exchange before state creation; it cannot ask the
+user to choose between two identities or create/send again. The same source also distinguishes Reviewer Chat
+submission from Git commit/push. A verified worktree diff and tests are valid
+review evidence unless the user or project contract explicitly requires a commit
+identity; an external worktree index permission cannot become an invented review
+prerequisite. Revision `.54` prevents a completed browser
+provisioning step from being misreported as unresponsive merely because it took
+about ten seconds. C28 reached a logged-in ChatGPT home page and successfully
+filled the composer with an enabled send button, yet stopped before sending or
+creating state. Completed tool status plus the expected postcondition now means
+continue; one side-effect-free local locator expression may be corrected once,
+while real timeouts and uncertain sends still fail closed. Revision `.53` removes an ambiguous waiting
 instruction that abbreviated the final command as `resume`. It now names the
 exact `resume-from-reply` subcommand and its required deletion-proof arguments,
 preventing a successfully staged reply from being stranded after its platform
@@ -442,6 +466,18 @@ python -X utf8 -B skills\luna-chatgpt-review-loop\scripts\lcrl.py closure-check
 
 Also run the current Codex `skill-creator` quick validator on the bundled Skill
 and the `plugin-creator` validator on this project root before packaging.
+
+Build and independently verify the deterministic tracked-source archive:
+
+```powershell
+python -X utf8 -B scripts\build_release.py build
+python -X utf8 -B scripts\build_release.py verify
+```
+
+The archive contains only Git-tracked source plus an embedded
+`RELEASE-MANIFEST.sha256`; ignored runtime state, caches, and older archives are
+not eligible for inclusion. Rebuilding unchanged source produces identical
+archive bytes and a standalone `.sha256.txt` file.
 
 See [the roadmap](docs/ROADMAP.md), [the browser transport contract](skills/luna-chatgpt-review-loop/references/browser_transport.md), [the current release evidence](release/alpha_release_report.json), and [the 2026-08-11 company-PC handoff](docs/HANDOFF_COMPANY_PC_2026-08-11.zh-CN.md).
 

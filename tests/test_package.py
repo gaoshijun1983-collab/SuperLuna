@@ -955,6 +955,41 @@ class PackageTests(unittest.TestCase):
             self.assertIn(requirement, skill)
             self.assertIn(requirement, provisioning)
 
+    def test_completed_provisioning_step_is_not_misclassified_as_unresponsive(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        provisioning = (
+            SKILL_ROOT / "references" / "browser_chat_provisioning.md"
+        ).read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (skill, provisioning, transport):
+            normalized = " ".join(text.split())
+            self.assertIn("completed", normalized)
+            self.assertIn("enabled=true", normalized)
+            self.assertIn("ten seconds", normalized.replace("十秒", "ten seconds"))
+            self.assertIn("pre-send", normalized)
+            self.assertIn("corrected", normalized.replace("修正后", "corrected"))
+        self.assertIn("不得称为“无响应”或提前结束", skill)
+        self.assertIn("must not end the turn", transport)
+
+    def test_review_submission_does_not_require_a_git_commit(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        packet = (SKILL_ROOT / "references" / "review_packet.md").read_text(
+            encoding="utf-8"
+        )
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (skill, packet):
+            self.assertIn("不等于执行 `git commit`", text)
+            self.assertIn("工作树 diff", text)
+            self.assertIn("未创建 commit", text)
+            self.assertIn("用户", text)
+        self.assertIn("not a Git commit or push", protocol)
+        self.assertIn("must not", protocol)
+        self.assertIn("continue with readable local evidence", protocol)
+
     def test_new_task_startup_opens_and_rebinds_the_existing_web_chat(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         provisioning = (
@@ -974,6 +1009,30 @@ class PackageTests(unittest.TestCase):
         self.assertIn("browser_startup_reopen_authorized", transport)
         self.assertIn("before local project work", transport)
         self.assertIn("不得在仅完成启动重绑后结束本次 turn", skill)
+
+    def test_provisioned_chat_rejects_temporary_web_route_identity(self):
+        provisioning = (
+            SKILL_ROOT / "references" / "browser_chat_provisioning.md"
+        ).read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (provisioning, transport, protocol):
+            self.assertIn("WEB:<uuid>", text)
+            self.assertIn("canonical", text)
+        self.assertIn("不得新建第二个 Chat", provisioning)
+
+    def test_state_init_binds_to_host_task_not_delegation_source(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (skill, protocol):
+            self.assertIn("CODEX_THREAD_ID", text)
+            self.assertIn("source_thread_id", text)
 
     def test_bound_existing_chat_can_reopen_without_creating_a_replacement(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -1109,6 +1168,13 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(report["package_version"], manifest["version"])
         self.assertEqual(report["controller_version"], registry["controller_version"])
         self.assertEqual(report["skill_revision"], registry["skill_revision"])
+        self.assertFalse(report["source_contains_unreleased_hotfix"])
+        self.assertTrue(report["dist_archive_matches_current_source"])
+        archive = report["dist_archive"]
+        self.assertEqual(archive["filename"], f"SuperLuna-{manifest['version']}.zip")
+        self.assertGreater(archive["tracked_source_files"], 50)
+        self.assertTrue(archive["embedded_manifest_verified"])
+        self.assertTrue(archive["deterministic_rebuild_verified"])
         self.assertEqual(report["compatibility_entrypoints"]["skill"], "luna-chatgpt-review-loop")
         self.assertEqual(report["compatibility_entrypoints"]["plugin"], "luna-review-loop")
         closure = report["automated_evidence"]["controller_closure_check"]

@@ -47,6 +47,13 @@ prove that another computer signed into the same ChatGPT account is idle.
 ## Fixed identity
 
 - Bind the exact conversation id from `https://chatgpt.com/c/<conversation-id>`.
+- A newly created in-app-browser Chat can briefly expose
+  `https://chatgpt.com/c/WEB:<uuid>`. That is a temporary platform route, not a
+  canonical conversation identity. Never persist it or pass it to `init` or
+  `bind-browser-tab`. Resolve the unique real `/c/<conversation-id>` link for
+  the same initialized conversation from the current page/sidebar, open it once
+  in the same controlled tab, and verify the initialization request and reply.
+  If that resolution is not unique, fail closed without creating or sending again.
 - Bind every formal request to its state-local `review.run_binding`. Immediately
   before composing, render the controller-owned block with
   `render-review-run-binding`, put it first in the payload, and pass the same
@@ -112,6 +119,16 @@ slot with `--new-chat-authorization-id` and may open the returned home URL only
 when `provisioning_home_navigation_allowed=true`. It keeps that same slot until
 the single authorized Chat is provisioned; releasing it and falling back to a
 health probe is not a valid provisioning retry.
+
+Classify browser execution from the returned tool status and verified
+postcondition, never from wall-clock duration. A `completed` call that proves the
+composer was filled and the send control reports `enabled=true` is successful even when it
+took ten seconds; it is not an unresponsive browser and must not end the turn.
+One explicitly failed, side-effect-free local JavaScript/locator expression may
+be corrected once at the same pre-send step. After the corrected call completes
+with its intended postcondition, continue provisioning. An actual timeout or an
+uncertain send follows same-tab reconciliation; it never authorizes a blind send,
+replacement Chat, or generic retry.
 
 When a coordinator has already provisioned the sole Chat and durable state is
 still a pristine `local_work` / provisioned `pending_handoff`, call
@@ -189,6 +206,11 @@ reopen lease, and reviewer-bound submission account-slot lease. Only
 `browser_submission_send_authorized` permits the one
 visible send. The gate atomically persists its matching reopen lease and
 authorization revision. Return that `revision` and the same account-slot lease through
+Read the complete request turn/message identity directly from the newly visible
+user message node; never retype, slice, or truncate it. For a canonical ChatGPT
+UUID conversation, both request identities must be complete UUIDs. A malformed
+identity leaves the state pending and requires rereading the already-sent
+message, never resending. Then use
 `confirm-review-submission --browser-send-authorization-revision --account-slot-lease-id`; confirmation
 must consume the persisted fact at the unchanged revision. The reopen
 authorization or its already-known revision never authorizes sending. The caller **must not close the tab merely because the navigation
@@ -201,7 +223,12 @@ Complete page/login/Extreme/composer checks whenever the exact tab is already
 visible, then request the same one-shot send authorization using the current
 turn-entry lease. After authorization, perform only the final
 identity check, one send, and immediate submission confirmation. Never resend if
-the visible request exists but confirmation fails or the lease expires.
+the identity is malformed, a command rejects it, the visible request already
+exists but confirmation fails, or the lease expires.
+
+Browser ids are opaque platform values. Pass them as `--browser-id=<full-value>`;
+the controller also normalizes a separated value with one leading hyphen so it
+cannot be mistaken for another option. Never trim or rewrite the identity.
 
 Once the exact receipt is confirmed and state enters waiting, the submitting
 occurrence must hand off the tab and end. The submitting occurrence must not consume a reply in that same occurrence,

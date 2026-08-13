@@ -24,8 +24,21 @@
    请求将另行提交”。初始化消息不计入正式回合，也不能被当作 PASS/REVISE 结果。
 3. 通过可见 UI 只创建一个 Chat，并只发送一次初始化消息。发送结果不确定时只在原标签
    协调可见回执，禁止再建 Chat 或重发。
+   浏览器调用的状态必须按工具事实判断，不能按耗时猜测：`completed` 且返回预期后置条件
+   （例如 composer 已填充、发送按钮 `enabled=true`）就是成功，即使耗时十秒，也不得称为
+   “无响应”或在发送前结束。若第一次调用因实现任务自己的 JavaScript/locator 表达式明确
+   `failed`，并且尚未点击发送、没有不确定网页副作用，可只修正该表达式一次并重试同一个
+   **pre-send** 步骤；修正后的调用完成且后置条件成立时必须继续。只有正确调用明确超时/失败，
+   或后置条件无法验证，才可报告浏览器不可用；发送动作一旦可能发生则改走原标签回执协调，
+   绝不盲目重试。
 4. 等初始化回复完整结束后，从 URL 捕获新的 conversation id；再用 `user.openTabs()` 的
    当前列表唯一匹配该 URL，保存 `providerTabId`。不得把运行期数字 `Tab.id` 当成持久身份。
+   Codex 内置浏览器可能先显示 `https://chatgpt.com/c/WEB:<uuid>`；这是平台临时路由身份，
+   **不是 canonical conversation URL**，不得传给 `init` 或 `bind-browser-tab`。出现该形式时，
+   只能在同一已创建 Chat 的当前页面/侧栏中定位与初始化标题及正文唯一匹配的 conversation
+   链接，读取其真实 `https://chatgpt.com/c/<conversation-id>`，在原受控标签打开该 URL 一次，
+   并确认初始化请求与完整回复仍唯一可见。无法唯一解析时失败关闭；不得新建第二个 Chat、
+   重发初始化消息或要求用户在两个身份之间选择。
    若 agent 刚创建且仍控制该标签时平台暂不暴露 `providerTabId`，不得失败后再建 Chat；只可
    为这一个已授权新 Chat 用 `pending_handoff` 和 `--provisioned-chat` 建立临时绑定。
 5. 运行正常的自动预检与 `init`，随后调用 `bind-browser-tab` 保存 browser binding、固定 URL

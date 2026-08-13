@@ -2,10 +2,10 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.49",
-      "title": "Browser-first loop proof and release-contract correction",
+      "version": "0.2.0-alpha.50",
+      "title": "Autonomous browser continuation and reproducible source archive",
       "upgrade_prerequisites": [
-        "Run the repository test suite and controller selftest.",
+        "Run the repository test suite, controller selftest, and release archive verifier.",
         "Confirm the current candidate remains Alpha and Public Beta is blocked."
       ],
       "rollback_triggers": [
@@ -18,8 +18,9 @@
         "Re-run the focused validator and the required local checks."
       ],
       "verification": [
-        "The milestone validator exits successfully.",
+        "The milestone and release archive validators exit successfully.",
         "Repository tests, selftest, and closure-check pass independently.",
+        "Two builds from the same source produce the same SHA-256 digest.",
         "Local checks remain labelled as local-only evidence."
       ],
       "evidence_scope": "local_only",

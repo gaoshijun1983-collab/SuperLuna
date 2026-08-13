@@ -860,6 +860,43 @@ class ControllerTests(unittest.TestCase):
             at=None,
         ))
 
+    def test_browser_init_rejects_temporary_web_conversation_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for temporary_id in (
+                "WEB:6d004455-3893-4bd1-a8f2-ee0cb7b0210a",
+                "web:6d004455-3893-4bd1-a8f2-ee0cb7b0210a",
+            ):
+                with self.subTest(temporary_id=temporary_id):
+                    with self.assertRaisesRegex(
+                        lcrl.LCRLError, "temporary WEB: conversation identity"
+                    ):
+                        lcrl.new_state(
+                            "none",
+                            "implementation-task",
+                            directory,
+                            temporary_id,
+                            review_transport="in_app_browser",
+                        )
+
+    def test_init_identity_must_match_host_task_not_delegation_source(self):
+        with mock.patch.dict(
+            os.environ,
+            {"CODEX_THREAD_ID": "current-implementation-task"},
+            clear=False,
+        ):
+            self.assertEqual(
+                lcrl.resolve_init_implementation_thread_id(
+                    "current-implementation-task"
+                ),
+                "current-implementation-task",
+            )
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "does not match the current host task"
+            ):
+                lcrl.resolve_init_implementation_thread_id(
+                    "delegation-source-task"
+                )
+
     def acquire_submission_slot(self, state_path: Path, registry: Path):
         state = lcrl.load_state(state_path)
         return lcrl.acquire_account_browser_slot_command(Namespace(
@@ -3470,6 +3507,16 @@ class ControllerTests(unittest.TestCase):
         parsed = lcrl.parse_result(reply_text)
         self.assertFalse(lcrl.reply_requires_user_decision(parsed))
 
+        real_round_reply = lcrl.parse_result(
+            "REVISE\n\n"
+            "唯一最小后续动作\n\n"
+            "补一份提交前工作树差异边界证据，确认 Round 1 相对于其既定 baseline "
+            "的变更路径仅为 `work/controller100_retest_rounds.md`。\n\n"
+            "完成条件：机器输出能够明确显示无其他新增、修改或删除路径，并给出该文件"
+            "实际 diff 或内容摘要。无需扩大测试范围。"
+        )
+        self.assertFalse(lcrl.reply_requires_user_decision(real_round_reply))
+
         real_delete = lcrl.parse_result(
             "REVISE\n\n唯一下一步：\n删除项目文件，再生成完整 manifest。"
         )
@@ -5136,16 +5183,28 @@ class ControllerTests(unittest.TestCase):
             root = Path(directory)
             state_path = root / "state.json"
             account_registry = root / "account-browser-gate.json"
+            reviewer_id = "6a7d0b2f-4e60-43ee-a8fa-3625846b567a"
+            request_id = "2f6cd09a-b225-49db-96c8-3fe97ee1b519"
+            self.assertEqual(
+                lcrl.normalize_opaque_cli_values([
+                    "bind-browser-tab", "--browser-id", "-platform-browser-id",
+                    "--state", "state.json",
+                ]),
+                [
+                    "bind-browser-tab", "--browser-id=-platform-browser-id",
+                    "--state", "state.json",
+                ],
+            )
             state = lcrl.new_state(
-                "none", "implementation", root, "visible-submit-chat",
+                "none", "implementation", root, reviewer_id,
                 continuation_mode="foreground", review_transport="in_app_browser",
             )
             state["runtime"]["session_log"] = str(root / "session.jsonl")
             lcrl.save_state(state_path, state)
-            self.bind_browser_tab(state_path, "visible-submit-chat")
+            self.bind_browser_tab(state_path, reviewer_id)
             lcrl.confirm_review_mode(Namespace(
                 state=str(state_path), mode="extreme", source="in_app_browser",
-                reviewer_thread_id="visible-submit-chat", observed_label="极高",
+                reviewer_thread_id=reviewer_id, observed_label="极高",
                 native_app_instance_id=None, at=None,
             ))
             entry = lcrl.guard_action(Namespace(
@@ -5158,7 +5217,7 @@ class ControllerTests(unittest.TestCase):
             )
             account_slot = lcrl.acquire_account_browser_slot_command(Namespace(
                 implementation_thread_id="implementation",
-                reviewer_thread_id="visible-submit-chat",
+                reviewer_thread_id=reviewer_id,
                 operation="submission", registry=str(account_registry), at=None,
             ))
 
@@ -5178,9 +5237,9 @@ class ControllerTests(unittest.TestCase):
                 lcrl.LCRLError, "fresh browser submission send authorization",
             ):
                 lcrl.confirm_review_submission_command(Namespace(
-                    state=str(state_path), reviewer_thread_id="visible-submit-chat",
-                    request_turn_id="turn-visible-S1",
-                    request_message_id="message-visible-S1",
+                    state=str(state_path), reviewer_thread_id=reviewer_id,
+                    request_turn_id=request_id,
+                    request_message_id=request_id,
                     native_app_instance_id=None, attachment_name=None,
                     submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
                     browser_id="iab-session-1",
@@ -5201,10 +5260,26 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(authorized["send_allowed"])
             self.assertTrue(authorized["review_run_binding_required_in_payload"])
 
+            before_malformed_identity = state_path.read_bytes()
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "request identity is malformed",
+            ):
+                lcrl.confirm_review_submission_command(Namespace(
+                    state=str(state_path), reviewer_thread_id=reviewer_id,
+                    request_turn_id=request_id[:-1],
+                    request_message_id=request_id[:-1],
+                    native_app_instance_id=None, attachment_name=None,
+                    submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
+                    browser_id="iab-session-1",
+                    browser_send_authorization_revision=authorized["revision"],
+                    account_slot_lease_id=account_slot["lease_id"],
+                ))
+            self.assertEqual(state_path.read_bytes(), before_malformed_identity)
+
             confirmed = lcrl.confirm_review_submission_command(Namespace(
-                state=str(state_path), reviewer_thread_id="visible-submit-chat",
-                request_turn_id="turn-visible-S1",
-                request_message_id="message-visible-S1",
+                state=str(state_path), reviewer_thread_id=reviewer_id,
+                request_turn_id=request_id,
+                request_message_id=request_id,
                 native_app_instance_id=None, attachment_name=None,
                 submitted_at=lcrl.utc_now(), browser_reopen_lease_id=None,
                 browser_id="iab-session-1",

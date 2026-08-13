@@ -20,11 +20,31 @@ Codex 开发 → 固定 ChatGPT 网页 Chat 审阅 → 原 Codex 任务继续
 
 ## 当前源码状态
 
-首个公开开源版本是 `0.2.0-alpha.49`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。当前未发布源码为控制器 81 / Skill revision `2026-08-12.35`：Windows 3.13 的六进程
-竞争中，多个进程可能同时打开刚创建的锁文件，却在写入首个可锁字节时收到短暂权限拒绝。现在会
-重新检查该字节是否已被竞争进程写入；只有账户共享门使用 10 秒有界排队，普通状态锁仍为 2 秒，
-持续权限错误仍失败关闭。控制器 80 在 C9 真实 Mac 测试中，
+当前公开开源候选版本是 `0.2.0-alpha.50`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。当前源码为控制器 103 / Skill revision `2026-08-13.60`：C34 发现平台 browser id
+可能以连字符开头，旧的分离参数写法会被命令行误当成新选项。现在控制器兼容该 opaque value，
+Skill 统一使用不歧义的 `--browser-id=<完整值>`。此前 Controller 102 中，C32 第 2 轮只发送一次，
+但把少一个字符的 request UUID 交给提交确认。现在控制器会在状态切换前拒绝畸形 UUID，要求从
+已经发送的同一消息节点重新读取完整身份，禁止重发。此前 Controller 101 已修复 C32 首轮：
+C32 已完成一次真实提交和
+定时回复读取，但明确、低风险的 REVISE 因“唯一最小后续动作”标题和“无其他新增、修改或删除路径”
+证据措辞被误判为删除项目。现在这类负面差异证据可自动续接，真正删除项目仍会停止等待用户决定。
+此前 C31 已自动解析并绑定
+真实 canonical Chat，但又错误把委派来源任务 ID 当成自己的实施身份。现在 `init` 必须与宿主
+提供的 `CODEX_THREAD_ID` 完全一致，不一致会在 state 创建前拒绝，不能污染 writer、账户门、
+run binding 或等待身份。此前 Controller 99 的 C30 发现内置浏览器新建
+Chat 后会先暴露 `/c/WEB:<uuid>` 临时路由，而真实 canonical conversation URL 稍后才出现在
+当前页面/侧栏。现在临时身份不能再创建 state；任务必须在同一 Chat 唯一解析真实 URL 并核验
+原初始化往返，不能要求用户二选一、重建 Chat 或重发。C27 已在同一任务、
+同一固定极高 Chat 中连续完成三轮隔离 macOS 网页闭环，平台单次等待、回复身份登记、删除与续接
+均未依赖协调者补指令；六平台 CI 也已通过。该证据仍是隔离传输测试，不冒充真实项目 10/10
+Beta 门槛。发布脚本只打包 Git 已跟踪源码，加入内嵌 SHA-256 清单，并能复现和核验完全相同的
+归档内容。C28 还证明一次已完成的 composer 填充会因耗时约十秒被误报为“无响应”；现在必须
+同时依据工具状态和已验证后置条件，成功就继续，真实超时或不确定发送仍安全停止。此前控制器
+98 的 C29 复测进一步发现任务把 Chat 审阅误当成必须先 Git commit；现在只有用户或项目验收
+明确要求 commit identity 时才需要 Git 写入，正常工作树 diff 和测试可直接送审，不再制造权限
+审批。此前控制器
+81 修复 Windows 3.13 锁文件竞争，控制器 80 在 C9 真实 Mac 测试中，
 控制器正确完成了发送前授权，却在发送后才发现完整等待说明达到 1215 bytes、超过 1200-byte
 安全上限。现在等待说明在不删除 state、token、账户名额、浏览器读取、当前标签、删除等待项或
 续接要求的前提下压缩；每次浏览器发送授权还会提前按最长受支持等待任务 identity 计算容量，
@@ -219,6 +239,16 @@ Chat Pro。更深的配额账本和工作流阶段关系仍在审计，未宣称
 - mocks、字段存在、单元测试和 `closure-check` 只能证明本地合同。
 - Public Beta 仍需完成真实连续闭环目标与 Windows/macOS 网页兼容证据；当前不能宣称
   Beta ready。
+
+## 打包与核验
+
+```powershell
+python -X utf8 -B scripts\build_release.py build
+python -X utf8 -B scripts\build_release.py verify
+```
+
+生成的 ZIP 只包含 Git 已跟踪源码和内嵌 `RELEASE-MANIFEST.sha256`；运行状态、缓存、旧包和
+其他忽略文件不会进入归档。源码不变时重复打包会得到完全相同的 ZIP 与 SHA-256。
 
 公司电脑接手请先阅读 [2026-08-11 交接说明](docs/HANDOFF_COMPANY_PC_2026-08-11.zh-CN.md)。验证命令见 [README.md](README.md)，规划见 [ROADMAP](docs/ROADMAP.md)，网页合同见
 [browser_transport.md](skills/luna-chatgpt-review-loop/references/browser_transport.md)，真实发布

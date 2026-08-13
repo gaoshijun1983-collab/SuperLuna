@@ -160,6 +160,9 @@ python -B <skill-root>/scripts/lcrl.py begin-new-goal \
 
 1. **先只读取本 SuperLuna Skill，不得提前读取或启用浏览器 Skill。** 取得并校验当前任务的
    精确 identity 后，先使用宿主分配给当前任务的现有 `cwd` / 项目根目录运行工作区预检；
+   创建 state 时传入的 `--implementation-thread-id` 必须与当前进程的 `CODEX_THREAD_ID`
+   完全相同；委派包装中的 `source_thread_id` 只是来源，禁止用于 `init`、run binding、账户门
+   或等待身份。控制器会在写 state 前拒绝二者不一致。
    无项目任务也必须使用自己已经分配的可写输出目录，不得硬编码 `/var/tmp`、桌面或另一个
    未授权路径，也不得为了通过预检自行创建替代目录：
 
@@ -225,9 +228,18 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
    不得自行追加第二层 `skills/control-in-app-browser/scripts/`；路径不存在时必须停止并报告，
    不能试探多个浏览器实现。若没有旧状态，先在这个实现任务自己的内置浏览器打开
    `https://chatgpt.com/` 并检查登录状态；这一步不发送消息、不创建 Chat、不改模型。
+   浏览器是否可用必须依据工具返回状态和后置条件，不得按耗时猜测：调用返回 `completed`，且
+   已证明 composer 填入、发送按钮 `enabled=true` 等目标成立时，即使耗时十秒也属于成功，
+   不得称为“无响应”或提前结束。第一次调用若因任务自身 JavaScript/locator 表达式明确
+   `failed`，且尚未点击发送、无不确定网页副作用，只允许修正一次并重试同一个 pre-send 步骤；
+   修正后完成且后置条件成立就必须继续。正确调用真实超时或发送是否发生不确定时，才按同标签
+   协调合同处理，不能盲目重试、换 Chat 或泛化为浏览器能力缺失。
 3. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
    一次性新 Chat 授权，先按 `browser_chat_provisioning.md` 创建并初始化唯一 reviewer
-   conversation；初始化消息不计入正式回合。否则继续认领用户已有 Chat。
+   conversation；初始化消息不计入正式回合。新建对话若暂时显示 `/c/WEB:<uuid>`，该值只是
+   平台临时路由，禁止写入 state。必须从同一页面/侧栏唯一解析真实 `/c/<conversation-id>`，
+   在原标签核验初始化请求与回复后才可 `init`；不得新建第二个 Chat 或要求用户二选一。
+   否则继续认领用户已有 Chat。
    在打开任何新标签前，先分别统计 `user.openTabs()` 与当前 `tabs.list()` 中精确 canonical
    URL 的匹配数量，并运行：
 
@@ -368,6 +380,11 @@ python -B <skill-root>/scripts/lcrl.py confirm-review-mode \
 审阅包遵守 [review_packet.md](references/review_packet.md)：区分已证明、合理推断和未验证；
 要求 Chat 主动找反例；只审查提交前已经发生的证据，未来动作不得申请 PASS。证据不足不得
 PASS。视觉审查必须让 Chat 真正看到图片，只有本地路径不算证据。
+这里的“提交一次”是向固定 Reviewer Chat 发送一次审阅包，不等于执行 `git commit` 或
+`git push`。除非用户明确把 Git 提交列为本轮交付要求，否则经过验证的工作树 diff、测试输出和
+文件内容就是可审阅证据；不得为了进入 Chat 审阅而自行增加 Git 写入、权限审批或远端操作。
+Git 元数据不可写时仍可在项目工作树可写、改动与测试可读取的前提下继续送审，并把
+“未创建 commit”明确列入证据边界。只有项目自身的验收标准明确要求 commit identity 时才停止。
 本次 Chat 回复之后才能发生的回复登记、账户名额释放、等待任务删除和状态续接属于控制器的
 回复后收尾，不在本次 reviewer verdict 的证据范围内，也不得成为本次 PASS 的前置条件；宿主必须
 在收到回复后独立完成并验证这些动作。前几轮已经完成的收尾可以作为后续轮次的既有证据。
@@ -381,11 +398,16 @@ PASS。视觉审查必须让 Chat 真正看到图片，只有本地路径不算�
 - 先进入 `review_submit_pending` 并取得带当前固定 reviewer id 的 `submission` 账户名额；未取得时
   保持该状态，不得初始化浏览器或发送；
 - 再核验同一标签、同一 conversation id、页面可读和用户确认仍有效；
+- browser id 是平台 opaque value；调用 CLI 时优先使用 `--browser-id=<完整值>`。控制器也会兼容
+  单个前导连字符的分离参数值，不能截断、手改或把它误认为新选项；
 - 捕获当前可见用户消息身份基线和将发送的完整正文身份；
 - **无论标签是否需要重开**，都必须在点击发送前立即运行
   `authorize-browser-submission-send --state <state-file> --fingerprint <本轮正文身份> --review-run-binding-id <区块中的RUN_ID> --browser-id <当前browser.browserId> --lease-id <当前turn-entry或受权重开lease> --account-slot-lease-id <submission账户名额lease>`；
   只有返回 `browser_submission_send_authorized` 才能通过该标签的可见 composer 发送一次；
-- 发送后立即运行 `confirm-review-submission`，交回同一 `--browser-id`、
+- 发送后从当前用户消息节点重新读取**完整、未手抄、未截断**的 request turn/message identity；
+  canonical ChatGPT conversation 使用 UUID 时，两项 request identity 也必须是完整 UUID。格式不完整时保持
+  `review_submit_pending`，重新读取刚才已经发送的同一消息身份，绝不重发；随后立即运行
+  `confirm-review-submission`，交回同一 `--browser-id`、
   `--account-slot-lease-id` 和授权返回的 `--browser-send-authorization-revision`；重开路径还要交回
   `--browser-reopen-lease-id`。缺少任一证明时保持 `review_submit_pending`，不得发送或补发。
 

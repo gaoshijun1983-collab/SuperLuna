@@ -1,5 +1,12 @@
 # SuperLuna browser-first review protocol
 
+Review submission means one browser message to the bound reviewer Chat. It is
+not a Git commit or push. Unless the user or project acceptance contract
+explicitly requires a commit identity, verified worktree diffs and test output
+are sufficient review evidence. An unwritable external worktree index must not
+introduce a permission approval or stop the loop; record that no commit exists
+and continue with readable local evidence.
+
 ## 1. Observable loop
 
 ```text
@@ -177,6 +184,17 @@ reading Chat, acquiring execution, or changing workflow state.
 
 ## 3. Submit exactly once
 
+Before state initialization, an explicitly provisioned browser Chat must have a
+real canonical `/c/<conversation-id>` identity. A transient `/c/WEB:<uuid>` URL
+is only an in-app-browser routing handle and is never a valid reviewer identity.
+The implementation task resolves the unique canonical sidebar/page link for the
+same initialized conversation and verifies the original initialization exchange
+in that URL. Ambiguous resolution fails closed without a second Chat or resend.
+State initialization also binds to the host-provided `CODEX_THREAD_ID`. An
+explicit implementation identity that differs from the current host task is
+rejected before state creation; a delegation wrapper's `source_thread_id` can
+never become the writer, run-binding, account-gate, or waiting identity.
+
 Immediately before the send, capture the same tab, conversation id, visible
 message baseline, and exact packet identity. Submit once through the visible
 composer. Only one new exact-body message after the baseline is a receipt.
@@ -187,6 +205,9 @@ messages, multiple candidates, changed body, changed Chat, and stale context all
 fail closed.
 
 The exact request identity is persisted separately from the response identity.
+For canonical ChatGPT UUID conversations, submission confirmation rejects a
+truncated request turn/message UUID before state transition. The implementation
+must reread the existing sent message node and must not resend.
 Reply retrieval starts from that request and consumes only its complete paired
 assistant response. Partial streaming output and unrelated turns are not input.
 After an exact submission receipt enters waiting, the submitting occurrence

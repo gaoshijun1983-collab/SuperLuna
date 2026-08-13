@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 98
-SKILL_REVISION = "2026-08-13.53"
+CONTROLLER_VERSION = 103
+SKILL_REVISION = "2026-08-13.60"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 BINDING_REGISTRY_VERSION = 1
@@ -145,6 +145,10 @@ NETWORK_ERROR_PATTERN = re.compile(
     r"network(?:\s+error)?|timed?\s*out|econnreset|fetch failed",
     re.IGNORECASE,
 )
+CHATGPT_UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 POLICY_PATTERNS = [
     re.compile(pattern, re.IGNORECASE)
     for pattern in (
@@ -201,6 +205,7 @@ VAGUE_REPLY_PATTERN = re.compile(
 )
 EXPLICIT_NEXT_STEP_HEADING_PATTERN = re.compile(
     r"(?im)^(?:#{1,6}\s*)?(?:(?:唯一)?下一步|"
+    r"(?:唯一)?(?:最小|必要)?后续动作|"
     r"(?:minimum\s+)?in[- ]scope\s+next\s+step)"
     r"(?:\s*[｜|:：]\s*.+)?\s*$"
 )
@@ -227,8 +232,8 @@ NEGATED_BOUNDARY_POSITIVE_TURN_PATTERN = re.compile(
     re.IGNORECASE,
 )
 NEGATED_HIGH_IMPACT_EVIDENCE_PATTERN = re.compile(
-    r"(?:明确)?(?:证明|确认|验证)[^。！？;；\n]{0,180}"
-    r"(?:没有|不存在|未发生)[^。！？;；\n]{0,100}(?:删除|移除)"
+    r"(?:明确)?(?:证明|确认|验证|显示|列出|输出)[^。！？;；\n]{0,180}"
+    r"(?:没有|不存在|未发生|无(?:任何|其他)?)[^。！？;；\n]{0,100}(?:删除|移除)"
     r"[^。！？;；\n]*(?:[。！？;；]|$)|"
     r"(?:不把|不得把|不能把|不应把)[^。！？;；\n]{0,120}"
     r"(?:解释|视为|作为)[^。！？;；\n]{0,80}(?:已验证|已证明|已完成)"
@@ -1589,6 +1594,15 @@ def new_state(
         raise LCRLError("continuation_mode must be automatic or foreground")
     if review_transport not in VALID_REVIEW_TRANSPORTS:
         raise LCRLError("review_transport must be app_chat_review or in_app_browser")
+    normalized_reviewer_thread_id = str(reviewer_thread_id or "").strip()
+    if (
+        review_transport == "in_app_browser"
+        and normalized_reviewer_thread_id.upper().startswith("WEB:")
+    ):
+        raise LCRLError(
+            "in-app browser state cannot use a temporary WEB: conversation identity; "
+            "resolve and verify the canonical /c/<conversation-id> URL first"
+        )
     if implementation_role not in VALID_IMPLEMENTATION_ROLES:
         raise LCRLError("implementation_role must be luna_medium or terra_medium")
     if goal_mode not in VALID_GOAL_MODES:
@@ -1764,6 +1778,20 @@ def new_state(
             "resume_checkpoint_at": now,
         },
     }
+
+
+def resolve_init_implementation_thread_id(supplied: str) -> str:
+    """Bind a new state to the host task, never a delegation source identity."""
+    supplied_id = str(supplied or "").strip()
+    host_id = str(os.environ.get("CODEX_THREAD_ID") or "").strip()
+    if supplied_id in {"", "none"}:
+        raise LCRLError("init requires the exact implementation task identity")
+    if host_id and supplied_id != host_id:
+        raise LCRLError(
+            "init implementation identity does not match the current host task; "
+            "do not reuse a delegation source_thread_id"
+        )
+    return host_id or supplied_id
 
 
 def validate_execution_fact(record: dict[str, Any], label: str, errors: list[str]) -> None:
@@ -6237,6 +6265,17 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
         raise LCRLError("review submission is not pending")
     if args.reviewer_thread_id != state["confirmation"]["reviewer_thread_id"]:
         raise LCRLError("submission target must match the bound App Chat")
+    if (
+        review.get("transport") == "in_app_browser"
+        and CHATGPT_UUID_PATTERN.fullmatch(args.reviewer_thread_id)
+        and not (
+            CHATGPT_UUID_PATTERN.fullmatch(str(args.request_turn_id or ""))
+            and CHATGPT_UUID_PATTERN.fullmatch(str(args.request_message_id or ""))
+        )
+    ):
+        raise LCRLError(
+            "browser submission request identity is malformed; reread the existing sent message identity without resending"
+        )
     native_instance_id = getattr(args, "native_app_instance_id", None) or "none"
     if state["confirmation"].get("reviewer_reasoning_control_source") == "native_app":
         if native_instance_id != state["confirmation"].get("reviewer_reasoning_native_app_instance_id"):
@@ -8276,14 +8315,39 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def normalize_opaque_cli_values(argv: list[str] | None) -> list[str] | None:
+    """Keep a leading-hyphen browser identity from becoming an option token."""
+    if argv is None:
+        return None
+    normalized: list[str] = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if (
+            token == "--browser-id"
+            and index + 1 < len(argv)
+            and argv[index + 1].startswith("-")
+            and not argv[index + 1].startswith("--")
+        ):
+            normalized.append(f"--browser-id={argv[index + 1]}")
+            index += 2
+            continue
+        normalized.append(token)
+        index += 1
+    return normalized
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    args = parser.parse_args(normalize_opaque_cli_values(argv))
     try:
         if args.command == "init":
+            implementation_thread_id = resolve_init_implementation_thread_id(
+                args.implementation_thread_id
+            )
             state = new_state(
                 args.automation_id,
-                args.implementation_thread_id,
+                implementation_thread_id,
                 args.project_path,
                 args.reviewer_thread_id,
                 args.profile,

@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.2.0-alpha.50 - 2026-08-13
+
+- Packages Controller 103 / Skill revision `2026-08-13.60` after the clean C27
+  three-round macOS transport proof and the six-platform CI pass.
+- Adds a deterministic tracked-source ZIP builder and verifier. The archive
+  contains an embedded SHA-256 manifest, excludes ignored runtime state and old
+  archives, and writes a standalone checksum file.
+- Keeps Public Beta false: C27 is isolated evidence, and the real-project,
+  platform-matrix, and real recovery gates remain incomplete.
+- C28 reached a logged-in ChatGPT home page and completed a corrected composer
+  fill with an enabled send button, but then misclassified that ten-second
+  successful call as browser unresponsiveness and stopped at 0/3 with zero side
+  effects. Provisioning now classifies calls by returned status and verified
+  postcondition, permits one correction of a side-effect-free local expression,
+  and requires continuation after the corrected step succeeds.
+- C29 then initialized and named its one Extreme reviewer Chat and completed its
+  first verified UNSEEN worktree change, but invented a Git commit prerequisite;
+  the external worktree index triggered permission approval before any formal
+  round. Reviewer submission now accepts verified worktree evidence unless a
+  commit identity is explicitly required.
+- C30 initialized exactly one Extreme reviewer Chat and completed its first
+  verified UNSEEN change, then discovered that the in-app browser initially
+  exposed a temporary `/c/WEB:<uuid>` route while the same conversation had a
+  different real sidebar URL. State initialization now rejects that temporary
+  identity and provisioning must resolve and verify the unique canonical URL
+  for the same initialization exchange without creating or sending again.
+- C31 proved the canonical-URL fix, then created state with the delegation
+  source task id instead of its own host identity. `init` now compares the
+  supplied writer identity with `CODEX_THREAD_ID` and rejects any mismatch
+  before state creation, so coordinator identity cannot leak into run, account,
+  or waiting ownership.
+- C32 proved the Controller 100 host-identity and canonical-URL fixes through a
+  real project submission and scheduled reply read. Its clear low-risk REVISE
+  asked only for proof that no other path was added, modified, or deleted, but
+  the prose gate did not recognize the heading “唯一最小后续动作” and treated the
+  word “删除” inside that absence criterion as a destructive instruction.
+  Controller 101 recognizes narrow Chinese follow-up headings and negative
+  diff evidence while preserving the gate for an affirmative project deletion.
+- C32 then sent its second request exactly once, but the task passed a request
+  UUID missing one character to submission confirmation. Controller 102 rejects
+  a malformed request turn/message UUID before state transition and requires
+  rereading the already-sent message node without resending.
+- C34 exposed a platform browser id beginning with `-`; a separated argparse
+  value was mistaken for an option. Controller 103 normalizes that opaque value,
+  and the Skill prefers the unambiguous `--browser-id=<full-value>` form.
+- C34 then reached its first tracked UNSEEN documentation edit but Codex Desktop
+  placed the task in `waitingOnApproval`. No browser slot remained and no formal
+  round was sent. This is recorded as a host task-permission Beta blocker; the
+  controller cannot approve or bypass a host-owned file-change decision.
+
 - Unreleased Controller 98 / Skill revision `2026-08-13.53`: C26 completed one
   real send, gated read, reply staging, slot release, and platform-wait deletion,
   but the generated waiting prompt abbreviated the final step as `resume`. The
