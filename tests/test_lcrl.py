@@ -2608,6 +2608,30 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(result["expected_state_path"], str(state_path.resolve()))
             self.assertEqual(list(project.glob(".superluna-write-probe-*")), [])
 
+    def test_repo_retest_workspace_preflight_uses_windows_compatible_probe(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            thread_id = "implementation-retest-windows-workspace"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            project.mkdir(parents=True)
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {"CODEX_THREAD_ID": thread_id}),
+                mock.patch.object(lcrl.os, "supports_dir_fd", set()),
+            ):
+                result = lcrl.workspace_preflight_command(Namespace(
+                    project_path=str(project),
+                    state=str(state_path),
+                    profile="superluna_repo_retest_v1",
+                    implementation_thread_id=thread_id,
+                ))
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["probe_removed"])
+            self.assertEqual(list(project.glob(".superluna-write-probe-*")), [])
+
     def test_repo_retest_workspace_rejects_wrong_paths_before_write_probe(self):
         with tempfile.TemporaryDirectory() as directory:
             checkout = Path(directory) / "SuperLuna"

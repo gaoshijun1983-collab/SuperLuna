@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 108
-SKILL_REVISION = "2026-08-13.65"
+CONTROLLER_VERSION = 109
+SKILL_REVISION = "2026-08-13.66"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -4115,7 +4115,9 @@ def workspace_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
     descriptor: int | None = None
     probe_removed = True
     try:
-        if profile == SUPERLUNA_REPO_RETEST_PROFILE:
+        if profile == SUPERLUNA_REPO_RETEST_PROFILE and (
+            os.open in os.supports_dir_fd and os.stat in os.supports_dir_fd
+        ):
             project_directory_fd = os.open(
                 project_path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
                 | getattr(os, "O_NOFOLLOW", 0),
@@ -4138,6 +4140,28 @@ def workspace_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
                 probe_path = project_path / probe_name
             finally:
                 os.close(project_directory_fd)
+        elif profile == SUPERLUNA_REPO_RETEST_PROFILE:
+            # Windows does not implement open(..., dir_fd=...). Keep the same
+            # fail-closed scope validation, and bracket the bounded probe with
+            # directory identity checks so a junction/reparse swap is rejected.
+            opened_stat = os.stat(project_path, follow_symlinks=False)
+            descriptor, probe_name = tempfile.mkstemp(
+                prefix=".superluna-write-probe-",
+                dir=str(project_path),
+            )
+            probe_path = Path(probe_name)
+            current_stat = os.stat(project_path, follow_symlinks=False)
+            validate_repo_retest_scope(
+                profile,
+                implementation_thread_id,
+                raw_project_path,
+                getattr(args, "state", None),
+            )
+            if (
+                opened_stat.st_dev != current_stat.st_dev
+                or opened_stat.st_ino != current_stat.st_ino
+            ):
+                raise OSError("repository retest project directory changed")
         else:
             descriptor, probe_name = tempfile.mkstemp(
                 prefix=".superluna-write-probe-",

@@ -2,8 +2,8 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.52",
-      "title": "Repository-local self-retest sandbox before browser access",
+      "version": "0.2.0-alpha.53",
+      "title": "Cross-platform repository-local self-retest sandbox before browser access",
       "upgrade_prerequisites": [
         "Run the repository test suite, controller selftest, and release archive verifier.",
         "Confirm the current candidate remains Alpha and Public Beta is blocked.",

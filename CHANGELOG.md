@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0-alpha.53 - 2026-08-13
+
+- Packages Controller 109 / Skill revision `2026-08-13.66`.
+- Fixes the repository self-retest workspace probe on Windows, where Python does
+  not support `open(..., dir_fd=...)`. The Windows fallback keeps exact scope
+  validation and brackets the bounded probe with directory identity checks.
+- Adds a regression that exercises the no-`dir_fd` branch while preserving the
+  existing out-of-scope and symlink fail-closed checks.
+- Supersedes Alpha 52, whose tag remains immutable after its Windows CI failure.
+- Public Beta remains blocked; this is an Alpha compatibility hotfix.
+
 ## 0.2.0-alpha.52 - 2026-08-13
 
 - Packages Controller 108 / Skill revision `2026-08-13.65` in a deterministic

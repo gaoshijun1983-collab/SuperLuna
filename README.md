@@ -24,9 +24,10 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current public open-source candidate is `0.2.0-alpha.52`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 108 / Skill revision
-`2026-08-13.65` keeps concise bilingual one-shot guidance and prevents a claimed
+The current public open-source candidate is `0.2.0-alpha.53`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 109 / Skill revision
+`2026-08-13.66` keeps concise bilingual one-shot guidance, adds a Windows-safe
+repository retest workspace probe, and prevents a claimed
 wait from ending after it has received a complete reply: the same task must
 resume, apply the result, and prepare the next review submission in the same turn.
 It
