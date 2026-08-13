@@ -19,7 +19,9 @@ It supersedes Alpha 52 without rewriting the already published Alpha 52 tag.
 - Repository tests: 328/328.
 - Controller selftest: 15/15.
 - Skill and plugin validators: passed.
-- Final archive: pending rebuild after the cross-platform CI result.
+- GitHub CI: Windows, macOS, and Ubuntu on Python 3.11/3.13 all passed.
+- Final archive: 67 tracked source files plus the embedded SHA-256 manifest;
+  two builds are byte-identical and verification against current source passed.
 
 ## Status
 
