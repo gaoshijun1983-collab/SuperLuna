@@ -7,7 +7,7 @@ Each milestone must identify its version, upgrade prerequisites, rollback
 triggers, rollback steps, and verification method. A rollback is bounded to the
 milestone diff and must preserve the failing output for diagnosis.
 
-The current `0.2.0-alpha.50` entry includes a deterministic source archive but
+The current `0.2.0-alpha.51` entry includes a deterministic source archive but
 still treats repository tests as local-only evidence. Repository tests,
 controller selftest, and `closure-check` do not prove real Windows/macOS device
 behavior and do not prove Public Beta readiness. Those gates remain false until

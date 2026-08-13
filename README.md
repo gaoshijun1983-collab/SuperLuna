@@ -24,9 +24,15 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current public open-source candidate is `0.2.0-alpha.50`. It is an early
+The current public open-source candidate is `0.2.0-alpha.51`. It is an early
 technical-testing Alpha, not a Public Beta. This packaged source,
-Controller 103 / Skill revision `2026-08-13.60` also accepts a platform browser
+Controller 104 / Skill revision `2026-08-13.61`, requires an explicitly
+authorized new reviewer Chat to be provisioned only after the task has completed
+and verified its first real, minimal project change. A host approval or failed
+real write therefore stops before Browser Skill access and leaves zero Chat side
+effects. The account-browser gate rejects missing local-work status before
+issuing a slot or browser permission; existing fixed-Chat recovery is unchanged.
+Revision `.60` also accepts a platform browser
 identity beginning with a hyphen without mistaking it for an option and documents
 the unambiguous equals form. Controller 102 rejects a truncated browser
 request UUID before state transition and requires rereading the already-sent

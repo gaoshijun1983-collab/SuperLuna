@@ -48,10 +48,19 @@ that page but the platform exposes no provider identity, the task may bind the
 non-handle `canonical_url_only` marker. Every later access remains exact-URL and
 occurrence-authorized; a numeric `Tab.id`, title, or focus is never persisted.
 
-Before project writes or a formal submission, the caller must prove that the
-same claimed tab is readable, its URL still identifies the bound conversation,
-and its page is ChatGPT. A network error, login boundary, ambiguous tab, or
-changed conversation fails closed before local work begins.
+For an existing fixed reviewer Chat, before project writes or a formal
+submission the caller must prove that the same claimed tab is readable, its URL
+still identifies the bound conversation, and its page is ChatGPT. A network
+error, login boundary, ambiguous tab, or changed conversation fails closed
+before local work begins. Explicit one-time new-Chat provisioning has one
+narrow ordering exception: the implementation task first completes and verifies
+its first real, minimal project change before reading the Browser Skill or
+acquiring a browser slot. A temporary workspace probe is insufficient. If the
+host requests approval or the real change is not durably written, the run stops
+with zero Chat side effects. After the new Chat is bound, the ordinary tab gate
+applies to all later project writes. The account-browser controller also requires
+`--new-chat-local-work-status completed_and_verified`; without it, startup is
+rejected before a slot or browser permission is issued.
 
 Before formal preflight, `startup-diagnostics` reports exactly one first
 failure from caller-observed facts: stable implementation identity, initialized

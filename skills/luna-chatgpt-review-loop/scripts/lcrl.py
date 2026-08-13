@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 103
-SKILL_REVISION = "2026-08-13.60"
+CONTROLLER_VERSION = 104
+SKILL_REVISION = "2026-08-13.61"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 BINDING_REGISTRY_VERSION = 1
@@ -906,6 +906,31 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
     ).strip()
     if new_chat_authorization_raw and args.operation != "startup":
         raise LCRLError("new Chat provisioning authorization requires a startup slot")
+    new_chat_local_work_status = str(
+        getattr(args, "new_chat_local_work_status", "") or ""
+    ).strip()
+    if new_chat_local_work_status and not new_chat_authorization_raw:
+        raise LCRLError(
+            "new Chat local-work status requires a provisioning authorization"
+        )
+    if (
+        new_chat_authorization_raw
+        and new_chat_local_work_status != "completed_and_verified"
+    ):
+        return {
+            "ok": True,
+            "action": "account_browser_new_chat_local_work_required",
+            "slot_acquired": False,
+            "browser_skill_read_allowed": False,
+            "browser_runtime_initialization_allowed": False,
+            "provisioning_home_navigation_allowed": False,
+            "new_automation_allowed": False,
+            "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+            "registry": str(gate_path),
+            "user_status": "正在开发",
+            "user_message": "必须先完成并验证第一项真实项目改动，才能创建新的评审 Chat。",
+            "user_next_choice": "继续完成当前最小本地改动；无需打开浏览器。",
+        }
     new_chat_authorization_id = (
         hashlib.sha256(new_chat_authorization_raw.encode("utf-8")).hexdigest()
         if new_chat_authorization_raw else "none"
@@ -8049,6 +8074,11 @@ def build_parser() -> argparse.ArgumentParser:
     acquire_account_browser_slot.add_argument(
         "--new-chat-authorization-id",
         help="当前用户一次性授权新建唯一 reviewer Chat 的稳定身份",
+    )
+    acquire_account_browser_slot.add_argument(
+        "--new-chat-local-work-status",
+        choices=("completed_and_verified",),
+        help="新建 reviewer Chat 前第一项真实项目改动已经完成并验证",
     )
     acquire_account_browser_slot.add_argument(
         "--operation", required=True, choices=sorted(VALID_ACCOUNT_BROWSER_OPERATIONS),

@@ -13,16 +13,22 @@
 
 ## Provision exactly once
 
-1. 工作区预检后，用当前任务 identity、尚无 conversation id 的稳定占位 reviewer identity、
+1. 工作区预检后，先在当前项目完成第一项真实、最小的本地改动并运行最小验证。必须确认目标
+   文件已经落盘；随机写入探针不能代替真实项目修改。若宿主要求审批、改动未落盘或验证失败，
+   必须在读取 Browser Skill、取得账户名额、初始化浏览器或创建 Chat 前停止，保持零 Chat 副作用。
+   不得让协调任务代替审批，也不得为了通过检查写无关文件。
+2. 上述本地阶段完成后，用当前任务 identity、尚无 conversation id 的稳定占位 reviewer identity、
    `operation=startup` 和当前用户授权正文的稳定 `--new-chat-authorization-id` 取得账户名额。
+   同一调用必须带 `--new-chat-local-work-status completed_and_verified`；缺少时控制器返回
+   `account_browser_new_chat_local_work_required`，且不占名额、不允许 Browser Skill 或运行时。
    只有返回同时包含 `slot_acquired=true`、`browser_runtime_initialization_allowed=true` 与
    `provisioning_home_navigation_allowed=true` 才初始化当前任务的浏览器。若该浏览器没有
    ChatGPT 标签，只可打开一次控制器返回的 `provisioning_home_url`，再只读检查登录状态和
    首页可用性。空标签列表不代表浏览器能力缺失；不得释放 startup 名额后改走健康探测。
    相同授权身份释放后不能再次取得开页许可，另一个任务也不能复用。
-2. 生成一条简短初始化消息，包含项目名称、开发目标、评审角色、证据边界和“后续正式
+3. 生成一条简短初始化消息，包含项目名称、开发目标、评审角色、证据边界和“后续正式
    请求将另行提交”。初始化消息不计入正式回合，也不能被当作 PASS/REVISE 结果。
-3. 通过可见 UI 只创建一个 Chat，并只发送一次初始化消息。发送结果不确定时只在原标签
+4. 通过可见 UI 只创建一个 Chat，并只发送一次初始化消息。发送结果不确定时只在原标签
    协调可见回执，禁止再建 Chat 或重发。
    浏览器调用的状态必须按工具事实判断，不能按耗时猜测：`completed` 且返回预期后置条件
    （例如 composer 已填充、发送按钮 `enabled=true`）就是成功，即使耗时十秒，也不得称为
@@ -31,7 +37,7 @@
    **pre-send** 步骤；修正后的调用完成且后置条件成立时必须继续。只有正确调用明确超时/失败，
    或后置条件无法验证，才可报告浏览器不可用；发送动作一旦可能发生则改走原标签回执协调，
    绝不盲目重试。
-4. 等初始化回复完整结束后，从 URL 捕获新的 conversation id；再用 `user.openTabs()` 的
+5. 等初始化回复完整结束后，从 URL 捕获新的 conversation id；再用 `user.openTabs()` 的
    当前列表唯一匹配该 URL，保存 `providerTabId`。不得把运行期数字 `Tab.id` 当成持久身份。
    Codex 内置浏览器可能先显示 `https://chatgpt.com/c/WEB:<uuid>`；这是平台临时路由身份，
    **不是 canonical conversation URL**，不得传给 `init` 或 `bind-browser-tab`。出现该形式时，
@@ -41,12 +47,12 @@
    重发初始化消息或要求用户在两个身份之间选择。
    若 agent 刚创建且仍控制该标签时平台暂不暴露 `providerTabId`，不得失败后再建 Chat；只可
    为这一个已授权新 Chat 用 `pending_handoff` 和 `--provisioned-chat` 建立临时绑定。
-5. 运行正常的自动预检与 `init`，随后调用 `bind-browser-tab` 保存 browser binding、固定 URL
+6. 运行正常的自动预检与 `init`，随后调用 `bind-browser-tab` 保存 browser binding、固定 URL
    以及真实 `providerTabId`，或上述唯一允许的 `pending_handoff`。初始化 request/response
    identity 单独保存为启动证据。
-6. 读取新 Chat 当前可见推理标签。若已经是“极高”，调用 `confirm-review-mode` 并开始第一
-   个正式开发/评审回合；否则停在项目写入和正式提交前，只请求用户完成一次可见选择。
-7. 进入正式循环后，这个 Chat 与标签遵守普通固定绑定合同；任何错误都不能授权替代 Chat。
+7. 读取新 Chat 当前可见推理标签。若已经是“极高”，调用 `confirm-review-mode` 并提交刚才已
+   完成本地验证的第一轮结果；否则停在正式提交和后续项目写入前，只请求用户完成一次可见选择。
+8. 进入正式循环后，这个 Chat 与标签遵守普通固定绑定合同；任何错误都不能授权替代 Chat。
    首次正式提交后，离开当前浏览器控制回合前必须把同一标签设为 `handoff`。第一次受权等待
    检查按唯一固定 URL 重新认领它；`user.openTabs()` 暴露真实 `providerTabId` 后，在同一个
    token、等待任务 ID 和读 lease 下先调用 `promote-browser-tab-binding`，再重新授权读取。
@@ -60,7 +66,7 @@
    request identity；否则失败关闭。此路径只恢复既有 conversation，不发送、不创建 Chat、
    不改 URL，也不保存本次数字句柄。
 
-8. 后续新一轮提交前，如果平台已把这个 provisioned Chat 的临时标签从两个标签列表同时
+9. 后续新一轮提交前，如果平台已把这个 provisioned Chat 的临时标签从两个标签列表同时
    清理，不得直接 `tabs.new()` 后发送。原 state 必须仍处于 `review_submit_pending`，持有
    同一 browser、同一 conversation、`provisioned_chat=true` 与
    `provider_tab_id=pending_handoff`，且本轮尚无 request identity。先调用

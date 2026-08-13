@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0-alpha.51 - 2026-08-13
+
+- Packages Controller 104 / Skill revision `2026-08-13.61`.
+- Changes explicit one-time new-reviewer-Chat startup ordering: the implementation
+  task must first complete and minimally verify one real project change. Only then
+  may it read the Browser Skill, acquire an account slot, or create the Chat.
+- A random workspace probe remains a directory check only. If the host asks for
+  approval or the real edit is not durably written, the run stops before browser
+  startup with zero Chat side effects. Existing fixed-Chat recovery is unchanged.
+- The account-browser gate now requires
+  `--new-chat-local-work-status completed_and_verified` for one-time new-Chat
+  provisioning. Missing status receives no slot or browser permission.
+- Keeps Public Beta false. This is a packaged workflow contract and local
+  regression, not proof that Codex Desktop grants noninteractive write capability.
+
 ## 0.2.0-alpha.50 - 2026-08-13
 
 - Packages Controller 103 / Skill revision `2026-08-13.60` after the clean C27

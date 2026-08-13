@@ -951,9 +951,19 @@ class PackageTests(unittest.TestCase):
             "--browser-reopen-lease-id",
             "--new-chat-authorization-id",
             "provisioning_home_navigation_allowed=true",
+            "--new-chat-local-work-status completed_and_verified",
+            "account_browser_new_chat_local_work_required",
+            "第一项真实、最小",
+            "零 Chat 副作用",
         ):
             self.assertIn(requirement, skill)
             self.assertIn(requirement, provisioning)
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("first real, minimal project change", protocol)
+        self.assertIn("zero Chat side effects", protocol)
+        self.assertIn("temporary workspace probe is insufficient", protocol.lower())
 
     def test_completed_provisioning_step_is_not_misclassified_as_unresponsive(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")

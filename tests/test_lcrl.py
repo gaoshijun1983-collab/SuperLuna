@@ -415,6 +415,7 @@ class ControllerTests(unittest.TestCase):
                 implementation_thread_id="implementation-c10",
                 reviewer_thread_id="pending-superluna-c10",
                 new_chat_authorization_id=authorization_id,
+                new_chat_local_work_status="completed_and_verified",
                 operation="startup", registry=str(registry),
                 at="2026-08-12T08:00:00Z",
             ))
@@ -430,6 +431,7 @@ class ControllerTests(unittest.TestCase):
                 implementation_thread_id="implementation-c10",
                 reviewer_thread_id="pending-superluna-c10",
                 new_chat_authorization_id=authorization_id,
+                new_chat_local_work_status="completed_and_verified",
                 operation="startup", registry=str(registry),
                 at="2026-08-12T08:00:00Z",
             ))
@@ -447,6 +449,7 @@ class ControllerTests(unittest.TestCase):
                 implementation_thread_id="implementation-c10",
                 reviewer_thread_id="pending-superluna-c10",
                 new_chat_authorization_id=authorization_id,
+                new_chat_local_work_status="completed_and_verified",
                 operation="startup", registry=str(registry),
                 at="2026-08-12T08:03:02Z",
             ))
@@ -454,6 +457,26 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(repeated["action"], "account_browser_provisioning_already_used")
             self.assertFalse(repeated["slot_acquired"])
             self.assertFalse(repeated["provisioning_home_navigation_allowed"])
+
+    def test_explicit_new_chat_cannot_start_before_real_local_work_is_verified(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            result = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation-c34-regression",
+                reviewer_thread_id="pending-superluna-c34",
+                new_chat_authorization_id="user-request-c34-new-reviewer-chat",
+                operation="startup", registry=str(registry),
+                at="2026-08-13T01:00:00Z",
+            ))
+
+            self.assertEqual(
+                result["action"], "account_browser_new_chat_local_work_required"
+            )
+            self.assertFalse(result["slot_acquired"])
+            self.assertFalse(result["browser_skill_read_allowed"])
+            self.assertFalse(result["browser_runtime_initialization_allowed"])
+            self.assertFalse(result["provisioning_home_navigation_allowed"])
+            self.assertFalse(registry.exists())
 
     def test_new_chat_authorization_is_rejected_outside_startup(self):
         with tempfile.TemporaryDirectory() as directory:

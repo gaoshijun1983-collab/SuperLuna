@@ -44,6 +44,13 @@ Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通�
 状态或 composer 可用都不能单独证明对话记录限流已经解除。该共享门
 只能协调本机任务，无法证明另一台电脑没有同时访问；跨设备同时运行仍由用户避免。
 
+若当前用户明确授权本轮创建一个全新 reviewer Chat，启动顺序必须保持简单：**先在项目中完成
+并验证第一项真实、最小的本地改动，再取得账户名额、初始化浏览器和创建 Chat**。随机临时文件
+只能证明目录可写，不能证明宿主允许当前任务修改真实项目文件。第一项改动若触发宿主审批、
+没有实际落盘或不能完成最小验证，本轮必须在读取 Browser Skill、初始化浏览器或创建 Chat 前
+停止；不得先留下孤儿 Chat，也不得要求协调任务代替批准。已有固定 reviewer Chat 的恢复和
+可用性预检仍按下文原合同执行。
+
 全新实现任务的内置浏览器可能没有任何可认领标签。无新 Chat 授权时，只有当前 lease 是
 `health_probe` 且控制器返回 `health_probe_home_navigation_allowed=true`，才允许新建一个受控
 标签并导航一次精确 `https://chatgpt.com/`；该页面本身不是健康证明，必须继续核验侧栏或对话
@@ -176,6 +183,12 @@ python -B <skill-root>/scripts/lcrl.py workspace-preflight \
    缺失、不可写、校验失败或探针无法清理时，必须在初始化浏览器、创建/打开 Chat、发送消息
    或创建 state **之前**停止；不得先留下孤儿 Chat 再请求目录权限。
 
+   当前授权包含“创建全新 reviewer Chat”时，工作区探针通过后还必须先完成本轮第一项真实、
+   最小、可验证的项目改动，并确认目标文件已经落盘且最小验证通过。此时仍不得读取 Browser
+   Skill、取得浏览器名额、初始化浏览器或创建 Chat。宿主若把该文件改动置为等待审批，立即
+   停止且保持零 Chat 副作用；目录探针不能替代这项真实写入证明。只有该本地阶段已经完成，
+   才继续下面的新 Chat provisioning。使用用户已有固定 Chat 时不增加这项启动改动要求。
+
    工作区通过后才取得机器级共享名额；浏览器 Skill 的读取、运行时连接、说明、标签、页面和
    截图都属于受控浏览器启动，不得用“尚未打开网页”绕过：
 
@@ -191,9 +204,12 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
 
 ```text
 --new-chat-authorization-id <当前用户授权或委派正文的稳定身份>
+--new-chat-local-work-status completed_and_verified
 ```
 
-只有同一返回同时包含 `slot_acquired=true` 与
+缺少 `--new-chat-local-work-status completed_and_verified` 时，控制器必须返回
+`account_browser_new_chat_local_work_required`，且不读取 Browser Skill、不占账户名额、不创建
+Chat。只有同一返回同时包含 `slot_acquired=true` 与
 `provisioning_home_navigation_allowed=true`，才可在空标签情况下打开一次返回的
 `provisioning_home_url`。这个授权在机器共享门中只消费一次；释放名额后再次使用相同授权身份、
 另一个任务复用它或非 `startup` 操作携带它都会失败关闭。
@@ -235,7 +251,8 @@ python -B <skill-root>/scripts/lcrl.py acquire-account-browser-slot \
    修正后完成且后置条件成立就必须继续。正确调用真实超时或发送是否发生不确定时，才按同标签
    协调合同处理，不能盲目重试、换 Chat 或泛化为浏览器能力缺失。
 3. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
-   一次性新 Chat 授权，先按 `browser_chat_provisioning.md` 创建并初始化唯一 reviewer
+   一次性新 Chat 授权，先确认上述第一项真实本地改动及其最小验证已经完成，再按
+   `browser_chat_provisioning.md` 创建并初始化唯一 reviewer
    conversation；初始化消息不计入正式回合。新建对话若暂时显示 `/c/WEB:<uuid>`，该值只是
    平台临时路由，禁止写入 state。必须从同一页面/侧栏唯一解析真实 `/c/<conversation-id>`，
    在原标签核验初始化请求与回复后才可 `init`；不得新建第二个 Chat 或要求用户二选一。
@@ -268,13 +285,14 @@ python -B <skill-root>/scripts/lcrl.py browser-startup-plan \
    或总体目标完成才允许结束。
    没有这种持久状态时，认领该现有标签，也就是当前实现任务浏览器中用户已有的目标 Chat，并记录 URL 中的
    conversation id；只有身份含糊或需要用户选择现有 Chat 时才请求用户决定。
-5. 在任何项目写入和正式发送之前，核验该标签可读、URL 仍是绑定 Chat、页面主体确为
+5. 对已有固定 Chat，在任何项目写入和正式发送之前，核验该标签可读、URL 仍是绑定 Chat、页面主体确为
    ChatGPT。网络错误或登录页不允许先开发二十分钟后才发现无法提交。既有 conversation 的
    内容证据使用稳定消息结构（例如真实 `[data-message-author-role]`、`[data-message-id]` 或
    conversation article 节点）和固定 URL；不得搜索“你说：”“ChatGPT 说：”等本地化快照文案。
    composer 可用性必须读取实际 textbox/contenteditable 与发送控件的可交互/disabled 状态，
-   不得以 DOM snapshot 是否含 `[active]` 字符串判断。推理档位仍需在可见界面或无障碍按钮上
-   真实确认“极高”；仅对整个 DOM 做 `includes("极高")` 既不能证明也不能否定该档位。
+   不得以 DOM snapshot 是否含 `[active]` 字符串判断。全新 Chat 则只允许上述已经验证的第一项
+   本地改动作为启动例外；创建并绑定后，后续项目写入同样受本条约束。推理档位仍需在可见界面
+   或无障碍按钮上真实确认“极高”；仅对整个 DOM 做 `includes("极高")` 既不能证明也不能否定该档位。
 6. 用户亲眼确认该 Chat 当前显示所需推理模式。以 `in_app_browser` 记录确认；
    SuperLuna 不替用户切换。
 7. 运行只读能力预检：
