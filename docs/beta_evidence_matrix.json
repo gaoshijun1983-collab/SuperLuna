@@ -1,0 +1,39 @@
+{
+  "contract_version": "1",
+  "candidate_version": "0.2.0-alpha.63",
+  "candidate_commit": "e24edd00ec3775108e283460d4b5b5625eae8c73",
+  "required_consecutive_cycles": 10,
+  "gates": {
+    "codex_host_same_turn_continuation_enforcement": {
+      "passed": false,
+      "evidence_scope": "real_device",
+      "evidence": []
+    },
+    "ten_consecutive_real_project_cycles_on_frozen_candidate": {
+      "passed": false,
+      "evidence_scope": "real_device",
+      "cycles": []
+    },
+    "windows_waiting_check_platform_automation": {
+      "passed": false,
+      "evidence_scope": "real_device",
+      "evidence": []
+    },
+    "windows_in_app_browser_full_loop": {
+      "passed": false,
+      "evidence_scope": "real_device",
+      "evidence": []
+    },
+    "macos_in_app_browser_version_matrix": {
+      "passed": false,
+      "evidence_scope": "real_device",
+      "evidence": []
+    },
+    "real_browser_network_and_rate_limit_recovery": {
+      "passed": false,
+      "evidence_scope": "real_device",
+      "evidence": []
+    }
+  },
+  "ready": false
+}

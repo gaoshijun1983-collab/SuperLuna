@@ -34,9 +34,11 @@ intervention.
 ## Completed and verified
 
 - Source candidate: `0.2.0-alpha.63`, Controller 119, Skill `2026-08-14.76`.
-- Repository tests: 346/346; controller tests: 250/250.
+- Repository tests: 353/353; controller tests: 250/250.
 - Controller selftest: 15/15.
 - Milestone, Skill, and plugin validators pass.
+- Beta evidence matrix and CI truth validator are present; all six real-device
+  gates remain explicitly blocked and cannot be promoted by local/mock evidence.
 
 ## Locked decisions
 
@@ -60,6 +62,7 @@ intervention.
 - Skill: `skills/luna-chatgpt-review-loop/SKILL.md`
 - Tests: `tests/test_lcrl.py`, `tests/test_package.py`
 - Release truth: `release/alpha_release_report.json`
+- Beta evidence truth: `docs/beta_evidence_matrix.json`
 - Decision index: `DECISION_REGISTER.json`
 
 ## Idea backlog
@@ -69,8 +72,9 @@ intervention.
 
 ## Next decision point
 
-Complete repository validation, deploy the same Skill revision locally, then
-start a clean bounded reviewer Chat after cooldown before packaging Alpha 63.
+Freeze the next candidate commit, then collect the six real-device Beta gates
+against that exact commit. Run `scripts/validate_beta_evidence.py --require-ready`
+before any Public Beta declaration.
 
 ## Do not repeat
 

@@ -119,6 +119,13 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 The Alpha core remains feature-frozen after this transport correction. Progress
 toward Beta means real-cycle and platform evidence, not more orchestration.
 
+The canonical Beta evidence checklist is `docs/beta_evidence_matrix.json`.
+`scripts/validate_beta_evidence.py` verifies that all evidence is real-device,
+bound to the exact frozen candidate, and consistent with the release report.
+Normal CI verifies truthful blocked/ready reporting; a release decision must run
+the validator with `--require-ready`, which remains failing until all six gates
+and ten unique consecutive cycles are complete.
+
 ## 0.3: validated usability and recovery
 
 - Refine plain-language status and user recovery for expired login, changed Chat,
