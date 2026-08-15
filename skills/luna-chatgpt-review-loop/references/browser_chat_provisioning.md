@@ -6,6 +6,10 @@
 “新审阅对话”或等价目标时，才形成一次性新 Chat 授权。该授权只属于当前实施任务：只创建
 一个 Chat，不得在失败、重试、下一回合或上下文压缩后再次创建，也不得扩展成无限建 Chat。
 
+这里约束的是新任务的首次 provision。正式运行中只有两种独立、受控的换卷例外：当前 Chat
+已完成 8 次正式评审，或当前 Chat 出现真实限流。例外必须由控制器生成唯一 rollover 授权，
+先永久归档旧 Chat，再只创建一个替代 Chat；普通失败和重试仍不允许建新 Chat。
+
 一次性授权允许通过 Codex 内置浏览器可见 UI 创建一个 ChatGPT 网页 conversation，并发送
 一条不含敏感信息的初始化消息。它不授权创建第二个 Codex 任务、切换评审通道、安装依赖、
 发布项目或扩大项目写入范围。不得自动切换模型或推理档位；只有新 Chat 可见标签已经是
@@ -68,7 +72,8 @@
    identity 单独保存为启动证据。
 8. 读取新 Chat 当前可见推理标签。若已经是“极高”，调用 `confirm-review-mode` 并提交刚才已
    完成本地验证的第一轮结果；否则停在正式提交和后续项目写入前，只请求用户完成一次可见选择。
-9. 进入正式循环后，这个 Chat 与标签遵守普通固定绑定合同；任何错误都不能授权替代 Chat。
+9. 进入正式循环后，这个 Chat 与标签遵守当前活动卷绑定合同。只有控制器确认已达到 8 次正式
+   评审上限，或账户门记录了该 Chat 的真实限流，才授权唯一替代 Chat；其他错误不能授权替代。
    首次正式提交后，离开当前浏览器控制回合前必须把同一标签设为 `handoff`。第一次受权等待
    检查按唯一固定 URL 重新认领它；`user.openTabs()` 暴露真实 `providerTabId` 后，在同一个
    token、等待任务 ID 和读 lease 下先调用 `promote-browser-tab-binding`，再重新授权读取。
@@ -82,13 +87,16 @@
    request identity；否则失败关闭。此路径只恢复既有 conversation，不发送、不创建 Chat、
    不改 URL，也不保存本次数字句柄。
 
-10. 后续新一轮提交前，如果平台已把这个 provisioned Chat 的临时标签从两个标签列表同时
-   清理，不得直接 `tabs.new()` 后发送。原 state 必须仍处于 `review_submit_pending`，持有
+10. 后续新一轮提交前，分别统计两个当前标签列表中的精确 URL 匹配数。若 App 重启后正确
+   Chat 已唯一可见但 browser id 改变，不得因为旧身份不符而结束；若两个列表都没有匹配，也
+   不得直接 `tabs.new()` 后发送。原 state 必须仍处于 `review_submit_pending`，持有
    同一 browser、同一 conversation、`provisioned_chat=true` 与
    `provider_tab_id=pending_handoff`，且本轮尚无 request identity。先调用
-   `authorize-browser-submission-reopen` 并提供当前 submission fingerprint、当前 browser id 与
-   `submission` 账户名额 lease；只有取得
-   `browser_submission_reopen_authorized` 与十分钟 lease 后，才可打开 canonical URL 一次。
+   `authorize-browser-submission-reopen` 并提供当前 submission fingerprint、当前 browser id、
+   `--user-exact-url-count`、`--controlled-exact-url-count` 与 `submission` 账户名额 lease；只有
+   取得 `browser_submission_reopen_authorized` 与十分钟 lease 后才可继续。返回
+   `reuse_existing_exact_url=true` 时认领唯一现有标签且不得导航；返回
+   `open_canonical_url_once=true` 时才可打开 canonical URL 一次；任一列表多重匹配均停止。
    发送前复核精确 URL、登录状态、可见“极高”和正文身份；
    `confirm-review-submission` 必须带回 `--browser-reopen-lease-id` 与同一 `--browser-id`，控制器只在进入等待状态时
    提交受权 browser 换绑并清除 lease。普通用户标签、已提升 provider identity、旧 fingerprint、换成第三个 browser 或缺少 lease 证明
@@ -109,9 +117,10 @@
    即使固定标签始终可见，也必须在发送前执行相同的一次性发送授权；此时使用当前
    `turn_entry` lease，不得把“无需重开”解释成“无需控制器授权”。
 
-普通用户选择并已绑定的固定 Chat 若在后续回合也同时消失于两个当前标签列表，遵循通用
-`canonical_url_reopen_allowed` 合同：只能在受权 occurrence 内打开原 URL 一次并重新核验，
-不能创建替代 Chat、改变 conversation 或在仍有精确 URL 对象时重复开标签。
+普通用户选择并已绑定、仍处于活动卷且未退休的 Chat 在后续回合也遵循通用
+`canonical_url_reopen_allowed` 合同：若新浏览器实例已有唯一精确 URL 就原地认领；只有两个
+列表都没有匹配时，才可在受权 occurrence 内打开原 URL 一次。不能创建替代 Chat、改变
+conversation 或在仍有精确 URL 对象时重复开标签。
 
 ## New implementation task startup handoff
 

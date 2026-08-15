@@ -21,11 +21,15 @@ This directory is the dedicated source workspace for the SuperLuna Codex plugin 
 
 ## Development workflow
 
-1. Read `README.md`, `docs/ROADMAP.md`, `release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md`, and the relevant source/tests before changing behavior.
+1. Read `README.md`, `docs/ROADMAP.md`, `release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md`, `DECISION_REGISTER.json`, and the relevant source/tests before changing behavior. The register indexes locked decisions; its cited sources remain authoritative.
 2. Add a regression test for every bug before or with the fix.
 3. Keep Skill instructions concise; put detailed protocol material in `skills/luna-chatgpt-review-loop/references/`.
 4. Keep plugin, Python, lockfile, release report, README, controller registry, and Skill revision metadata synchronized.
 5. Never claim real macOS/Windows App capability from mocks or local unit tests.
+6. After an explicit decision is approved, rejected, superseded, or narrowed,
+   update `DECISION_REGISTER.json` and run the shared
+   `scripts/validate_decision_register.py --project-root .` resolved from the
+   active Codex home; never hard-code a user-home path.
 
 ## Two-location Git workflow
 

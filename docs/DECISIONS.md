@@ -12,7 +12,13 @@ This file records confirmed product boundaries. It is not a release claim.
 
 ## Formal reviewer transport
 
-- New runs use one user-selected ChatGPT conversation in Codex's in-app browser.
+- New runs use one active user-selected ChatGPT conversation at a time in
+  Codex's in-app browser.
+- A reviewer conversation is bounded to eight formal reviews. Before a ninth
+  review, or immediately after a real rate-limit notice, retire it permanently
+  and create exactly one replacement conversation with compact current context.
+  Never reopen or health-probe a retired conversation, and never keep two
+  reviewer conversations active in parallel.
 - Bind the conversation id from the URL and claim the same tab for the run. Titles
   and current focus are not identity.
 - The implementation task owns submission, waiting, reply retrieval, and
@@ -21,15 +27,26 @@ This file records confirmed product boundaries. It is not a release claim.
   transports mid-cycle or duplicate a submission.
 - Before project writes and every send, verify the bound page is readable and is
   still the same Chat.
+- After an in-app-browser restart, submission recovery must count the fixed
+  Chat's exact URL in both current tab listings. Claim one visible exact match
+  without navigation; open the saved URL once only when both counts are zero;
+  reject ambiguity. Commit a changed browser identity only after the existing
+  one-shot send gate and submission confirmation succeed.
 
 ## Waiting and recovery
 
 - Unbounded recurring execution is retired. Only a receipt/reply wait may own one
   future identity-gated check.
+- When a due wait claims Chat-read authority, that same platform wait must first
+  move to the claim-expiry recovery time and be confirmed in state. Browser read
+  remains denied until confirmation. If the occurrence exits before reading,
+  the same wait recovers the expired claim; no second scheduler is created.
 - A healthy page is read without refresh. A network/load failure schedules one
   check 180 seconds later, which may reload the same tab exactly once.
 - A “requests are too frequent” notice is not a network error: perform no reload,
-  history read, or send; back off 15, then 30, then 60 minutes.
+  history read, or send; retire that reviewer conversation, respect the shared
+  cooldown, then create one replacement conversation instead of probing the old
+  history again.
 - Leaving the waiting phase retires the check and invalidates queued occurrences.
 - An uncertain send is reconciled in the same Chat and is never blindly resent.
 

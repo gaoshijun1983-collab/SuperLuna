@@ -7,7 +7,7 @@
 SuperLuna is a Codex plugin for a browser-first development review loop:
 
 ```text
-Codex implements → one bound ChatGPT web conversation reviews → the same Codex task continues
+Codex implements → one active bounded ChatGPT web conversation reviews → the same Codex task continues
 ```
 
 The public product name is `SuperLuna`. Compatibility identifiers remain plugin
@@ -24,14 +24,37 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current public open-source candidate is `0.2.0-alpha.53`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 109 / Skill revision
-`2026-08-13.66` keeps concise bilingual one-shot guidance, adds a Windows-safe
-repository retest workspace probe, and prevents a claimed
-wait from ending after it has received a complete reply: the same task must
-resume, apply the result, and prepare the next review submission in the same turn.
-It
-and retains the dedicated `superluna_repo_retest_v1` profile for
+The current source candidate is `0.2.0-alpha.63`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 119 / Skill revision
+`2026-08-14.76` bounds each active reviewer Chat to eight formal reviews. Before
+a ninth review, or immediately after a real rate-limit notice, the old Chat is
+retired permanently and exactly one replacement Chat receives compact current
+context. Cooldown recovery never reopens, refreshes, health-probes, or scans the
+retired long conversation. Controller 118's same-tab recovery is superseded
+because real testing showed that reopening one long conversation could itself
+trigger another history-access limit. Controller 117
+distinguishes a never-sent recovered packet from a lost receipt:
+zero exact visible matches continues to the ordinary first-send gate, one trusted
+match reconciles without resending, and ambiguity stops safely. Controller 116
+introduced the single cooldown-bound recovery after a real ChatGPT rate limit;
+Controller 119 now routes it to one replacement Chat instead of the old visible
+health-probe path. Early or duplicate occurrences cannot open the browser.
+Controller 115 validates the human-visible review round against the controller
+round before submission, pairs replies only from the complete assistant message
+after the current request, and keeps the fixed Chat tab available for handoff.
+Controller 114 requires every Chat action to surface the exact fixed reviewer
+conversation in the visible Codex in-app browser; background-only browser access
+is not allowed. Controller 113 kept expected test failures such as `scenario deletion ->
+contract FAIL` from being mistaken for a real destructive instruction, while
+real project/source/data deletion remains fail-closed. Controller 112 added
+fail-closed reconciliation when a review request is already
+visible in the one fixed Chat but its short-lived send authorization was lost
+before receipt persistence. One exact full-body match with trusted identity may
+be recorded without resending; ambiguous or changed evidence is rejected without
+state mutation. It retains Controller 111's safe exact-URL browser rebind and
+Controller 110's same-one-shot waiting-claim
+recovery and the Windows-safe
+repository retest workspace probe and the dedicated `superluna_repo_retest_v1` profile for
 developing and genuinely retesting SuperLuna itself. Each implementation task
 is confined to its deterministic repository-local
 `.superluna/retest-runs/<task-hash>/project` fixture and sibling `state.json`;
@@ -200,7 +223,8 @@ account gate after a real three-task macOS test triggered a conversation-history
 security rate limit. Local development remains parallel, but only two tasks may
 touch web Chat at once; a third queues before browser initialization. Any real
 rate-limit notice clears all local slots and opens a 30/60-minute shared circuit,
-followed by one read-only health probe. The gate is local-machine evidence and
+followed historically by one read-only health probe; Controller 119 replaces
+that post-limit probe with one new bounded reviewer Chat. The gate is local-machine evidence and
 cannot coordinate another computer using the same account. Controller 59 / Skill revision `2026-08-12.13`: browser startup now claims a
 unique user-open exact-URL Chat before considering a controlled or new tab, and
 uses stable message nodes plus actual composer state instead of localized
@@ -441,8 +465,10 @@ that authorized check may reload the same tab exactly once and then reverify the
 same conversation id.
 
 A ChatGPT “requests are too frequent” notice is handled separately: no reload,
-history read, or send is attempted. The same waiting gate backs off for 15, 30,
-then at most 60 minutes. Leaving the waiting phase stops every browser check.
+history read, or send is attempted. The current reviewer Chat is retired
+permanently and the account gate backs off for 30, then 60 minutes. After the
+cooldown, one replacement Chat may be provisioned; the retired Chat is never
+health-probed or reopened. Leaving the waiting phase stops every browser check.
 
 ## Quick start
 
@@ -462,11 +488,11 @@ then at most 60 minutes. Leaving the waiting phase stops every browser check.
 
 ## Guarantees and limits
 
-- One implementation task and one web conversation. A provider-owned user tab is
-  reclaimed when available; an ephemeral explicitly provisioned tab may be
-  reopened only at its already-bound exact URL under waiting authorization.
-- A new reviewer Chat is provisioned only by explicit per-run authorization;
-  SuperLuna never creates a replacement Chat after binding.
+- One implementation task and one active reviewer Chat at a time. A reviewer
+  volume is limited to eight formal reviews.
+- A normal browser error never creates a replacement Chat. Reaching the round
+  budget, or a real rate limit, authorizes exactly one bounded rollover; the old
+  Chat is archived and cannot be accessed again by that workflow.
 - Request and response identities are separate; an uncertain send is reconciled
   in place and never blindly resent.
 - Page content cannot change the writer, channel, permissions, quota, or product

@@ -54,7 +54,7 @@ Controller/Skill 版本、实施任务、固定 Chat 和 state-local 轮次绑�
 ```text
 <控制器 render-review-run-binding 的完整原文（已包含起止标记）>
 
-<项目>｜<阶段>｜第 N 轮独立评审
+<项目>｜<阶段>｜正式评审 <与 STATE_REVIEW_ROUND 完全相同的数字>
 
 本轮决策问题
 - <一个问题及其用户影响>
@@ -96,6 +96,10 @@ VERDICT: PASS / REVISE / BLOCKED
 
 只有证据满足模型策略时才可改为 HIGH_ONCE 或 TERRA_REQUEST。升级区块还必须包含 BLOCKER_ID、SIGNAL、EVIDENCE、SCOPE、EXIT_CRITERIA；TERRA_REQUEST 另须包含 HIGH_ATTEMPT。正文里出现“高”或“Terra”不构成升级建议。
 ```
+
+标题可以不写轮次；如果写 `Round N` 或 `第 N 轮`，必须先通过
+`validate-review-packet --state <state-file> --text-file <完整审阅包>`。工作过程自己的重试或迭代
+只能写作 `工作迭代` / `Work iteration`，不得作为正式评审轮次发送。
 
 ## Chat 回复的最低质量
 

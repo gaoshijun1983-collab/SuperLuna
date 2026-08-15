@@ -13,8 +13,11 @@ When the current request explicitly authorizes a new reviewer Chat, SuperLuna
 creates exactly one through the visible in-app browser, sends one setup message,
 captures the resulting conversation/provider identity, and binds it. The setup
 exchange is not a formal review cycle. Without that explicit authorization the
-user selects an existing Chat. Recovery never creates a replacement Chat, and
-SuperLuna never changes the model/reasoning selector automatically.
+user selects an existing Chat. Ordinary browser recovery never creates a
+replacement Chat. The bounded-volume rule is the only exception: after eight
+formal reviews, or after a real rate limit, SuperLuna retires the old Chat and
+provisions exactly one replacement. It never changes the model/reasoning
+selector automatically.
 
 ## Several projects are active
 
@@ -59,9 +62,10 @@ then reverifies the same conversation before reading. No resend is authorized.
 Release the current shared browser slot with `rate_limited`. Do not click,
 reload, read conversation history, send, or probe another Chat. This clears all
 local slots and opens the machine-wide account circuit for 30 minutes; a
-consecutive notice uses 60 minutes. After cooldown, exactly one read-only health
-probe may run. Only a healthy probe closes the circuit and restores the two-slot
-limit. Per-run waiting recovery remains subordinate to this account-wide gate.
+consecutive notice uses 60 minutes. After cooldown, the retired Chat is not
+health-probed or reopened. Exactly one replacement Chat may be provisioned and
+bound before the unsent packet continues. Per-run waiting recovery remains
+subordinate to this account-wide gate.
 The local gate cannot coordinate another computer signed into the same account.
 
 ## Send result is uncertain

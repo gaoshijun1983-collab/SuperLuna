@@ -42,12 +42,15 @@ explicitly selected, host-authorized external project.
 By default the workflow never creates a Chat. One explicit user request for a
 new reviewer conversation authorizes exactly one visible browser Chat plus one
 initialization message, as defined in `browser_chat_provisioning.md`; that setup
-exchange is not a formal review cycle. The workflow never creates a replacement
-Chat, switches model/reasoning, or sends through a second transport. The user
-explicitly confirms the visible reviewer mode unless the new Chat already shows
-the required label.
-The user explicitly confirms the visible reviewer mode; an already-visible
-required label satisfies that confirmation without changing the selector.
+exchange is not a formal review cycle. Ordinary browser recovery never creates
+a replacement Chat. A bounded rollover is allowed only after eight formal
+reviews or a real rate limit; it retires the old Chat and provisions exactly one
+replacement with compact current context. The workflow never switches
+model/reasoning or sends through a second transport. The user explicitly
+confirms the visible reviewer mode unless the new Chat already shows the
+required label.
+An already-visible required label satisfies that confirmation without changing
+the selector.
 
 Every formal packet starts with the exact controller-rendered
 `[SUPERLUNA_REVIEW_RUN]` ... `[/SUPERLUNA_REVIEW_RUN]` block. Its trusted
@@ -140,6 +143,20 @@ For a `continuous` goal, transitions into the active `local_work`,
 `turn_completion_allowed=false`. The implementation task must perform that
 next action in the same turn. An active boundary, local milestone, or statement
 that the loop remains in progress is not permission to end the turn.
+
+When a visible submission attempt encounters the real ChatGPT history
+rate-limit notice, releasing its account slot as `rate_limited` is only the
+first half of recovery. While the state remains `review_submit_pending`,
+`schedule-submission-retry` persists one `submission_retry` wait at the shared
+account circuit's exact cooldown. Early or duplicate occurrences cannot open
+the browser or read Chat. The due occurrence retires itself before requesting one
+rollover-authorized `startup` with reviewer identity `none`. It provisions
+exactly one replacement reviewer Chat, binds its canonical identity, reconfirms
+the visible reasoning mode, and continues the original unsent submission. The
+rate-limited old Chat is permanently denied browser access; it is never reopened,
+refreshed, probed, or scanned. Another rate limit schedules exactly one
+replacement. This recovery kind never becomes a reply-reading wait and never
+uses a recurring rule.
 
 Every ordinary resumed turn with an existing state must run `guard --state
 <state> --reason turn_entry --implementation-thread-id <current-task-id>` as its first executable action, before project
@@ -273,12 +290,15 @@ binding. It must verify the exact URL, authenticated ChatGPT page, and current
 request identity before reading; it cannot send, create a Chat, change identity,
 or persist the new numeric handle.
 
-A later submission to that same provisioned `pending_handoff` Chat may also need
-one exact-URL reopen after both tab listings disappear. This is not a general
-browser fallback. It requires `review_submit_pending`, a matching current
+A later submission to the same fixed Chat may need exact-URL recovery when the
+app restarts. This is not a general browser fallback. The caller supplies the
+exact URL counts from both current tab listings. One visible match is claimed
+without navigation; two zero counts authorize one canonical open; any ambiguous
+count fails closed. Recovery requires `review_submit_pending`, a matching current
 submission fingerprint, no request identity, the still-confirmed browser Chat,
-and a short `browser_submission_reopen` lease bound to the current browser id. The caller re-verifies the exact
-conversation, authenticated page, visible Extreme label, and payload identity.
+and a short `browser_submission_reopen` lease bound to the current browser id.
+The caller re-verifies the exact conversation, authenticated page, visible
+Extreme label, and payload identity.
 The fresh pre-send gate atomically persists the matching lease and authorization
 revision; `confirm-review-submission` must consume both at the unchanged state
 revision. The reopen authorization or its revision alone is not proof. A normal
@@ -291,6 +311,18 @@ fingerprint, confirmed Extreme reviewer identity, and a live `submission`
 account slot bound to that reviewer. Confirmation must consume the stored
 authorization revision plus the same browser and account-slot identities.
 
+An already-visible request whose short-lived send authorization was lost may be
+reconciled without a resend. This recovery still requires the exact fixed Chat,
+a live submission slot, the matching browser-reopen lease, trusted request
+identity, exactly one full-body match, and a raw payload SHA-256 equal to the
+current submission fingerprint. The command never grants send authority and
+returns `resend_allowed=false`; ambiguity or drift is non-mutating and fail-closed.
+When the exact current packet has zero visible matches, the same controller gate
+returns `browser_submission_not_previously_sent` without mutating state and
+directs the caller to the existing one-shot first-send authorization. Missing
+identity is expected in that zero-match case and is never itself evidence that a
+request was sent.
+
 If any already-bound fixed Chat later disappears from both current browser
 listings, the same identity-gated occurrence may receive
 `canonical_url_reopen_allowed=true`. It may open only the stored canonical URL
@@ -302,10 +334,16 @@ exists in either listing.
 ## 4. One waiting gate
 
 Unconditional recurring heartbeat execution remains retired. A state may have
-one future waiting-check only while `review_receipt_pending` or
+one future reply waiting-check only while `review_receipt_pending` or
 `review_waiting`. One waiting phase uses one stable platform heartbeat id; every
 future occurrence receives a fresh controller token. There is no second
 scheduler.
+
+The separate `submission_retry` kind exists only while an automatic run is
+`review_submit_pending` and the shared account circuit is `rate_limited`. It
+uses the same one-shot identity fields but never claims a waiting-read lease or
+reads Chat. At most one reply wait or submission recovery can be active for a
+state.
 
 The Codex Desktop heartbeat must use one UTC occurrence formatted exactly as
 the controller's exact `platform_rdate` in `RDATE:YYYYMMDDTHHMMSSZ` form;
@@ -372,7 +410,21 @@ CLI. Browser runtime setup, tab listing/claiming, or DOM access before its saved
 acquisition, and the second authorization is a failed cycle; any content observed
 through that bypass must not be consumed or applied.
 
-For `browser_read_authorized`, inspect the same tab without a reload. If the
+Immediately after `waiting-check` claims a due occurrence, its first host action
+must move the same platform waiting task to the exact recovery RDATE returned by
+the controller. The caller then runs `confirm-waiting-recovery-arm` with that
+platform RDATE and the current waiting lease. Until that confirmation is persisted,
+`authorize-waiting-chat-read` denies browser initialization. The recovery RDATE is
+the current read-lease expiry: if the occurrence ends before a real read, the same
+one-shot task can recover the expired claim. Normal no-reply rearm replaces that
+reservation with the next token/RDATE, while a staged reply deletes it before
+consumption. This is one stable platform task, never a second scheduler.
+
+For `browser_read_authorized`, require `browser_surface_mode=visible_foreground`,
+`background_browser_access_allowed=false`, and
+`visible_browser_required_before_chat_action=true`; show the in-app browser pane,
+make the exact fixed Chat the visible active tab, and only then inspect the same
+tab without a reload. If the
 page reports a network/load failure, release the account slot and call
 `browser-network-observation --outcome network_error`. The controller preserves
 the stable waiting id, sets `browser_reload_same_tab_required`, and authorizes a

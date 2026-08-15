@@ -1,5 +1,116 @@
 # Changelog
 
+## 0.2.0-alpha.63 - 2026-08-14
+
+- Packages Controller 119 / Skill revision `2026-08-14.76`.
+- Limits each active reviewer Chat to eight formal reviews. A ninth submission
+  fails closed before browser access and requires exactly one replacement Chat.
+- A reviewer Chat that produces a real rate limit is permanently retired from
+  startup, submission, waiting-read, and health-probe access. The cooldown-bound
+  recovery now provisions one replacement Chat with compact current context;
+  it never reopens or scans the retired long conversation.
+
+## 0.2.0-alpha.62 - 2026-08-14
+
+- Packages Controller 118 / Skill revision `2026-08-14.75`.
+- A successful post-cooldown health probe can now atomically become the real
+  `startup`, `submission`, or `waiting_read` operation while retaining the same
+  lease and already-visible fixed Chat. The follow-up must inspect only the
+  conversation tail; a second browser initialization and full-history scan are
+  explicitly forbidden.
+- The rate-limit streak is cleared only after the continued real browser action
+  succeeds. If the apparently healthy page immediately rate-limits again, the
+  next cooldown escalates from 30 to 60 minutes instead of restarting at 30.
+
+## 0.2.0-alpha.61 - 2026-08-14
+
+- Packages Controller 117 / Skill revision `2026-08-14.74`.
+- Fixes a recovered, never-sent review packet being mistaken for an already-sent
+  request merely because no request identity exists. The fixed Chat is now
+  checked against the exact current packet: zero matches continues to the
+  existing first-send authorization, one trusted match uses no-resend receipt
+  reconciliation, and multiple matches remain fail-closed.
+
+## 0.2.0-alpha.60 - 2026-08-14
+
+- Packages Controller 116 / Skill revision `2026-08-14.73`.
+- Fixes a real submission rate limit leaving an automatic run idle in
+  `review_submit_pending`: SuperLuna now creates one exact cooldown-bound
+  recovery, blocks browser access before it is due, deletes the one-shot before
+  one visible health probe, and resumes the same unsent packet only after the
+  account is healthy. Another limit creates one replacement, never a recurring
+  rule.
+
+## 0.2.0-alpha.59 - 2026-08-14
+
+- Packages Controller 115 / Skill revision `2026-08-14.72`.
+- Rejects a review packet before browser submission when its human-visible
+  `Round N` or `第 N 轮` title disagrees with the controller-owned formal review
+  round. Historical round references later in the packet remain allowed.
+- Waiting reads now pair the complete assistant message after the current
+  request, distinguish a visible fragment from a genuinely absent reply, and
+  keep the one fixed reviewer Chat tab available for the next handoff instead
+  of closing every browser tab.
+
+## 0.2.0-alpha.58 - 2026-08-14
+
+- Packages Controller 114 / Skill revision `2026-08-14.71`.
+- Makes every authorized browser startup, submission, waiting read, and health
+  probe a visible-foreground action in the Codex in-app browser. The exact bound
+  reviewer Chat must be surfaced as the user-visible active tab.
+- Browser authorizations now declare `browser_surface_mode=visible_foreground`,
+  deny background browser access, and return the foreground conversation target.
+  Existing exact tabs are surfaced rather than duplicated.
+
+## 0.2.0-alpha.57 - 2026-08-14
+
+- Packages Controller 113 / Skill revision `2026-08-14.70`.
+- Fixes a natural-language review false positive where a test-contract failure
+  map such as `scenario deletion -> contract FAIL` was mistaken for an instruction
+  to delete real files or data.
+- Expected-failure mapping lines are ignored only by the high-impact action gate;
+  imperative deletion and external project, source, repository, production, or
+  user-data targets remain fail-closed.
+
+## 0.2.0-alpha.56 - 2026-08-14
+
+- Packages Controller 112 / Skill revision `2026-08-14.69`.
+- Adds a fail-closed browser receipt reconciliation path for a request that is
+  already visible in the one fixed reviewer Chat after its short-lived send
+  authorization was lost. The controller requires one exact full-body match,
+  the current payload SHA-256, trusted request identity, fixed Chat binding,
+  live submission slot, and the existing browser-reopen lease.
+- Successful reconciliation records the existing request and enters the normal
+  reply path with `resend_allowed=false`; ambiguous, changed, external, malformed,
+  or stale evidence leaves the state unchanged. This fixes the Round 15 NPC AI
+  deadlock without weakening the ordinary one-shot send gate.
+
+## 0.2.0-alpha.55 - 2026-08-13
+
+- Packages Controller 111 / Skill revision `2026-08-13.68`.
+- Fixes a submission deadlock after Codex Desktop restarts its in-app browser:
+  when the one bound reviewer Chat is already visible under a new browser id,
+  SuperLuna can now claim that unique exact-URL tab without navigating.
+- The same controller gate accepts both current tab-list counts, opens the saved
+  canonical URL only when both counts are zero, and rejects either list when it
+  contains multiple exact matches. The candidate browser id is committed only
+  after the existing send gate and submission confirmation succeed.
+- A live `turn_entry` lease is atomically replaced by the ten-minute recovery
+  lease, so completed implementation work cannot stop between local work and
+  review submission. Local tests do not count as real macOS/Windows proof.
+
+## 0.2.0-alpha.54 - 2026-08-13
+
+- Packages Controller 110 / Skill revision `2026-08-13.67`.
+- Repairs the one-shot waiting gap exposed by the NPC AI run: after a due wait
+  claims Chat-read authority, it must move that same platform wait to the claim
+  expiry and confirm the recovery arm before browser initialization is allowed.
+- If the occurrence ends before a real read, the same one-shot task can fire at
+  lease expiry, recover the stale claim, and continue without a second scheduler.
+- Persists the recovery lease/RDATE identity in state, rejects missing or stale
+  confirmation, and clears it on recovery, rearm, reply consumption, or exit from
+  the waiting phase. Local regressions do not count as real macOS/Windows proof.
+
 ## 0.2.0-alpha.53 - 2026-08-13
 
 - Packages Controller 109 / Skill revision `2026-08-13.66`.

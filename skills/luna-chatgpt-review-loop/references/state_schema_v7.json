@@ -12,6 +12,7 @@
     "confirmation",
     "capabilities",
     "review",
+    "reviewer_chat",
     "review_history",
     "browser_reply_observation",
     "browser_binding",
@@ -42,9 +43,13 @@
         "title",
         "waiting_check_token",
         "waiting_check_active",
+        "waiting_check_kind",
+        "waiting_check_account_registry",
         "waiting_check_automation_id",
         "waiting_check_claimed_id",
-        "waiting_check_expected_rdate"
+        "waiting_check_expected_rdate",
+        "waiting_check_recovery_armed_lease_id",
+        "waiting_check_recovery_armed_rdate"
       ],
       "properties": {
         "id": {"type": "string"},
@@ -84,6 +89,8 @@
           "description": "Identity of the single currently authorized future waiting-check occurrence; rotated before updating the stable platform heartbeat."
         },
         "waiting_check_active": {"type": "boolean"},
+        "waiting_check_kind": {"enum": ["none", "review_reply", "submission_retry"]},
+        "waiting_check_account_registry": {"type": "string"},
         "waiting_check_automation_id": {
           "type": "string",
           "maxLength": 64,
@@ -99,6 +106,14 @@
         "waiting_check_expected_rdate": {
           "type": "string",
           "description": "Exact controller-generated single RDATE that the platform waiting task must use without rounding."
+        },
+        "waiting_check_recovery_armed_lease_id": {
+          "type": "string",
+          "description": "Current waiting-read lease whose stable platform task was confirmed at the recovery RDATE before browser access."
+        },
+        "waiting_check_recovery_armed_rdate": {
+          "type": "string",
+          "description": "Exact recovery RDATE confirmed for the currently claimed waiting-read lease; none outside that claim."
         }
       },
       "allOf": [
@@ -296,6 +311,42 @@
           }
         }
       ]
+    },
+    "reviewer_chat": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "generation",
+        "max_formal_rounds",
+        "status",
+        "rollover_reason",
+        "rollover_authorization_id",
+        "retired"
+      ],
+      "properties": {
+        "mode": {"const": "bounded_series_v1"},
+        "generation": {"type": "integer", "minimum": 1},
+        "max_formal_rounds": {"const": 8},
+        "status": {"enum": ["active", "rollover_required"]},
+        "rollover_reason": {"enum": ["none", "round_budget", "rate_limited"]},
+        "rollover_authorization_id": {"type": "string"},
+        "retired": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["reviewer_thread_id", "reason", "formal_rounds", "retired_at"],
+            "properties": {
+              "reviewer_thread_id": {"type": "string"},
+              "reason": {"enum": ["round_budget", "rate_limited"]},
+              "formal_rounds": {"type": "integer", "minimum": 0},
+              "retired_at": {"type": "string"}
+            }
+          }
+        }
+      }
     },
     "review_history": {
       "type": "array",
@@ -783,21 +834,49 @@
     },
     {
       "if": {
-        "required": ["automation", "review"],
-        "properties": {
-          "automation": {
-            "required": ["heartbeat_mode"],
-            "properties": {"heartbeat_mode": {"const": "waiting_only"}}
-          },
-          "review": {
-            "required": ["status"],
+        "anyOf": [
+          {
+            "required": ["automation", "review"],
             "properties": {
-              "status": {
-                "enum": ["review_receipt_pending", "review_waiting"]
+              "automation": {
+                "required": ["heartbeat_mode", "waiting_check_kind"],
+                "properties": {
+                  "heartbeat_mode": {"const": "waiting_only"},
+                  "waiting_check_kind": {"const": "review_reply"}
+                }
+              },
+              "review": {
+                "required": ["status"],
+                "properties": {
+                  "status": {
+                    "enum": ["review_receipt_pending", "review_waiting"]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "required": ["automation", "review", "recovery"],
+            "properties": {
+              "automation": {
+                "required": ["heartbeat_mode", "waiting_check_kind", "waiting_check_account_registry"],
+                "properties": {
+                  "heartbeat_mode": {"const": "waiting_only"},
+                  "waiting_check_kind": {"const": "submission_retry"},
+                  "waiting_check_account_registry": {"not": {"const": "none"}}
+                }
+              },
+              "review": {
+                "required": ["status"],
+                "properties": {"status": {"const": "review_submit_pending"}}
+              },
+              "recovery": {
+                "required": ["network_state"],
+                "properties": {"network_state": {"const": "rate_limited"}}
               }
             }
           }
-        }
+        ]
       },
       "then": {
         "properties": {
@@ -815,10 +894,14 @@
           "automation": {
             "properties": {
               "waiting_check_active": {"const": false},
+              "waiting_check_kind": {"const": "none"},
+              "waiting_check_account_registry": {"const": "none"},
               "waiting_check_token": {"const": "none"},
               "waiting_check_automation_id": {"const": "none"},
               "waiting_check_claimed_id": {"const": "none"},
-              "waiting_check_expected_rdate": {"const": "none"}
+              "waiting_check_expected_rdate": {"const": "none"},
+              "waiting_check_recovery_armed_lease_id": {"const": "none"},
+              "waiting_check_recovery_armed_rdate": {"const": "none"}
             }
           }
         }

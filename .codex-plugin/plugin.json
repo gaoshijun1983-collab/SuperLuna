@@ -1,6 +1,6 @@
 {
   "name": "luna-review-loop",
-  "version": "0.2.0-alpha.53",
+  "version": "0.2.0-alpha.63",
   "description": "A safe Codex implementation and ChatGPT review loop for Codex Desktop.",
   "author": {
     "name": "SuperLuna Contributors"
@@ -16,7 +16,7 @@
   "interface": {
     "displayName": "SuperLuna",
     "shortDescription": "A safe Codex and ChatGPT development loop.",
-    "longDescription": "Runs a simple, recoverable handoff between one Codex implementation task and one bound ChatGPT web conversation. Checks exist only while waiting for Chat, clear natural-language replies continue the original task once, and internal safety state stays hidden from routine use.",
+    "longDescription": "Runs a simple, recoverable handoff between one Codex implementation task and one active, bounded ChatGPT web conversation at a time. A reviewer Chat rolls over before its ninth formal review or after any real rate limit, while clear replies continue the original task once.",
     "developerName": "SuperLuna Contributors",
     "category": "Developer Tools",
     "capabilities": [

@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "project_id": "superluna",
+  "project_name": "SuperLuna",
+  "updated_on": "2026-08-14",
+  "policy": {
+    "user_owns_goals_and_values": true,
+    "professional_challenge_required": true,
+    "self_approval_allowed": false,
+    "technical_validation_is_approval": false
+  },
+  "authority_order": [
+    "AGENTS.md",
+    "README.md",
+    "docs/ROADMAP.md",
+    "release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md",
+    "CODEX_PROJECT_STATE.md"
+  ],
+  "decisions": [
+    {
+      "id": "plugin-not-standalone-app",
+      "scope_key": "product.form",
+      "status": "user_approved",
+      "decision": "SuperLuna 保持为 Codex plugin；Skill 是交互入口，标准库控制器与适配器承担确定性安全核心，不转成独立桌面应用。",
+      "scope": "适用于产品形态、打包、安装、文档和兼容标识。",
+      "recorded_on": "2026-08-14",
+      "authority_sources": [
+        {"type": "file", "path": "AGENTS.md"},
+        {"type": "file", "path": "README.md"},
+        {"type": "file", "path": "docs/ROADMAP.md"}
+      ],
+      "change_rule": "只有明确的产品形态迁移决定和兼容方案可以改变。"
+    },
+    {
+      "id": "browser-first-fixed-chat",
+      "scope_key": "review.transport_and_identity",
+      "status": "user_approved",
+      "decision": "新运行使用内置浏览器，任何时刻只允许一个活动评审 Chat；每个 Chat 最多承载 8 次正式评审，或在第一次真实限流后永久停用，并以精简项目上下文创建唯一替代 Chat。单实施者、精确请求/回复身份，且不得自动切换模型或推理档位。",
+      "scope": "适用于正式新运行；旧 App Chat 仅保留兼容，不得作为新流程默认通道。不得并行创建替代 Chat，也不得为恢复而重开已停用 Chat。",
+      "recorded_on": "2026-08-14",
+      "authority_sources": [
+        {"type": "file", "path": "README.md"},
+        {"type": "file", "path": "docs/ROADMAP.md"},
+        {"type": "file", "path": "release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md"}
+      ],
+      "change_rule": "任何传输、Chat 身份或模型策略变化都必须由明确用户决定并重新验证安全合同。"
+    },
+    {
+      "id": "public-beta-evidence-gate",
+      "scope_key": "release.public_beta",
+      "status": "user_approved",
+      "decision": "本地单测、mock、selftest 与 closure-check 只证明本地合同；真实连续闭环和 Windows/macOS 兼容证据未完成前不得宣称 Public Beta。",
+      "scope": "适用于发布状态、版本说明、验收和对外能力声明。",
+      "recorded_on": "2026-08-14",
+      "authority_sources": [
+        {"type": "file", "path": "AGENTS.md"},
+        {"type": "file", "path": "docs/ROADMAP.md"},
+        {"type": "file", "path": "release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md"}
+      ],
+      "change_rule": "只有 release truth 中所需真实证据完整并通过正式发布判断后才能改变。"
+    },
+    {
+      "id": "self-retest-isolation",
+      "scope_key": "development.test_scope",
+      "status": "user_approved",
+      "decision": "SuperLuna 自身开发与复测只能使用仓库内专用 fixture，不得拿其他项目作为测试目标；公开安装的 generic 模式仍可操作用户明确选择的外部项目。",
+      "scope": "适用于本仓库测试、真实闭环复测与 generic 产品兼容边界。",
+      "recorded_on": "2026-08-14",
+      "authority_sources": [
+        {"type": "file", "path": "AGENTS.md"},
+        {"type": "file", "path": "docs/ROADMAP.md"}
+      ],
+      "change_rule": "不得用测试便利性扩大到无关项目；改变隔离边界需明确安全评审。"
+    }
+  ]
+}

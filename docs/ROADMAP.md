@@ -50,13 +50,13 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
   listings, reopen only the already-bound canonical URL once under the same
   waiting authorization and browser binding, then verify the exact request before
   reading.
-- If that same provisioned `pending_handoff` tab is missing before a later
-  submission, require a ten-minute current-fingerprint lease for one canonical-URL
-  reopen. Bind that lease to the current browser id so an app restart can rebind
-  exactly once, and commit the new id only with submission confirmation; never
-  extend this path to ordinary user tabs or promoted provider identities.
-  Complete visual page checks before requesting the lease, then send and confirm
-  immediately; a visible but unconfirmed request is never resent.
+- Before any later fixed-Chat submission after an app restart, count the exact
+  URL in both current tab listings. Under a ten-minute current-fingerprint lease,
+  claim one visible exact match without navigation, or open the saved canonical
+  URL once only when both counts are zero; reject ambiguity. Bind that lease to
+  the current browser id and commit the new id only with submission confirmation.
+  Complete visual page checks before sending and confirm immediately; a visible
+  but unconfirmed request is never resent.
   Treat a first canonical-URL navigation timeout as uncertain: reconcile only
   the same opened tab without another open/navigation/reload, then require a
   fresh controller pre-send gate with the same lease, fingerprint, browser, and
@@ -69,10 +69,12 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 - Inspect healthy pages without refresh. After a network/load failure, permit one
   same-tab reload at the next 180-second authorized check.
 - Treat ChatGPT rate limiting separately: no reload/read/send and deterministic
-  machine-wide 30/60-minute circuit breaking. All local runs share at most two
-  short-lived web-Chat access slots; the third queues before browser startup,
-  and only one read-only health probe may close an expired circuit. Cross-device
-  access remains outside the local controller's proof boundary.
+  machine-wide 30/60-minute circuit breaking. Retire the affected reviewer Chat
+  permanently and, after cooldown, create exactly one compact-context replacement
+  instead of probing old history. Bound every active reviewer Chat to eight formal
+  reviews. All local runs share at most two short-lived web-Chat access slots;
+  the third queues before browser startup. Cross-device access remains outside
+  the local controller's proof boundary.
 - Preserve receipt reconciliation and duplicate-send protection without making
   hashes or internal state routine user concepts.
 - Preserve full natural-language review context while treating an explicitly
@@ -88,6 +90,9 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 - Keep waiting-check activity, token presence, and stale-identity cleanup tied
   to the exact runtime waiting-only status boundary in the published schema;
   leave claim/automation id equality explicitly controller-enforced.
+- Keep a claimed waiting read recoverable without recurrence: before browser
+  startup, move and confirm the same one-shot platform wait at the claim-expiry
+  RDATE; a vanished occurrence must be recoverable by that same wait.
 - Keep `review_submit_pending` response-completion and apply-validity flags false
   in both runtime validation and the published schema until a review request has
   actually been submitted.

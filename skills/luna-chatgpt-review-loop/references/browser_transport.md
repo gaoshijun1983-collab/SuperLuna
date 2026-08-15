@@ -1,9 +1,9 @@
 # In-app browser review transport
 
 This document is the normative transport contract for new SuperLuna runs. The
-formal reviewer is one user-selected ChatGPT conversation in Codex's in-app
-browser. `app_chat_review` remains readable for compatibility with saved state,
-but new runs use `in_app_browser`.
+formal reviewer is one active, bounded user-selected ChatGPT conversation at a
+time in Codex's in-app browser. `app_chat_review` remains readable for
+compatibility with saved state, but new runs use `in_app_browser`.
 
 ## Shared account access gate
 
@@ -25,16 +25,15 @@ use the two global slots only when they target different reviewer Chats; a
 platform-duplicated task targeting an already leased reviewer gets
 `account_browser_reviewer_busy` and must stop before browser initialization or
 send. A third run queues without initializing its browser. A real
-conversation-history rate-limit notice releases
-the reporting slot, clears every other local slot, and opens a 30-minute account
-circuit; a consecutive notice opens it for 60 minutes. After cooldown only one
-read-only health probe may run, and a healthy result is required to restore the
-two-slot limit. Slots never span local implementation or reviewer waiting.
+conversation-history rate-limit notice releases the reporting slot, permanently
+retires that reviewer identity, clears every other local slot, and opens a
+30-minute account circuit; a consecutive notice opens it for 60 minutes. After
+cooldown only one rollover-authorized `startup` may provision a replacement
+reviewer Chat. It must not reopen, refresh, probe, or scan the retired Chat.
+Slots never span local implementation or reviewer waiting.
 After a slot is released, a different task must observe a 180-second account-level
-quiet handoff before acquiring browser access. The only immediate bypass is one
-same-task `startup` or `waiting_read` acquisition directly after a proven healthy
-`health_probe`; either acquisition consumes the bypass. This keeps the two-task
-product limit without letting one task starve another through repeated polling.
+quiet handoff before acquiring browser access. This keeps the two-task product
+limit without letting one task starve another through repeated polling.
 
 A quiet handoff during active `startup` or `submission` is not a waiting-state
 schedule. The implementation task keeps the same foreground turn alive, performs
@@ -130,6 +129,18 @@ when `provisioning_home_navigation_allowed=true`. It keeps that same slot until
 the single authorized Chat is provisioned; releasing it and falling back to a
 health probe is not a valid provisioning retry.
 
+Every authorized Chat action uses the visible foreground surface. The account
+slot and later action authorization must report
+`browser_surface_mode=visible_foreground`,
+`background_browser_access_allowed=false`, and
+`visible_browser_required_before_chat_action=true`. Show the Codex in-app
+browser pane, display `Opening the fixed reviewer Chat / 正在打开固定评审 Chat`,
+and make the one exact bound conversation the visible active tab before reading
+or writing Chat. A hidden page, background script, cached DOM, coordinator-owned
+browser, or headless request is not an allowed substitute. Reuse and surface an
+existing exact tab; never create a duplicate tab or replacement Chat merely to
+make the action visible.
+
 Classify browser execution from the returned tool status and verified
 postcondition, never from wall-clock duration. A `completed` call that proves the
 composer was filled and the send control reports `enabled=true` is successful even when it
@@ -188,22 +199,26 @@ barrier. If a host turn nevertheless ends before binding, only an exact-task
 steps; it grants no browser or project authority.
 
 If a later submission reuses any fixed Chat already bound by the same durable
-state and the platform has removed its exact URL from both listings, the caller
-must not claim an empty result or open the URL on its own. While status is
-`review_submit_pending` and no request identity exists, call
-`authorize-browser-submission-reopen` with the current submission fingerprint,
-current in-app browser id, and live `submission` account-slot lease.
-Only `browser_submission_reopen_authorized` grants a ten-minute lease for one canonical-URL open in the
-authorized browser. If the app restarted and issued a new browser id, the lease
-records that one candidate without changing durable state. Verify the exact
+state, count its exact URL separately in `user.openTabs()` and `tabs.list()`.
+When the browser id changed, or both counts are zero, the caller must not adopt
+or open a tab on its own. While status is `review_submit_pending` and no request
+identity exists, call `authorize-browser-submission-reopen` with
+`--user-exact-url-count`, `--controlled-exact-url-count`, the current submission
+fingerprint, current in-app browser id, and live `submission` account-slot lease.
+`browser_submission_reopen_authorized` grants
+one mutually exclusive recovery: `reuse_existing_exact_url=true` claims the
+unique current exact-URL tab without navigation, while
+`open_canonical_url_once=true` permits one canonical open only when both counts
+are zero. Multiple exact matches fail closed. The lease records a changed browser
+id as one candidate without changing durable state. Verify the exact
 conversation, authenticated page, visible
 Extreme label, and payload identity before sending once; return the lease through
 `confirm-review-submission --browser-reopen-lease-id --browser-id`. Only successful
 submission confirmation commits the candidate browser id and clears the lease.
-Stale fingerprints, wrong URLs, missing bindings, and missing/expired leases
+Stale fingerprints, wrong URLs, ambiguous matches, missing bindings, and missing/expired leases
 remain fail-closed. An ordinary provider tab may use the same lease only after
-both current listings have lost its exact URL; this never authorizes a new Chat,
-different conversation, duplicate send, or skipped page verification.
+the same exact-count gate; this never authorizes a new Chat, different
+conversation, duplicate send, or skipped page verification.
 
 If the first `goto` or navigation call for that authorized open times out, the
 **navigation result is uncertain**; the timeout is not proof that loading has
@@ -237,6 +252,22 @@ identity check, one send, and immediate submission confirmation. Never resend if
 the identity is malformed, a command rejects it, the visible request already
 exists but confirmation fails, or the lease expires.
 
+If that already-visible request lost its short-lived send authorization before
+confirmation, use the existing exact-Chat reopen gate for read-only recovery and
+never click send again. `reconcile-browser-submission` requires one exact visible
+full-body match, the current raw packet SHA-256, trusted request turn/message
+identity, the fixed reviewer binding, a live `submission` account slot, and the
+matching browser-reopen lease. It records the existing request with
+`resend_allowed=false` and enters the ordinary reply path. If a complete reply is
+already visible, consume it immediately in the foreground instead of creating a
+wait. Any ambiguity or stale evidence leaves the state unchanged.
+
+If the exact current packet has zero visible matches, call the same controller
+gate with `--request-match-count 0` and no request identity. It returns
+`browser_submission_not_previously_sent` without changing state; the caller must
+then use the ordinary `authorize-browser-submission-send` gate for the first and
+only send. Zero matches must not be described as a lost or ambiguous identity.
+
 Browser ids are opaque platform values. Pass them as `--browser-id=<full-value>`;
 the controller also normalizes a separated value with one leading hyphen so it
 cannot be mistaken for another option. Never trim or rewrite the identity.
@@ -257,25 +288,33 @@ SuperLuna uses the existing single future waiting-check gate. There is no second
 scheduler and no global recurring browser poller.
 
 1. After the due occurrence has returned `review_poll` or `receipt_reconcile`,
-   acquire the shared account browser slot with operation `waiting_read`.
+   immediately update that same platform waiting task to the returned claim-
+   recovery RDATE. Then persist the exact update with
+   `confirm-waiting-recovery-arm`. Until confirmation succeeds, the controller
+   denies browser initialization and Chat read. If this occurrence exits after
+   claiming but before reading, the same task fires again when the claim expires
+   and safely recovers it; no second scheduler is created.
+2. After the recovery arm is confirmed, acquire the shared account browser slot with operation `waiting_read`.
    Until `slot_acquired=true`, do not initialize the browser runtime or inspect
    any tab. Also verify the returned `operation` is `waiting_read`. If acquisition
    instead returns `account_browser_operation_conflict`, release only its
    `existing_slot_lease_id`, rearm this waiting occurrence, and update the same
    platform task; never pass the stale operation lease to the read authorization.
-2. Authorize the due occurrence with `authorize-waiting-chat-read`, passing the
+3. Authorize the due occurrence with `authorize-waiting-chat-read`, passing the
    waiting-check lease and `--account-slot-lease-id` from the exact live
    `waiting_read` slot. The controller rejects a missing, expired, wrong-task,
    or wrong-operation slot before browser initialization.
-3. The authorization returns the persisted browser/provider identity. If the
+4. The authorization returns the persisted browser/provider identity. If the
    earlier tab object is stale or absent, reuse the existing browser binding,
    call `user.openTabs()`, uniquely match `providerTabId` plus the exact bound
    URL, and pass that returned object to `user.claimTab(tab)`. Never call
    `tabs.get()` with a `Tab.id` saved by an earlier occurrence. If claiming says
    the tab is already controlled, use only a unique exact-URL entry from the
    current occurrence's `tabs.list()`; ambiguity or absence fails closed.
-4. If the action is `browser_read_authorized`, inspect that reclaimed same tab
-   without reloading it. If its binding still says `pending_handoff`, promote
+5. If the action is `browser_read_authorized`, first surface that reclaimed same
+   tab in the visible in-app browser pane and verify the authorization's visible-
+   foreground contract, then inspect it without reloading. If its binding still
+   says `pending_handoff`, promote
    the newly exposed real provider identity first, then re-authorize the read.
    When no provider identity exists and the authorization explicitly allows the
    provisioned URL fallback, inspect only a unique exact-URL tab from the current
@@ -283,27 +322,34 @@ scheduler and no global recurring browser poller.
    authorization explicitly returns `canonical_url_reopen_allowed=true`, open
    `browser_binding.conversation_url` once in that same browser binding. Verify
    exact canonical URL, login, ChatGPT page, and the paired request identity
-   before reading; do not send or persist the occurrence-local handle.
-5. After releasing the account slot, report a load failure with
+   before reading. Pair the first complete assistant message *after* the current
+   persisted request identity; the request node itself, the page's arbitrary last
+   node, and a virtualized text fragment are not a reply. Do not send or persist
+   the occurrence-local handle.
+6. After releasing the account slot, report a load failure with
    `browser-network-observation --outcome network_error`. This schedules the next
    authorized occurrence for 180 seconds later and preserves the same stable
    waiting-check identity.
-6. Rearm that one future occurrence with
+7. Rearm that one future occurrence with
    `rearm-waiting-check --lease-id <current waiting-check lease>`. This first
    clears the claimed read and rotates state; update the platform wait only
    after it succeeds.
-7. If the next authorization returns `browser_refresh_authorized` and
+8. If the next authorization returns `browser_refresh_authorized` and
    `reload_same_tab_once=true`, reload the same tab exactly once, wait for the
    document to load, verify the same conversation id, and inspect it.
-8. Record a readable page with `browser-network-observation --outcome loaded`.
+9. Record a readable page with `browser-network-observation --outcome loaded`.
    If a real page read finds no complete reply, first persist that fact with
    `record-browser-no-complete-reply`, including the bound browser id, visible
-   current request message id, and latest assistant message id. Then release the
+   current request message id, latest assistant message id, assistant count after
+   the request, and whether the latest node is absent, streaming, fragment, or
+   unknown. A fragment must be reported as observed but incomplete, never as no
+   reply. Then release the
    account slot and run `rearm-waiting-check --reason no_complete_reply` with the
    current read lease before updating another future check. Without that durable
    observation, the controller reports “not checked” and never “no reply”. Before
    that occurrence ends, the final browser action keeps the same
-   tab as `status: "handoff"`; the next occurrence reclaims it rather than
+   tab as `status: "handoff"`; `finalize({keep:[]})` or any equivalent close-all
+   action is forbidden. The next occurrence reclaims it rather than
    reusing a stale control handle. Leaving the waiting phase retires the gate
    and stops browser checks.
 
@@ -324,15 +370,25 @@ than authority and must never advance or stop the current run.
 
 The ChatGPT notice “requests are too frequent” is not a network error. Record it
 as `--outcome rate_limited`: do not reload, do not read conversation history, and
-do not send. The same waiting gate schedules one non-reloading probe after 15
-minutes; consecutive notices back off to 30 and then 60 minutes. A successful
-`loaded` observation resets this backoff.
+do not send. This permanently retires the current reviewer identity. If this
+happens during `review_submit_pending`, immediately call
+`schedule-submission-retry` with the same state and account registry. It binds
+one future occurrence to the account circuit's exact 30/60-minute cooldown.
+Before that RDATE the occurrence has no browser permission. At expiry it deletes
+itself and obtains one rollover-authorized `startup` slot with reviewer identity
+`none`. It visibly provisions exactly one replacement Chat, sends compact current
+context rather than old history, completes the rollover binding, reconfirms the
+visible reasoning mode, and then continues the same unsent packet. The retired
+Chat can never regain startup, submission, waiting-read, or health-probe access.
+Another limit schedules one replacement cooldown occurrence. This recovery never
+reads a reply, writes the project, or creates a recurring rule.
 
-An account-level `health_probe` must read one already-existing fixed conversation
-or the conversation-history surface without creating a Chat or sending a message.
+An account-level `health_probe` must display one already-existing fixed
+conversation and inspect only its currently visible tail without creating a Chat
+or sending a message.
 The homepage alone is not health evidence, and neither are a visible account menu,
 an empty new-chat composer, or successful login. Release a probe as healthy only
-with `--health-proof conversation_history_accessible`; otherwise keep the circuit
+with `--health-proof fixed_conversation_tail_accessible`; otherwise keep the circuit
 fail closed or report the real rate-limit notice.
 
 A new implementation browser can legitimately start with no user or controlled
@@ -343,6 +399,10 @@ history surface contains at least one real existing conversation entry and no
 rate-limit notice. It must not open an unrelated conversation. The homepage,
 login, account menu, and composer still do not count. Close the temporary probe
 tab before releasing the slot.
+
+The generic `health_probe` operation remains available for a page that has not
+been retired by a real rate limit. It is never a recovery path for a retired
+reviewer identity.
 
 Do not reload a healthy page, do not reload while a response is visibly
 streaming, and do not retry blindly after a failed UI action. 不得切回 App Chat、

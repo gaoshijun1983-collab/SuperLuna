@@ -161,6 +161,9 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(registry["account_browser_gate_lock_timeout_seconds"], 10)
         self.assertEqual(registry["account_browser_cross_task_quiet_seconds"], 180)
         self.assertEqual(registry["account_browser_rate_limit_backoff_seconds"], [1800, 3600])
+        self.assertEqual(registry["reviewer_chat_max_formal_rounds"], 8)
+        self.assertFalse(registry["rate_limited_reviewer_chat_reopen_allowed"])
+        self.assertTrue(registry["reviewer_chat_rollover_after_rate_limit"])
         for requirement in (
             "acquire-account-browser-slot",
             "release-account-browser-slot",
@@ -175,8 +178,10 @@ class PackageTests(unittest.TestCase):
             "最多 2 个",
             "第三个任务只排队",
             "--outcome rate_limited",
-            "health_probe",
-            "conversation_history_accessible",
+            "每个 reviewer Chat 最多承载 8 次正式评审",
+            "旧 Chat 已退休",
+            "complete-reviewer-chat-rollover",
+            "reviewer_chat_rollover_required",
         ):
             self.assertIn(requirement, skill)
         self.assertIn("Every browser initialization", transport)
@@ -189,7 +194,7 @@ class PackageTests(unittest.TestCase):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("--reviewer-thread-id <当前固定评审Chat ID>", skill)
         self.assertIn("account_browser_reviewer_busy", skill)
-        self.assertIn("同一固定 Chat 在任一时刻只允许一个", skill)
+        self.assertIn("同一当前卷 Chat 在任一时刻只允许一个", skill)
 
     def test_account_slot_precedes_browser_skill_and_runtime(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -213,6 +218,21 @@ class PackageTests(unittest.TestCase):
             transport.index("acquire an account browser slot"),
             transport.index("activate `browser:control-in-app-browser`"),
         )
+
+    def test_every_chat_action_requires_the_visible_foreground_browser(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+
+        for document in (skill, transport, source):
+            self.assertIn("visible_foreground", document)
+            self.assertIn("background_browser_access_allowed", document)
+            self.assertIn("visible_browser_required_before_chat_action", document)
+        self.assertIn("正在打开固定评审 Chat", skill)
+        self.assertIn("Opening the fixed reviewer Chat", transport)
+        self.assertIn("不能为了“可见”而重复新建标签或 Chat", skill)
 
     def test_waiting_read_authorization_requires_a_live_account_slot_lease(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -358,6 +378,7 @@ class PackageTests(unittest.TestCase):
         runtime_sections = {
             "schema_version", "revision", "created_at", "updated_at", "automation",
             "policy", "confirmation", "capabilities", "review", "review_history",
+            "reviewer_chat",
             "browser_reply_observation", "browser_binding", "binding", "attachment", "capability_probes",
             "next_operation", "model_policy", "recovery", "alternative", "runtime",
         }
@@ -746,14 +767,20 @@ class PackageTests(unittest.TestCase):
         wait_state_rules = [
             rule
             for rule in schema["allOf"]
-            if rule.get("if", {}).get("properties", {}).get("automation", {})
-            .get("properties", {}).get("heartbeat_mode", {}).get("const")
-            == "waiting_only"
-            and set(
-                rule.get("if", {}).get("properties", {}).get("review", {})
-                .get("properties", {}).get("status", {}).get("enum", [])
+            if any(
+                branch.get("properties", {}).get("automation", {})
+                .get("properties", {}).get("heartbeat_mode", {}).get("const")
+                == "waiting_only"
+                and branch.get("properties", {}).get("automation", {})
+                .get("properties", {}).get("waiting_check_kind", {}).get("const")
+                == "review_reply"
+                and set(
+                    branch.get("properties", {}).get("review", {})
+                    .get("properties", {}).get("status", {}).get("enum", [])
+                )
+                == monitor_statuses
+                for branch in rule.get("if", {}).get("anyOf", [])
             )
-            == monitor_statuses
         ]
 
         self.assertEqual(len(wait_state_rules), 1)
@@ -768,6 +795,7 @@ class PackageTests(unittest.TestCase):
             "waiting_check_automation_id",
             "waiting_check_claimed_id",
             "waiting_check_expected_rdate",
+            "waiting_check_account_registry",
         ):
             self.assertEqual(inactive[field]["const"], "none")
 
@@ -777,9 +805,10 @@ class PackageTests(unittest.TestCase):
             source,
         )
         self.assertIn(
-            "status in MONITOR_STATUSES and heartbeat_mode == \"waiting_only\"",
+            'if kind == "review_reply":',
             source,
         )
+        self.assertIn('if kind == "submission_retry":', source)
 
     def test_source_tree_contains_no_python_cache_artifacts(self):
         artifacts = [
@@ -1093,10 +1122,32 @@ class PackageTests(unittest.TestCase):
         )
         for text in (skill, transport, protocol):
             self.assertIn("canonical_url_reopen_allowed", text)
-        self.assertIn("两个当前列表都不存在其精确 URL", skill)
+        self.assertIn("两个列表都没有匹配", skill)
         self.assertIn("任何已经绑定的固定 Chat", skill)
         self.assertIn("any fixed Chat already bound", transport)
         self.assertIn("never authorizes a new Chat", transport)
+
+    def test_restarted_browser_can_claim_one_visible_fixed_chat_without_navigation(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (skill, transport):
+            self.assertIn("--user-exact-url-count", text)
+            self.assertIn("--controlled-exact-url-count", text)
+            self.assertIn("reuse_existing_exact_url", text)
+        self.assertIn("不得重新打开或刷新", skill)
+        self.assertIn(
+            "claims the unique current exact-URL tab without navigation",
+            " ".join(transport.split()),
+        )
+        self.assertIn(
+            "One visible match is claimed without navigation",
+            " ".join(protocol.split()),
+        )
 
     def test_submission_reopen_navigation_timeout_is_reconciled_on_same_tab(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
@@ -1192,6 +1243,23 @@ class PackageTests(unittest.TestCase):
         self.assertIn("directly capture only the new user-message region", transport)
         self.assertIn("omit the post-submit screenshot", transport)
 
+    def test_claimed_wait_arms_same_one_shot_recovery_before_browser_read(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(
+            encoding="utf-8"
+        )
+        transport = (SKILL_ROOT / "references" / "browser_transport.md").read_text(
+            encoding="utf-8"
+        )
+        source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
+
+        for document in (skill, protocol, transport):
+            self.assertIn("confirm-waiting-recovery-arm", document)
+        self.assertIn("same platform wait", transport)
+        self.assertIn("no second scheduler is created", transport)
+        self.assertIn('"action": "waiting_recovery_arm_required"', source)
+        self.assertIn('"waiting_check_action": "update_once"', source)
+
     def test_startup_browser_confirmation_is_visible_user_evidence_not_model_control(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(encoding="utf-8")
@@ -1201,8 +1269,9 @@ class PackageTests(unittest.TestCase):
             "用户报告或亲眼看到档位变化",
         ):
             self.assertIn(requirement, skill)
-        self.assertIn("The user explicitly confirms the visible reviewer mode", protocol)
-        self.assertIn("never creates a replacement\nChat, switches model/reasoning", protocol)
+        self.assertIn("The user explicitly\nconfirms the visible reviewer mode", protocol)
+        self.assertIn("The workflow never switches\nmodel/reasoning", protocol)
+        self.assertIn("A bounded rollover is allowed only after eight formal", protocol)
 
     def test_skill_preflight_uses_the_runtime_extreme_review_mode_enum(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")

@@ -2,13 +2,19 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.53",
-      "title": "Cross-platform repository-local self-retest sandbox before browser access",
+      "version": "0.2.0-alpha.63",
+      "title": "Bound reviewer Chat history and retire rate-limited volumes",
       "upgrade_prerequisites": [
         "Run the repository test suite, controller selftest, and release archive verifier.",
         "Confirm the current candidate remains Alpha and Public Beta is blocked.",
         "Confirm SuperLuna repository self-retests use superluna_repo_retest_v1 with the exact task-hash project and state paths.",
-        "Confirm generic-profile compatibility remains available for user-selected, host-authorized external projects."
+        "Confirm generic-profile compatibility remains available for user-selected, host-authorized external projects.",
+        "Confirm browser read stays denied until the same waiting task is moved to and confirmed at the claim-expiry recovery RDATE.",
+        "Confirm submission recovery receives both current exact-URL counts and never navigates when one exact fixed Chat is already visible.",
+        "Confirm zero exact current-packet matches continues to the existing first-send authorization while one trusted match reconciles without resending.",
+        "Confirm every reviewer Chat is limited to eight formal reviews and the ninth submission is blocked before browser access.",
+        "Confirm a real submission rate limit permanently retires the old reviewer Chat, schedules one exact future recovery, and blocks early browser access.",
+        "Confirm cooldown recovery provisions exactly one replacement Chat with compact current context and never reopens, refreshes, probes, or scans the retired Chat."
       ],
       "rollback_triggers": [
         "A focused regression test fails.",
@@ -20,12 +26,21 @@
         "Re-run the focused validator and the required local checks."
       ],
       "verification": [
+        "A review packet whose visible Round N or 第 N 轮 title disagrees with the controller-owned round is rejected before browser submission.",
+        "Waiting reads pair only the complete assistant message after the current request, report fragments separately, and keep the fixed Chat tab for handoff.",
+        "Every authorized Chat action declares visible_foreground mode and denies background access.",
+        "Expected-failure mapping lines remain actionable while imperative external deletion remains blocked.",
         "The milestone and release archive validators exit successfully.",
         "Repository tests, selftest, and closure-check pass independently.",
         "Two builds from the same source produce the same SHA-256 digest.",
         "Local checks remain labelled as local-only evidence.",
         "The packaged controller rejects repository-root, adjacent-run, symlink-escape, and external retest paths before any probe, state use, account gate, or browser access.",
-        "The tracked project sandbox configuration is documented as applying to newly started trusted-project tasks only."
+        "The tracked project sandbox configuration is documented as applying to newly started trusted-project tasks only.",
+        "An occurrence that exits after claiming but before reading can be recovered by the same one-shot wait after claim expiry, without a recurring or second scheduler.",
+        "A recovered unsent packet with zero exact visible matches reaches the existing one-shot send authorization without mutating state or inventing request identity.",
+        "A rate-limited reviewer identity cannot acquire startup, submission, waiting-read, or health-probe browser permission again.",
+        "Completing one rollover binds exactly one new canonical reviewer identity and resets the state-local formal round count.",
+        "A restarted browser with one visible exact fixed Chat reuses it without navigation, rejects ambiguity, and commits the new browser identity only after submission confirmation."
       ],
       "evidence_scope": "local_only",
       "real_device_evidence": false,

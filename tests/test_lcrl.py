@@ -384,6 +384,9 @@ class ControllerTests(unittest.TestCase):
         automation_id: str,
         waiting_lease_id: str,
     ):
+        self.arm_waiting_recovery(
+            state_path, token, automation_id, waiting_lease_id,
+        )
         state = lcrl.load_state(state_path)
         registry = state_path.parent / "account-browser-gate.json"
         slot = lcrl.acquire_account_browser_slot_command(Namespace(
@@ -403,6 +406,22 @@ class ControllerTests(unittest.TestCase):
             account_browser_registry=str(registry),
             at=None,
         ))
+
+    def arm_waiting_recovery(
+        self,
+        state_path: Path,
+        token: str,
+        automation_id: str,
+        waiting_lease_id: str,
+    ):
+        state = lcrl.load_state(state_path)
+        armed = lcrl.confirm_waiting_recovery_arm_command(Namespace(
+            state=str(state_path), token=token, automation_id=automation_id,
+            lease_id=waiting_lease_id,
+            scheduled_rdate=state["automation"]["waiting_check_expected_rdate"],
+        ))
+        self.assertTrue(armed["recovery_armed"], armed)
+        return armed
 
     def test_account_browser_gate_allows_two_and_queues_third(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -427,6 +446,9 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(third["action"], "account_browser_access_queued")
             self.assertTrue(first["browser_skill_read_allowed"])
             self.assertTrue(first["browser_runtime_initialization_allowed"])
+            self.assertEqual(first["browser_surface_mode"], "visible_foreground")
+            self.assertFalse(first["background_browser_access_allowed"])
+            self.assertTrue(first["visible_browser_required_before_chat_action"])
             self.assertFalse(first["health_probe_home_navigation_allowed"])
             self.assertFalse(third["slot_acquired"])
             self.assertFalse(third["browser_skill_read_allowed"])
@@ -1028,6 +1050,201 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(gate["slots"], [])
             self.assertEqual(gate["consecutive_rate_limits"], 1)
 
+    def test_rate_limited_reviewer_chat_is_never_opened_again(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", reviewer_thread_id="old-review-chat",
+                operation="submission", registry=str(registry),
+                at="2026-08-14T08:00:00Z",
+            ))
+            limited = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-14T08:00:30Z", health_proof=None,
+                continue_operation=None,
+            ))
+
+            old_chat = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", reviewer_thread_id="old-review-chat",
+                operation="health_probe", registry=str(registry),
+                at="2026-08-14T09:00:30Z",
+            ))
+            replacement = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", reviewer_thread_id="none",
+                operation="startup", registry=str(registry),
+                new_chat_authorization_id="rollover-auth-1",
+                new_chat_local_work_status="completed_and_verified",
+                at="2026-08-14T09:00:30Z",
+            ))
+
+            self.assertTrue(limited["reviewer_chat_retired"])
+            self.assertEqual(old_chat["action"], "account_browser_reviewer_chat_retired")
+            self.assertFalse(old_chat["browser_runtime_initialization_allowed"])
+            self.assertEqual(replacement["action"], "account_browser_slot_acquired")
+            self.assertTrue(replacement["rate_limit_recovery_rollover"])
+            self.assertTrue(replacement["provisioning_home_navigation_allowed"])
+
+    def test_round_budget_requires_rollover_before_ninth_submission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            binding = state["review"]["run_binding"]
+            for number in range(1, lcrl.REVIEWER_CHAT_MAX_FORMAL_ROUNDS + 1):
+                state["review_history"].append({
+                    "run_binding": dict(binding),
+                    "request_message_id": f"request-{number}",
+                    "response_message_id": f"response-{number}",
+                })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+
+            result = self.transition(
+                state_path, "review_submit_pending", stage="ROUND-9",
+                fingerprint="round-9-packet",
+            )
+            blocked = lcrl.load_state(state_path)
+
+            self.assertEqual(result["action"], "reviewer_chat_rollover_required")
+            self.assertEqual(result["completed_formal_rounds"], 8)
+            self.assertEqual(blocked["review"]["status"], "local_work")
+            self.assertEqual(blocked["reviewer_chat"]["status"], "rollover_required")
+            self.assertFalse(result["browser_runtime_initialization_allowed"])
+            self.assertFalse(lcrl.reviewer_chat_browser_access_allowed(blocked))
+
+    def test_completed_rollover_binds_one_new_chat_and_resets_round_count(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "old-review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "old-review-chat")
+            pending = lcrl.load_state(state_path)
+            revision = pending["revision"]
+            authorization_id = lcrl.mark_reviewer_chat_rollover_required(
+                pending, "rate_limited",
+            )
+            lcrl.save_state(state_path, pending, expected_revision=revision)
+            new_id = "6a7d5c81-29bc-43e8-bc0a-05faa6a0a621"
+
+            result = lcrl.complete_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), authorization_id=authorization_id,
+                new_reviewer_thread_id=new_id, browser_id="iab-new",
+                provider_tab_id="provider-new",
+                url=f"https://chatgpt.com/c/{new_id}",
+                observed_title="NPC AI review volume 2", at=None,
+            ))
+            rolled = lcrl.load_state(state_path)
+
+            self.assertEqual(result["action"], "reviewer_chat_rollover_completed")
+            self.assertEqual(rolled["reviewer_chat"]["generation"], 2)
+            self.assertEqual(rolled["confirmation"]["reviewer_thread_id"], new_id)
+            self.assertEqual(rolled["browser_binding"]["conversation_id"], new_id)
+            self.assertEqual(lcrl.current_state_review_round_number(rolled), 0)
+            self.assertFalse(rolled["confirmation"]["reviewer_reasoning_confirmed"])
+            self.assertEqual(
+                rolled["reviewer_chat"]["retired"][0]["reviewer_thread_id"],
+                "old-review-chat",
+            )
+
+    def test_submission_rate_limit_schedules_one_safe_resume_without_chat_read(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry = root / "account-browser-gate.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "review-chat")
+            self.transition(
+                state_path, "review_submit_pending", stage="RATE-SUBMIT",
+                fingerprint="rate-submit-packet",
+            )
+            slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", operation="submission",
+                reviewer_thread_id="review-chat",
+                registry=str(registry), at="2026-08-14T07:00:00Z",
+            ))
+            limited = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", lease_id=slot["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-14T07:00:30Z", health_proof=None,
+            ))
+
+            scheduled = lcrl.schedule_submission_retry_command(Namespace(
+                state=str(state_path), registry=str(registry),
+                at="2026-08-14T07:00:31Z",
+            ))
+            self.assertEqual(scheduled["action"], "submission_retry_scheduled")
+            self.assertEqual(scheduled["waiting_check_action"], "schedule_once")
+            self.assertEqual(
+                scheduled["waiting_check_expected_rdate"],
+                lcrl.rdate_from_timestamp(limited["retry_not_before"]),
+            )
+            self.assertFalse(scheduled["browser_runtime_initialization_allowed"])
+            queued = lcrl.load_state(state_path)
+            self.assertEqual(queued["reviewer_chat"]["status"], "rollover_required")
+            self.assertEqual(queued["reviewer_chat"]["rollover_reason"], "rate_limited")
+            self.assertEqual(queued["automation"]["waiting_check_kind"], "submission_retry")
+            token = queued["automation"]["waiting_check_token"]
+            automation_id = "submission-retry-once"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                scheduled_rdate=lcrl.rdate_from_timestamp(limited["retry_not_before"]),
+            ))
+            rendered = lcrl.render_waiting_check(state_path)
+            self.assertIn("waiting for ChatGPT cooldown", rendered)
+            self.assertLessEqual(len(rendered.encode("utf-8")), lcrl.MAX_HEARTBEAT_BYTES)
+
+            early = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                at="2026-08-14T07:20:00Z",
+            ))
+            self.assertEqual(early["action"], "submission_retry_not_due")
+            self.assertEqual(early["waiting_check_action"], "update_once")
+            self.assertFalse(early["browser_runtime_initialization_allowed"])
+
+            due = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                at=limited["retry_not_before"],
+            ))
+            self.assertEqual(due["action"], "submission_retry_ready")
+            self.assertEqual(
+                due["next_action"],
+                "delete_wait_then_provision_replacement_chat",
+            )
+            self.assertEqual(
+                due["account_browser_slot_request"]["operation"], "startup",
+            )
+            self.assertEqual(
+                due["account_browser_slot_request"]["reviewer_thread_id"], "none",
+            )
+            self.assertEqual(
+                due["account_browser_slot_request"]["new_chat_authorization_id"],
+                queued["reviewer_chat"]["rollover_authorization_id"],
+            )
+            self.assertFalse(due["old_chat_access_allowed"])
+            self.assertFalse(due["chat_read_allowed"])
+            self.assertFalse(due["browser_runtime_initialization_allowed"])
+            resumed = lcrl.load_state(state_path)
+            self.assertFalse(resumed["automation"]["waiting_check_active"])
+            self.assertEqual(resumed["automation"]["waiting_check_kind"], "none")
+            self.assertEqual(resumed["review"]["status"], "review_submit_pending")
+            self.assertEqual(resumed["recovery"]["network_state"], "recovering")
+
+            before = state_path.read_bytes()
+            stale = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                at="2026-08-14T07:31:00Z",
+            ))
+            self.assertEqual(stale["action"], "waiting_check_expired")
+            self.assertEqual(before, state_path.read_bytes())
+
     def test_account_health_probe_clears_expired_circuit(self):
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "account-browser-gate.json"
@@ -1067,6 +1284,95 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertFalse(status["cooldown_active"])
             self.assertEqual(status["active_count"], 0)
+
+    def test_health_probe_atomically_continues_submission_without_second_browser_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="health_probe",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-12T08:00:30Z", health_proof=None,
+                continue_operation=None,
+            ))
+            probe = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="health_probe",
+                reviewer_thread_id="review-chat", registry=str(registry),
+                at="2026-08-12T08:30:30Z",
+            ))
+
+            continued = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=probe["lease_id"],
+                outcome="healthy", registry=str(registry),
+                at="2026-08-12T08:30:31Z",
+                health_proof="fixed_conversation_tail_accessible",
+                continue_operation="submission",
+            ))
+
+            self.assertEqual(
+                continued["action"],
+                "account_browser_health_confirmed_and_continued",
+            )
+            self.assertEqual(continued["operation"], "submission")
+            self.assertEqual(continued["lease_id"], probe["lease_id"])
+            self.assertEqual(continued["active_count"], 1)
+            self.assertEqual(continued["consecutive_rate_limits"], 1)
+            self.assertTrue(continued["reuse_visible_tab_required"])
+            self.assertTrue(continued["history_tail_only_required"])
+            self.assertFalse(continued["full_history_scan_allowed"])
+            self.assertFalse(continued["browser_runtime_initialization_allowed"])
+            gate = lcrl.load_account_browser_gate(registry)
+            self.assertEqual(gate["slots"][0]["operation"], "submission")
+
+            limited_again = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=probe["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-12T08:30:32Z", health_proof=None,
+                continue_operation=None,
+            ))
+            self.assertEqual(limited_again["consecutive_rate_limits"], 2)
+            self.assertEqual(
+                limited_again["retry_not_before"], "2026-08-12T09:30:32Z",
+            )
+
+    def test_successful_continued_browser_action_resets_rate_limit_streak(self):
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "account-browser-gate.json"
+            first = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="health_probe",
+                registry=str(registry), at="2026-08-12T08:00:00Z",
+            ))
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=first["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-12T08:00:30Z", health_proof=None,
+                continue_operation=None,
+            ))
+            probe = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", operation="health_probe",
+                reviewer_thread_id="review-chat", registry=str(registry),
+                at="2026-08-12T08:30:30Z",
+            ))
+            continued = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one", lease_id=probe["lease_id"],
+                outcome="healthy", registry=str(registry),
+                at="2026-08-12T08:30:31Z",
+                health_proof="fixed_conversation_tail_accessible",
+                continue_operation="submission",
+            ))
+
+            completed = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="task-one",
+                lease_id=continued["lease_id"], outcome="completed",
+                registry=str(registry), at="2026-08-12T08:30:32Z",
+                health_proof=None, continue_operation=None,
+            ))
+
+            self.assertEqual(completed["consecutive_rate_limits"], 0)
+            self.assertEqual(lcrl.load_account_browser_gate(registry)["slots"], [])
 
     def test_account_health_probe_rejects_homepage_only_health_claim(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1208,17 +1514,32 @@ class ControllerTests(unittest.TestCase):
 
     def authorize_submission_reopen(
         self, state_path: Path, fingerprint: str, browser_id: str,
+        *, user_exact_url_count: int = 0,
+        controlled_exact_url_count: int = 0,
     ):
         registry = state_path.parent / "reopen-account-browser-gate.json"
         slot = self.acquire_submission_slot(state_path, registry)
         self.assertTrue(slot["slot_acquired"], slot)
         result = lcrl.authorize_browser_submission_reopen_command(Namespace(
             state=str(state_path), fingerprint=fingerprint, browser_id=browser_id,
+            user_exact_url_count=user_exact_url_count,
+            controlled_exact_url_count=controlled_exact_url_count,
             account_slot_lease_id=slot["lease_id"],
             account_browser_registry=str(registry), at=None,
         ))
         result["_test_account_registry"] = str(registry)
         return result
+
+    def write_review_packet(
+        self, state_path: Path, *, title: str = "Current bounded review"
+    ) -> str:
+        state = lcrl.load_state(state_path)
+        packet = state_path.parent / "current-review-packet.txt"
+        packet.write_text(
+            lcrl.render_review_run_binding(state) + f"\n{title}\n",
+            encoding="utf-8",
+        )
+        return str(packet)
 
     def authorize_startup_reopen(self, state_path: Path, browser_id: str):
         state = lcrl.load_state(state_path)
@@ -1278,6 +1599,9 @@ class ControllerTests(unittest.TestCase):
             self.assertIn("No action needed;", rendered)
             self.assertIn("内部单次检查", rendered)
             self.assertIn("Internal one-time check", rendered)
+            self.assertIn("片段等待", rendered)
+            self.assertIn("keep:[]", rendered)
+            self.assertIn("handoff", rendered)
             self.assertNotIn("slot后才authorize", rendered)
             self.assertNotIn("回复文件→", rendered)
             self.assertNotIn("acquire-account-browser-slot", rendered)
@@ -3146,6 +3470,71 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(recovered["expired_waiting_claim_recovered"])
             self.assertFalse(recovered["turn_completion_allowed"])
 
+    def test_expired_browser_read_claim_requires_rearming_same_wait_before_reread(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "web-chat-recovery-watchdog",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "web-chat-recovery-watchdog")
+            self.transition(
+                state_path, "review_submit_pending", stage="W-watchdog",
+                fingerprint="waiting-watchdog",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="web-chat-recovery-watchdog",
+                observed_label="极高", native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", waiting_since=now,
+                request_turn_id="turn-watchdog",
+                request_message_id="request-watchdog", request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            automation_id = "wait-watchdog"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            first = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            self.arm_waiting_recovery(
+                state_path, token, automation_id, first["lease_id"],
+            )
+            claimed = lcrl.load_state(state_path)
+            revision = claimed["revision"]
+            claimed["runtime"]["action_lease_expires_at"] = "2000-01-01T00:00:00Z"
+            lcrl.save_state(state_path, claimed, expected_revision=revision)
+
+            recovered = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            recovered_state = lcrl.load_state(state_path)
+
+            self.assertEqual(recovered["action"], "review_poll")
+            self.assertTrue(recovered["expired_waiting_claim_recovered"])
+            self.assertEqual(recovered["waiting_check_action"], "update_once")
+            self.assertEqual(
+                recovered["platform_wait_update"]["id"], automation_id,
+            )
+            self.assertEqual(
+                recovered_state["automation"]["waiting_check_recovery_armed_lease_id"],
+                "none",
+            )
+            blocked = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=recovered["lease_id"], account_slot_lease_id="none",
+                account_browser_registry=str(root / "unused-gate.json"), at=None,
+            ))
+            self.assertEqual(blocked["action"], "waiting_recovery_arm_required")
+            self.assertFalse(blocked["chat_read_allowed"])
+
     def test_wait_schedule_outputs_forbid_recurring_platform_rules(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))
@@ -3486,6 +3875,22 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id=wait_id,
             ))
+            self.assertEqual(claimed["waiting_check_action"], "update_once")
+            self.assertEqual(claimed["mandatory_next_tool"], "codex_app__automation_update")
+            self.assertEqual(
+                claimed["platform_wait_update"]["rrule"],
+                claimed["waiting_check_expected_rdate"],
+            )
+            unarmed = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=wait_id,
+                lease_id=claimed["lease_id"], account_slot_lease_id="none",
+                account_browser_registry=str(root / "missing-gate.json"), at=None,
+            ))
+            self.assertEqual(unarmed["action"], "waiting_recovery_arm_required")
+            self.assertFalse(unarmed["browser_runtime_initialization_allowed"])
+            self.arm_waiting_recovery(
+                state_path, token, wait_id, claimed["lease_id"],
+            )
             state_before = state_path.read_bytes()
 
             missing = lcrl.authorize_waiting_chat_read_command(Namespace(
@@ -3523,6 +3928,13 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual(blocked["required_operation"], "waiting_read")
             self.assertEqual(allowed["action"], "browser_read_authorized")
             self.assertTrue(allowed["chat_read_allowed"])
+            self.assertEqual(allowed["browser_surface_mode"], "visible_foreground")
+            self.assertFalse(allowed["background_browser_access_allowed"])
+            self.assertTrue(allowed["visible_browser_required_before_chat_action"])
+            self.assertEqual(
+                allowed["foreground_conversation_url"],
+                "https://chatgpt.com/c/web-chat-slot-gate",
+            )
             self.assertEqual(state_before, state_path.read_bytes())
 
     def test_mac_queue_replay_gate_records_zero_side_effects(self):
@@ -4165,6 +4577,28 @@ class ControllerTests(unittest.TestCase):
                 state["review"]["response_quarantined_reason"], "none",
             )
 
+    def test_expected_failure_mapping_does_not_turn_a_test_contract_into_delete_request(self):
+        parsed = lcrl.parse_result(
+            "REVISE\n\n"
+            "唯一下一步\n\n"
+            "目标：为 24 个场景增加 canonical scenario-definition contract，"
+            "冻结输入定义但不冻结 winner。\n\n"
+            "完成条件：runner 断言每个 scenario_id 的输入定义与 v1 contract 一致；"
+            "winner 仍由真实模型计算。\n\n"
+            "场景删除 → count/set contract FAIL\n"
+            "场景复制/身份替换 → uniqueness/set contract FAIL\n"
+            "同 ID 输入内容被改 → scenario-definition contract FAIL\n\n"
+            "最小验证：新增 equality/fingerprint 断言后，现有回归继续 PASS。"
+        )
+
+        self.assertFalse(lcrl.reply_requires_user_decision(parsed))
+
+        real_delete = lcrl.parse_result(
+            "REVISE\n\n唯一下一步\n\n"
+            "立即删除项目文件 → contract test FAIL，然后重建项目。"
+        )
+        self.assertTrue(lcrl.reply_requires_user_decision(real_delete))
+
     def test_c23_workspace_boundary_revise_does_not_treat_unapproved_release_as_action(self):
         parsed = lcrl.parse_result(
             "REVISE\n\n"
@@ -4274,6 +4708,38 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(lcrl.load_state(state_path)["review"]["status"], "result_received")
             self.assertEqual(repeated["action"], "already_consumed")
             self.assertFalse(repeated["consumed"])
+
+    def test_review_packet_title_must_match_controller_owned_round(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            binding = lcrl.render_review_run_binding(state)
+
+            valid = lcrl.validate_review_packet_text(
+                state, binding + "\nNPC AI｜Formal review 1\nReview this change.\n"
+            )
+            self.assertEqual(valid["state_review_round_number"], 1)
+            self.assertEqual(
+                valid["formal_review_display_label"],
+                "正式评审 1 / Formal review 1",
+            )
+
+            for title in ("NPC AI｜Round 27", "NPC AI｜第 27 轮独立评审"):
+                with self.subTest(title=title):
+                    with self.assertRaisesRegex(
+                        lcrl.LCRLError, "must match STATE_REVIEW_ROUND 1"
+                    ):
+                        lcrl.validate_review_packet_text(
+                            state, binding + f"\n{title}\nReview this change.\n"
+                        )
+
+            unnumbered = lcrl.validate_review_packet_text(
+                state,
+                binding
+                + "\nNPC AI｜bounded review\nPrior Round 27 is historical evidence only.\n",
+            )
+            self.assertFalse(unnumbered["numbered_title"])
 
     def test_three_wait_bound_cycles_need_no_foreground_wakeup(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -6171,6 +6637,7 @@ class ControllerTests(unittest.TestCase):
             authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="visible-submit-S1",
                 review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                text_file=self.write_review_packet(state_path, title="Formal review 1"),
                 browser_id="iab-session-1", lease_id=entry["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -6180,6 +6647,9 @@ class ControllerTests(unittest.TestCase):
             )
             self.assertTrue(authorized["send_allowed"])
             self.assertTrue(authorized["review_run_binding_required_in_payload"])
+            self.assertEqual(authorized["browser_surface_mode"], "visible_foreground")
+            self.assertFalse(authorized["background_browser_access_allowed"])
+            self.assertTrue(authorized["visible_browser_required_before_chat_action"])
 
             before_malformed_identity = state_path.read_bytes()
             with self.assertRaisesRegex(
@@ -6248,6 +6718,7 @@ class ControllerTests(unittest.TestCase):
             authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="send-confirm-fingerprint",
                 review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                text_file=self.write_review_packet(state_path, title="Formal review 1"),
                 browser_id="iab-session-1", lease_id=entry["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -6382,6 +6853,7 @@ class ControllerTests(unittest.TestCase):
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="bound-existing-chat-B2",
                 review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                text_file=self.write_review_packet(state_path, title="Formal review 2"),
                 browser_id="iab-restarted-instance", lease_id=reopened["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -6403,6 +6875,347 @@ class ControllerTests(unittest.TestCase):
                 persisted["browser_binding"]["browser_id"],
                 "iab-restarted-instance",
             )
+
+    def test_visible_exact_chat_can_rebind_after_browser_restart_without_reopening(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "visible-restarted-chat",
+                continuation_mode="foreground", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "visible-restarted-chat")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="visible-restarted-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="B-visible",
+                fingerprint="visible-restarted-B",
+            )
+            before_guard = lcrl.load_state(state_path)
+            entry_lease = lcrl.claim_action_lease(
+                before_guard, "turn_entry", minutes=4,
+            )
+            lcrl.save_state(
+                state_path, before_guard,
+                expected_revision=before_guard["revision"],
+            )
+
+            authorized = self.authorize_submission_reopen(
+                state_path, "visible-restarted-B", "iab-current-instance",
+                user_exact_url_count=1, controlled_exact_url_count=1,
+            )
+            self.assertNotEqual(authorized["lease_id"], entry_lease)
+            self.assertEqual(
+                authorized["action"], "browser_submission_reopen_authorized",
+            )
+            self.assertFalse(authorized["open_canonical_url_once"])
+            self.assertTrue(authorized["reuse_existing_exact_url"])
+            self.assertEqual(authorized["required_tab_source"], "user_open_tabs")
+            self.assertEqual(
+                authorized["next_action"],
+                "verify_existing_exact_url_then_authorize_send",
+            )
+            pending = lcrl.load_state(state_path)
+            self.assertEqual(
+                pending["browser_binding"]["browser_id"], "iab-session-1",
+            )
+            self.assertEqual(
+                pending["runtime"]["browser_submission_reopen_browser_id"],
+                "iab-current-instance",
+            )
+
+            account_registry = root / "visible-account-browser-gate.json"
+            account_slot = self.acquire_submission_slot(state_path, account_registry)
+            send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint="visible-restarted-B",
+                review_run_binding_id=pending["review"]["run_binding"]["id"],
+                text_file=self.write_review_packet(state_path, title="Formal review 1"),
+                browser_id="iab-current-instance", lease_id=authorized["lease_id"],
+                account_slot_lease_id=account_slot["lease_id"],
+                account_browser_registry=str(account_registry), at=None,
+            ))
+            confirmed = lcrl.confirm_review_submission_command(Namespace(
+                state=str(state_path), reviewer_thread_id="visible-restarted-chat",
+                request_turn_id="turn-visible", request_message_id="message-visible",
+                native_app_instance_id=None, attachment_name=None,
+                submitted_at=lcrl.utc_now(),
+                browser_reopen_lease_id=authorized["lease_id"],
+                browser_id="iab-current-instance",
+                browser_send_authorization_revision=send_authorized["revision"],
+                account_slot_lease_id=account_slot["lease_id"],
+            ))
+            self.assertEqual(confirmed["action"], "submission_confirmed")
+            self.assertEqual(
+                lcrl.load_state(state_path)["browser_binding"]["browser_id"],
+                "iab-current-instance",
+            )
+
+    def test_browser_submission_receipt_can_be_reconciled_without_resending(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            reviewer_id = "6a7d5c81-29bc-83e8-bc0a-05faa6a0a621"
+            request_turn_id = "11111111-1111-4111-8111-111111111111"
+            request_message_id = "22222222-2222-4222-8222-222222222222"
+            packet = root / "review-packet.txt"
+            packet.write_text(
+                "[SUPERLUNA_REVIEW_RUN]\nRUN_ID: review-run-test\n"
+                "STATE_REVIEW_ROUND: 15\n[/SUPERLUNA_REVIEW_RUN]\nreview this\n",
+                encoding="utf-8",
+            )
+            packet_hash = hashlib.sha256(packet.read_bytes()).hexdigest()
+            state = lcrl.new_state(
+                "none", "implementation", root, reviewer_id,
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, reviewer_id)
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id=reviewer_id, observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="RECOVER-SEND",
+                fingerprint=packet_hash,
+            )
+            reopened = self.authorize_submission_reopen(
+                state_path, packet_hash, "iab-recovered-instance",
+                user_exact_url_count=1, controlled_exact_url_count=1,
+            )
+
+            reconciled = lcrl.reconcile_browser_submission_command(Namespace(
+                state=str(state_path), fingerprint=packet_hash,
+                reviewer_thread_id=reviewer_id,
+                request_turn_id=request_turn_id,
+                request_message_id=request_message_id,
+                request_match_count=1, text_file=str(packet),
+                submitted_at=lcrl.utc_now(),
+                browser_reopen_lease_id=reopened["lease_id"],
+                browser_id="iab-recovered-instance",
+                account_slot_lease_id=reopened["account_slot_lease_id"],
+                account_browser_registry=reopened["_test_account_registry"], at=None,
+            ))
+
+            self.assertEqual(reconciled["action"], "browser_submission_reconciled")
+            self.assertFalse(reconciled["resend_allowed"])
+            persisted = lcrl.load_state(state_path)
+            self.assertEqual(persisted["review"]["status"], "review_waiting")
+            self.assertEqual(persisted["review"]["request_turn_id"], request_turn_id)
+            self.assertEqual(persisted["review"]["request_message_id"], request_message_id)
+            self.assertEqual(
+                persisted["browser_binding"]["browser_id"], "iab-recovered-instance",
+            )
+            self.assertEqual(persisted["runtime"]["action_lease_id"], "none")
+
+    def test_zero_visible_packet_match_continues_to_first_send_authorization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            reviewer_id = "6a7d5c81-29bc-83e8-bc0a-05faa6a0a621"
+            state = lcrl.new_state(
+                "none", "implementation", root, reviewer_id,
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, reviewer_id)
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id=reviewer_id, observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            packet = Path(self.write_review_packet(state_path))
+            packet_hash = hashlib.sha256(packet.read_bytes()).hexdigest()
+            self.transition(
+                state_path, "review_submit_pending", stage="FIRST-SEND-RECOVERY",
+                fingerprint=packet_hash,
+            )
+            reopened = self.authorize_submission_reopen(
+                state_path, packet_hash, "iab-recovered-instance",
+                user_exact_url_count=1, controlled_exact_url_count=1,
+            )
+            before = state_path.read_bytes()
+
+            planned = lcrl.reconcile_browser_submission_command(Namespace(
+                state=str(state_path), fingerprint=packet_hash,
+                reviewer_thread_id=reviewer_id,
+                request_turn_id=None, request_message_id=None,
+                request_match_count=0, text_file=str(packet), submitted_at=None,
+                browser_reopen_lease_id=reopened["lease_id"],
+                browser_id="iab-recovered-instance",
+                account_slot_lease_id=reopened["account_slot_lease_id"],
+                account_browser_registry=reopened["_test_account_registry"], at=None,
+                attachment_name=None,
+            ))
+
+            self.assertEqual(
+                planned["action"], "browser_submission_not_previously_sent",
+            )
+            self.assertTrue(planned["first_send_required"])
+            self.assertEqual(
+                planned["next_action"], "authorize_browser_submission_send",
+            )
+            self.assertFalse(planned["resend_allowed"])
+            self.assertEqual(state_path.read_bytes(), before)
+
+            authorized = lcrl.authorize_browser_submission_send_command(Namespace(
+                state=str(state_path), fingerprint=packet_hash,
+                review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                text_file=str(packet), browser_id="iab-recovered-instance",
+                lease_id=reopened["lease_id"],
+                account_slot_lease_id=reopened["account_slot_lease_id"],
+                account_browser_registry=reopened["_test_account_registry"], at=None,
+            ))
+            self.assertEqual(
+                authorized["action"], "browser_submission_send_authorized",
+            )
+
+    def test_zero_visible_packet_match_rejects_invented_request_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            reviewer_id = "6a7d5c81-29bc-83e8-bc0a-05faa6a0a621"
+            packet = root / "review-packet.txt"
+            packet.write_text("current packet\n", encoding="utf-8")
+            packet_hash = hashlib.sha256(packet.read_bytes()).hexdigest()
+            state = lcrl.new_state(
+                "none", "implementation", root, reviewer_id,
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, reviewer_id)
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id=reviewer_id, observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="ZERO-INVENTED",
+                fingerprint=packet_hash,
+            )
+            reopened = self.authorize_submission_reopen(
+                state_path, packet_hash, "iab-recovered-instance",
+                user_exact_url_count=1, controlled_exact_url_count=1,
+            )
+            before = state_path.read_bytes()
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "invented request identity"):
+                lcrl.reconcile_browser_submission_command(Namespace(
+                    state=str(state_path), fingerprint=packet_hash,
+                    reviewer_thread_id=reviewer_id,
+                    request_turn_id="invented", request_message_id="invented",
+                    request_match_count=0, text_file=str(packet), submitted_at=None,
+                    browser_reopen_lease_id=reopened["lease_id"],
+                    browser_id="iab-recovered-instance",
+                    account_slot_lease_id=reopened["account_slot_lease_id"],
+                    account_browser_registry=reopened["_test_account_registry"], at=None,
+                    attachment_name=None,
+                ))
+            self.assertEqual(state_path.read_bytes(), before)
+
+    def test_browser_submission_receipt_reconciliation_fails_closed_on_ambiguity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            reviewer_id = "6a7d5c81-29bc-83e8-bc0a-05faa6a0a621"
+            packet = root / "review-packet.txt"
+            packet.write_text("unique current review packet\n", encoding="utf-8")
+            packet_hash = hashlib.sha256(packet.read_bytes()).hexdigest()
+            state = lcrl.new_state(
+                "none", "implementation", root, reviewer_id,
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, reviewer_id)
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id=reviewer_id, observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="AMBIGUOUS-SEND",
+                fingerprint=packet_hash,
+            )
+            reopened = self.authorize_submission_reopen(
+                state_path, packet_hash, "iab-recovered-instance",
+                user_exact_url_count=1, controlled_exact_url_count=1,
+            )
+            before = state_path.read_bytes()
+
+            with self.assertRaisesRegex(lcrl.LCRLError, "exactly one matching request"):
+                lcrl.reconcile_browser_submission_command(Namespace(
+                    state=str(state_path), fingerprint=packet_hash,
+                    reviewer_thread_id=reviewer_id,
+                    request_turn_id="11111111-1111-4111-8111-111111111111",
+                    request_message_id="22222222-2222-4222-8222-222222222222",
+                    request_match_count=2, text_file=str(packet),
+                    submitted_at=lcrl.utc_now(),
+                    browser_reopen_lease_id=reopened["lease_id"],
+                    browser_id="iab-recovered-instance",
+                    account_slot_lease_id=reopened["account_slot_lease_id"],
+                    account_browser_registry=reopened["_test_account_registry"], at=None,
+                ))
+            self.assertEqual(state_path.read_bytes(), before)
+
+            packet.write_text("changed review packet\n", encoding="utf-8")
+            with self.assertRaisesRegex(lcrl.LCRLError, "does not match"):
+                lcrl.reconcile_browser_submission_command(Namespace(
+                    state=str(state_path), fingerprint=packet_hash,
+                    reviewer_thread_id=reviewer_id,
+                    request_turn_id="11111111-1111-4111-8111-111111111111",
+                    request_message_id="22222222-2222-4222-8222-222222222222",
+                    request_match_count=1, text_file=str(packet),
+                    submitted_at=lcrl.utc_now(),
+                    browser_reopen_lease_id=reopened["lease_id"],
+                    browser_id="iab-recovered-instance",
+                    account_slot_lease_id=reopened["account_slot_lease_id"],
+                    account_browser_registry=reopened["_test_account_registry"], at=None,
+                ))
+            self.assertEqual(state_path.read_bytes(), before)
+
+    def test_submission_rebind_rejects_ambiguous_visible_exact_chat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "ambiguous-visible-chat",
+                continuation_mode="foreground", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "ambiguous-visible-chat")
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="ambiguous-visible-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="B-ambiguous",
+                fingerprint="ambiguous-visible-B",
+            )
+            before = state_path.read_bytes()
+            result = self.authorize_submission_reopen(
+                state_path, "ambiguous-visible-B", "iab-current-instance",
+                user_exact_url_count=1, controlled_exact_url_count=2,
+            )
+            self.assertEqual(
+                result["action"], "browser_submission_reopen_forbidden",
+            )
+            self.assertEqual(
+                result["reason_code"], "multiple_controlled_exact_url_tabs",
+            )
+            self.assertFalse(result["open_canonical_url_once"])
+            self.assertFalse(result["reuse_existing_exact_url"])
+            self.assertEqual(state_path.read_bytes(), before)
 
     def test_provisioned_chat_promotes_provider_identity_on_first_wait_handoff(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -6516,6 +7329,9 @@ class ControllerTests(unittest.TestCase):
             )
             self.assertEqual(authorized["action"], "browser_submission_reopen_authorized")
             self.assertTrue(authorized["open_canonical_url_once"])
+            self.assertEqual(authorized["browser_surface_mode"], "visible_foreground")
+            self.assertFalse(authorized["background_browser_access_allowed"])
+            self.assertTrue(authorized["visible_browser_required_before_chat_action"])
             self.assertFalse(authorized["send_allowed_after_verification"])
             self.assertEqual(
                 authorized["browser_binding"]["conversation_url"],
@@ -6550,6 +7366,7 @@ class ControllerTests(unittest.TestCase):
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="provisioned-resubmit-B2",
                 review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                text_file=self.write_review_packet(state_path, title="Formal review 2"),
                 browser_id="iab-provisioned-resubmit",
                 lease_id=authorized["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
@@ -6841,6 +7658,7 @@ class ControllerTests(unittest.TestCase):
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="existing-chat-B1",
                 review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                text_file=self.write_review_packet(state_path, title="Formal review 1"),
                 browser_id="implementation-browser", lease_id=reopened["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -6958,6 +7776,7 @@ class ControllerTests(unittest.TestCase):
             send_authorized = lcrl.authorize_browser_submission_send_command(Namespace(
                 state=str(state_path), fingerprint="restarted-browser-B3",
                 review_run_binding_id=lcrl.load_state(state_path)["review"]["run_binding"]["id"],
+                text_file=self.write_review_packet(state_path, title="Formal review 3"),
                 browser_id="iab-new-instance", lease_id=authorized["lease_id"],
                 account_slot_lease_id=account_slot["lease_id"],
                 account_browser_registry=str(account_registry), at=None,
@@ -7095,6 +7914,9 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id=automation_id,
             ))
+            self.arm_waiting_recovery(
+                state_path, token, automation_id, claimed["lease_id"],
+            )
             slot = lcrl.acquire_account_browser_slot_command(Namespace(
                 implementation_thread_id="implementation",
                 reviewer_thread_id="web-chat-release-first",
@@ -7106,6 +7928,14 @@ class ControllerTests(unittest.TestCase):
                 account_browser_registry=str(registry), at=None,
             ))
             self.assertEqual(authorized["action"], "browser_read_authorized")
+            self.assertEqual(
+                authorized["response_pairing_rule"],
+                "first_complete_assistant_after_current_request",
+            )
+            self.assertFalse(authorized["request_node_is_reply"])
+            self.assertFalse(authorized["partial_reply_is_no_reply"])
+            self.assertEqual(authorized["required_browser_tab_exit_status"], "handoff")
+            self.assertFalse(authorized["fixed_chat_tab_close_allowed"])
             reply = root / "reply.txt"
             reply.write_text("请继续一个局部、可逆的修复。", encoding="utf-8")
             with self.assertRaisesRegex(lcrl.LCRLError, "response_message_id is required"):
@@ -7195,6 +8025,9 @@ class ControllerTests(unittest.TestCase):
             claimed = lcrl.waiting_check_command(Namespace(
                 state=str(state_path), token=token, automation_id=automation_id,
             ))
+            self.arm_waiting_recovery(
+                state_path, token, automation_id, claimed["lease_id"],
+            )
             slot = lcrl.acquire_account_browser_slot_command(Namespace(
                 implementation_thread_id="implementation",
                 reviewer_thread_id="web-chat-no-reply", operation="waiting_read",
@@ -7213,16 +8046,35 @@ class ControllerTests(unittest.TestCase):
                     lease_id=claimed["lease_id"], reason="no_complete_reply",
                 ))
 
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "complete paired assistant reply must be staged",
+            ):
+                lcrl.record_browser_no_complete_reply_command(Namespace(
+                    state=str(state_path), token=token, automation_id=automation_id,
+                    lease_id=claimed["lease_id"],
+                    account_slot_lease_id=slot["lease_id"],
+                    account_browser_registry=str(registry), at=None,
+                    browser_id="iab-session-1",
+                    observed_request_message_id="request-message-no-reply",
+                    latest_assistant_message_id="assistant-complete-after-request",
+                    assistant_after_request_count=1,
+                    latest_assistant_state="complete",
+                ))
+
             observed = lcrl.record_browser_no_complete_reply_command(Namespace(
                 state=str(state_path), token=token, automation_id=automation_id,
                 lease_id=claimed["lease_id"], account_slot_lease_id=slot["lease_id"],
                 account_browser_registry=str(registry), at=None,
                 browser_id="iab-session-1",
                 observed_request_message_id="request-message-no-reply",
-                latest_assistant_message_id="assistant-before-request",
+                latest_assistant_message_id="assistant-fragment-after-request",
+                assistant_after_request_count=1,
+                latest_assistant_state="fragment",
             ))
             self.assertEqual(observed["action"], "browser_no_complete_reply_observed")
             self.assertTrue(observed["chat_read_observed"])
+            self.assertTrue(observed["reply_fragment_observed"])
+            self.assertIn("回复片段", observed["user_message"])
             lcrl.release_account_browser_slot_command(Namespace(
                 implementation_thread_id="implementation", lease_id=slot["lease_id"],
                 outcome="completed", health_proof=None, registry=str(registry), at=None,
@@ -7233,7 +8085,10 @@ class ControllerTests(unittest.TestCase):
             ))
             self.assertEqual(rearmed["action"], "update_once")
             self.assertTrue(rearmed["chat_read_observed"])
-            self.assertEqual(rearmed["user_message"], "已检查固定 Chat，本次未发现完整回复。")
+            self.assertEqual(
+                rearmed["user_message"],
+                "已看到回复片段，但尚未取得完整可消费回复。",
+            )
             status = lcrl.progress_query_command(Namespace(state=str(state_path)))
             self.assertTrue(status["chat_read_observed"])
             self.assertEqual(status["last_chat_check_outcome"], "no_complete_reply")
