@@ -36,11 +36,13 @@ intervention.
 ## Completed and verified
 
 - Source candidate: `0.2.0-alpha.63`, Controller 119, Skill `2026-08-14.76`.
-- Repository tests: 358/358; controller tests: 250/250.
+- Repository tests: 361/361; controller tests: 250/250.
 - Controller selftest: 15/15.
 - Milestone, Skill, and plugin validators pass.
 - Beta evidence matrix and CI truth validator are present; all six real-device
   gates remain explicitly blocked and cannot be promoted by local/mock evidence.
+- Beta evidence is gate-bound, platform-bound, candidate-bound, and checked
+  against the full hashed JSON artifact; unrelated files cannot unlock a gate.
 
 ## Locked decisions
 

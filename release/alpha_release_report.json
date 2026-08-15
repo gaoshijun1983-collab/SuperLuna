@@ -20,7 +20,7 @@
     "command": "lcrl"
   },
   "automated_evidence": {
-    "repository_tests": 358,
+    "repository_tests": 361,
     "repository_test_total_pending_final_validation": false,
     "reviewer_chat_round_budget_rollover_local_tested": true,
     "rate_limited_reviewer_chat_retirement_local_tested": true,

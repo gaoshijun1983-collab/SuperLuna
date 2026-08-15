@@ -26,6 +26,7 @@ class BetaEvidenceRecordingTests(unittest.TestCase):
         return {
             "id": identifier,
             "gate": recorder.CYCLE_GATE,
+            "source": "real_device",
             "platform": "macos",
             "os_version": "macOS test",
             "codex_version": "Codex test",
@@ -81,6 +82,19 @@ class BetaEvidenceRecordingTests(unittest.TestCase):
             recorder.CYCLE_GATE,
         )
         self.assertIn("evidence candidate must match the frozen matrix candidate", errors)
+
+    def test_raw_evidence_cannot_predeclare_controller_owned_fields(self):
+        evidence = self.evidence("cycle-reserved")
+        evidence["artifact"] = "evidence/beta/forged.json"
+        evidence["sha256"] = "a" * 64
+        _, errors = recorder.prepare_update(
+            self.matrix, evidence, "evidence/beta/cycle-reserved.json", "b" * 64,
+            recorder.CYCLE_GATE,
+        )
+        self.assertEqual(
+            errors,
+            ["raw evidence must not contain controller-owned artifact or sha256 fields"],
+        )
 
     def test_file_outside_evidence_beta_is_rejected_without_matrix_write(self):
         with tempfile.TemporaryDirectory() as directory:

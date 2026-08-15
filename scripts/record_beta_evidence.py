@@ -44,6 +44,8 @@ def prepare_update(
     errors: list[str] = []
     if not isinstance(matrix, dict) or not isinstance(evidence, dict):
         return matrix, ["matrix and evidence must be objects"]
+    if "artifact" in evidence or "sha256" in evidence:
+        return matrix, ["raw evidence must not contain controller-owned artifact or sha256 fields"]
     if gate_name not in REQUIRED_GATES:
         return matrix, ["gate must be one of the six required Beta gates"]
     record = dict(evidence)

@@ -20,6 +20,11 @@ REQUIRED_GATES = (
     "macos_in_app_browser_version_matrix",
     "real_browser_network_and_rate_limit_recovery",
 )
+PLATFORM_BY_GATE = {
+    "windows_waiting_check_platform_automation": "windows",
+    "windows_in_app_browser_full_loop": "windows",
+    "macos_in_app_browser_version_matrix": "macos",
+}
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 
 
@@ -27,7 +32,12 @@ def _text(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
-def _valid_evidence(item: Any, candidate_version: str, candidate_commit: str) -> bool:
+def _valid_evidence(
+    item: Any,
+    candidate_version: str,
+    candidate_commit: str,
+    gate_name: str | None = None,
+) -> bool:
     if not isinstance(item, dict):
         return False
     required = (
@@ -38,8 +48,14 @@ def _valid_evidence(item: Any, candidate_version: str, candidate_commit: str) ->
         return False
     return (
         item.get("result") == "pass"
+        and item.get("source") == "real_device"
         and item.get("candidate_version") == candidate_version
         and item.get("candidate_commit") == candidate_commit
+        and (gate_name is None or item.get("gate") == gate_name)
+        and (
+            gate_name not in PLATFORM_BY_GATE
+            or item.get("platform") == PLATFORM_BY_GATE[gate_name]
+        )
         and bool(re.fullmatch(r"[0-9a-f]{64}", item["sha256"]))
     )
 
@@ -53,11 +69,19 @@ def _artifact_error(item: dict[str, Any], root: Path, label: str) -> str | None:
     try:
         if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(root):
             return f"{label}.artifact must be a regular repository file"
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        raw = path.read_bytes()
+        actual = hashlib.sha256(raw).hexdigest()
     except OSError as exc:
         return f"{label}.artifact cannot be read: {exc}"
     if actual != item["sha256"]:
         return f"{label}.artifact sha256 does not match the file"
+    try:
+        artifact = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return f"{label}.artifact must be a UTF-8 JSON object: {exc}"
+    expected = {key: value for key, value in item.items() if key not in {"artifact", "sha256"}}
+    if artifact != expected:
+        return f"{label}.artifact content must match the recorded evidence"
     return None
 
 
@@ -102,7 +126,10 @@ def validate_contract(document: Any, release_report: Any | None = None) -> list[
             if not isinstance(cycles, list):
                 errors.append(f"gates.{name}.cycles must be an array")
                 cycles = []
-            valid = [item for item in cycles if _valid_evidence(item, version, commit)]
+            valid = [
+                item for item in cycles
+                if _valid_evidence(item, version, commit, name)
+            ]
             valid = [
                 item for item in valid
                 if all(item.get(field) == 0 for field in (
@@ -120,7 +147,7 @@ def validate_contract(document: Any, release_report: Any | None = None) -> list[
                 errors.append(f"gates.{name}.evidence must be an array")
                 evidence = []
             evidence_complete = bool(evidence) and all(
-                _valid_evidence(item, version, commit) for item in evidence
+                _valid_evidence(item, version, commit, name) for item in evidence
             )
             if passed and not evidence_complete:
                 errors.append(f"gates.{name} cannot pass without candidate-bound real-device evidence")
@@ -166,7 +193,10 @@ def validate_files(matrix_path: Path, report_path: Path) -> dict[str, Any]:
             )
             for index, item in enumerate(items):
                 if isinstance(item, dict) and _valid_evidence(
-                    item, matrix["candidate_version"], matrix["candidate_commit"]
+                    item,
+                    matrix["candidate_version"],
+                    matrix["candidate_commit"],
+                    name,
                 ):
                     artifact_error = _artifact_error(item, root, f"gates.{name}[{index}]")
                     if artifact_error:

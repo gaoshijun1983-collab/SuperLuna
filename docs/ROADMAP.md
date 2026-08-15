@@ -126,7 +126,9 @@ bound to the exact frozen candidate, and consistent with the release report.
 under `evidence/beta/`; it never starts a browser, Chat, automation, or test.
 Failed cycle evidence resets the consecutive-cycle streak, and any external
 wakeup, duplicate send, cross-Chat read, or replacement task prevents that cycle
-from counting as a pass.
+from counting as a pass. The evidence must declare its exact gate and real-device
+source, use the gate's required platform, and match the hashed artifact body;
+`evidence/beta/README.md` documents the sanitized bilingual format.
 Normal CI verifies truthful blocked/ready reporting; a release decision must run
 the validator with `--require-ready`, which remains failing until all six gates
 and ten unique consecutive cycles are complete.
