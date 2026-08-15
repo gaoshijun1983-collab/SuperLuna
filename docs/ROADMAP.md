@@ -122,6 +122,11 @@ toward Beta means real-cycle and platform evidence, not more orchestration.
 The canonical Beta evidence checklist is `docs/beta_evidence_matrix.json`.
 `scripts/validate_beta_evidence.py` verifies that all evidence is real-device,
 bound to the exact frozen candidate, and consistent with the release report.
+`scripts/record_beta_evidence.py` records one already-observed evidence file
+under `evidence/beta/`; it never starts a browser, Chat, automation, or test.
+Failed cycle evidence resets the consecutive-cycle streak, and any external
+wakeup, duplicate send, cross-Chat read, or replacement task prevents that cycle
+from counting as a pass.
 Normal CI verifies truthful blocked/ready reporting; a release decision must run
 the validator with `--require-ready`, which remains failing until all six gates
 and ten unique consecutive cycles are complete.

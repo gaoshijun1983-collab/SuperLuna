@@ -30,11 +30,13 @@ intervention.
 - Formal review-title validation plus complete post-request assistant pairing;
   fragments remain pending and the fixed Chat tab is preserved for handoff.
 - Repository-local self-retest profile plus installed `generic` compatibility.
+- Candidate-bound Beta evidence recorder that accepts only repository evidence,
+  resets a consecutive streak on failure, and never starts Chat or automation.
 
 ## Completed and verified
 
 - Source candidate: `0.2.0-alpha.63`, Controller 119, Skill `2026-08-14.76`.
-- Repository tests: 353/353; controller tests: 250/250.
+- Repository tests: 358/358; controller tests: 250/250.
 - Controller selftest: 15/15.
 - Milestone, Skill, and plugin validators pass.
 - Beta evidence matrix and CI truth validator are present; all six real-device
