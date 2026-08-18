@@ -41,6 +41,7 @@ intervention.
 ## Completed and verified
 
 - Source candidate: `0.2.0-alpha.76`, Controller 132, Skill `2026-08-18.89`.
+- Frozen candidate commit: `dc0ed1c6f3ee94e64ce51bdb4c4eaac0ace14082`.
 - Alpha 76 repository regression passed 381/381. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the
@@ -141,8 +142,9 @@ intervention.
 
 ## Next decision point
 
-Freeze the next candidate commit, then collect the six real-device Beta gates
-against that exact commit. Run `scripts/validate_beta_evidence.py --require-ready`
+Collect the six real-device Beta gates against frozen commit
+`dc0ed1c6f3ee94e64ce51bdb4c4eaac0ace14082`. Run
+`scripts/validate_beta_evidence.py --require-ready`
 before any Public Beta declaration.
 
 ## Do not repeat

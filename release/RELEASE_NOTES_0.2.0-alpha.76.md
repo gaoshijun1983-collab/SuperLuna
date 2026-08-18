@@ -23,6 +23,7 @@ real-device and consecutive-cycle evidence gates.
 - Two independent builds produced the same verified archive from 98 tracked
   source files.
 
-The archive matches the current local Alpha 76 source. The source still needs a
-frozen Git commit before real-device Beta evidence can be attributed to an exact
-candidate.
+The Alpha 76 implementation is frozen at Git commit
+`dc0ed1c6f3ee94e64ce51bdb4c4eaac0ace14082`. Real-device Beta evidence must
+match this exact candidate; evidence-recording commits do not change the frozen
+implementation identity.
