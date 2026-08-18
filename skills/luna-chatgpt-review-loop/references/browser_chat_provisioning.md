@@ -7,13 +7,14 @@
 一个 Chat，不得在失败、重试、下一回合或上下文压缩后再次创建，也不得扩展成无限建 Chat。
 
 这里约束的是新任务的首次 provision。正式运行中只有两种独立、受控的换卷例外：当前 Chat
-已完成 8 次正式评审，或当前 Chat 出现真实限流。例外必须由控制器生成唯一 rollover 授权，
+按真实 Chat 身份跨运行累计已完成 2 次正式评审，或当前 Chat 出现真实限流。例外必须由控制器生成唯一 rollover 授权，
 先永久归档旧 Chat，再只创建一个替代 Chat；普通失败和重试仍不允许建新 Chat。
 
 一次性授权允许通过 Codex 内置浏览器可见 UI 创建一个 ChatGPT 网页 conversation，并发送
 一条不含敏感信息的初始化消息。它不授权创建第二个 Codex 任务、切换评审通道、安装依赖、
-发布项目或扩大项目写入范围。不得自动切换模型或推理档位；只有新 Chat 可见标签已经是
-“极高”时才自动继续，否则请用户完成一次可见选择并确认。
+发布项目或扩大项目写入范围。新 Chat 完成精确绑定后，SuperLuna 只可在 live `startup` 账户
+名额下取得一次控制器授权，通过前台可见 UI 把这个唯一 reviewer Chat 选择为“极高/Extreme”，
+并回读实际控件标签；不得改动实施任务模型、其他 Chat 或任何未授权档位。
 
 ## Provision exactly once
 
@@ -70,10 +71,15 @@
 7. 运行正常的自动预检与 `init`，随后调用 `bind-browser-tab` 保存 browser binding、固定 URL
    以及真实 `providerTabId`，或上述唯一允许的 `pending_handoff`。初始化 request/response
    identity 单独保存为启动证据。
-8. 读取新 Chat 当前可见推理标签。若已经是“极高”，调用 `confirm-review-mode` 并提交刚才已
-   完成本地验证的第一轮结果；否则停在正式提交和后续项目写入前，只请求用户完成一次可见选择。
-9. 进入正式循环后，这个 Chat 与标签遵守当前活动卷绑定合同。只有控制器确认已达到 8 次正式
-   评审上限，或账户门记录了该 Chat 的真实限流，才授权唯一替代 Chat；其他错误不能授权替代。
+8. 调用 `authorize-browser-review-mode-selection --target extreme`，同时提交当前 state、live
+   `startup` 账户名额和 browser identity。只有返回 `browser_review_mode_selection_authorized` 才在
+   当前前台标签打开推理选择器，选择可见“极高/Extreme”，然后回读选择器真实标签，并调用
+   `confirm-review-mode --source in_app_browser_automatic`，交回 authorization revision、同一账户
+   名额、browser 与 reviewer Chat identity。选择器缺失、标签不唯一、页面切换、授权过期或回读
+   不是“极高/Extreme”时失败关闭，不发送第一轮材料，也不要求用户完成正常流程中的机械点击。
+9. 进入正式循环后，这个 Chat 与标签遵守当前活动卷绑定合同。所有正常访问只检查可见末尾，
+   禁止扫描完整历史。只有控制器确认已达到 2 次正式评审上限，或账户门记录了该 Chat 的真实
+   限流，才授权唯一替代 Chat；其他错误不能授权替代。
    首次正式提交后，离开当前浏览器控制回合前必须把同一标签设为 `handoff`。第一次受权等待
    检查按唯一固定 URL 重新认领它；`user.openTabs()` 暴露真实 `providerTabId` 后，在同一个
    token、等待任务 ID 和读 lease 下先调用 `promote-browser-tab-binding`，再重新授权读取。

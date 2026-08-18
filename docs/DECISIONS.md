@@ -14,7 +14,7 @@ This file records confirmed product boundaries. It is not a release claim.
 
 - New runs use one active user-selected ChatGPT conversation at a time in
   Codex's in-app browser.
-- A reviewer conversation is bounded to eight formal reviews. Before a ninth
+- A reviewer conversation is bounded to two formal reviews across run boundaries. Before a third
   review, or immediately after a real rate-limit notice, retire it permanently
   and create exactly one replacement conversation with compact current context.
   Never reopen or health-probe a retired conversation, and never keep two
@@ -41,6 +41,10 @@ This file records confirmed product boundaries. It is not a release claim.
   move to the claim-expiry recovery time and be confirmed in state. Browser read
   remains denied until confirmation. If the occurrence exits before reading,
   the same wait recovers the expired claim; no second scheduler is created.
+- If that claim expires and an ordinary wake finds the local wait still bound,
+  inspect only the exact saved platform task id. Update that task in place when
+  found, or create exactly one replacement when the platform reports it missing.
+  This recovery never reads Chat or the project and never asks for a product choice.
 - A healthy page is read without refresh. A network/load failure schedules one
   check 180 seconds later, which may reload the same tab exactly once.
 - A “requests are too frequent” notice is not a network error: perform no reload,
@@ -49,6 +53,17 @@ This file records confirmed product boundaries. It is not a release claim.
   history again.
 - Leaving the waiting phase retires the check and invalidates queued occurrences.
 - An uncertain send is reconciled in the same Chat and is never blindly resent.
+
+## Technical blockers and product decisions
+
+- A technical failure is not a user product choice. Task identity mismatch,
+  missing capability, cooldown, browser-slot conflict, recoverable wait, and
+  controller failure must return a stable reason code plus a concrete system
+  recovery action with `user_choice_required=false`.
+- Use `需要你决定` only when the available paths would change the confirmed
+  product goal, authorized scope, or risk boundary. State the reason, ask one
+  concrete question, and provide two or three mutually exclusive options with
+  their impacts. Generic “continue / adjust / stop” prompts are forbidden.
 
 ## Model and quota
 

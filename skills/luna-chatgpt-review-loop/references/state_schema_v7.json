@@ -327,7 +327,7 @@
       "properties": {
         "mode": {"const": "bounded_series_v1"},
         "generation": {"type": "integer", "minimum": 1},
-        "max_formal_rounds": {"const": 8},
+        "max_formal_rounds": {"const": 2},
         "status": {"enum": ["active", "rollover_required"]},
         "rollover_reason": {"enum": ["none", "round_budget", "rate_limited"]},
         "rollover_authorization_id": {"type": "string"},

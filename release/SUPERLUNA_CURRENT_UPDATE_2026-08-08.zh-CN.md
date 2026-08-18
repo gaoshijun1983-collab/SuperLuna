@@ -3,19 +3,86 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.63`（Python 元数据：`0.2.0a63`）
-- 当前源码控制器：119
+- 版本：`0.2.0-alpha.76`（Python 元数据：`0.2.0a76`）
+- 当前源码控制器：132
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-14.76`
-- 候选日期：2026-08-14
+- 当前源码 Skill 修订：`2026-08-18.89`
+- 候选日期：2026-08-18
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
+
+## 当前候选验证
+
+- 仓库测试：381/381 通过；控制器 selftest：15/15 通过。
+- closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
+  validator 均通过。
+- 两次独立构建得到完全一致的 98 文件源码包，最终归档已通过源码一致性校验。
+- 上述结果只证明本地 Alpha 76 候选可重复构建，不代表真实 App 闭环或公开 Beta
+  已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
+### 0. 旧版等待作废入口不再终止自动恢复
+
+- Controller 132 / Skill revision `2026-08-18.89` 修复真机复测暴露的兼容路径：
+  已运行的任务调用旧 `retire-missing-wait` 时，不再把等待状态改为
+  `external_blocked`。
+- 旧入口也会轮换等待身份，保持 `review_waiting`，并返回“只创建和绑定一个
+  替代等待任务”的同一平台合同。
+- 该恢复仍不允许访问 Chat、项目或询问产品方向；身份不匹配时继续失败关闭。
+
 ### 0. 所有 Chat 操作改为可见前台模式
 
+- Controller 131 / Skill revision `2026-08-18.88` 修复本地等待状态仍存在、但平台单次等待任务
+  已中断或消失时的永久等待：普通唤醒只能先查询 state 中保存的精确任务 ID；存在则原地更新，
+  平台确认 `not_found` 时只重建一个新任务。该恢复不读 Chat、不读写项目，也不要求用户决定。
+- Controller 130 / Skill revision `2026-08-18.87` 修复技术故障被统一误报为“需要你决定”的问题。
+  任务身份不匹配、能力缺失、冷却、浏览器名额冲突、可恢复等待和控制器故障现在返回稳定
+  `reason_code`、明确中英文说明与系统恢复动作，且 `user_choice_required=false`。只有会改变已确认
+  产品目标、授权范围或风险边界的互斥选择才会要求用户决定，并必须提供一个具体问题和 2–3 个
+  带影响说明的选项；禁止再出现空泛“继续／调整／停止”。
+
+- Controller 129 / Skill revision `2026-08-17.86` 允许同一个仓库自测任务在旧失败轮次已明确终止、所有名额与等待均已释放时，保留精确隔离目录并干净重置；换任务继续强制新建任务专属隔离目录和状态。
+- Controller 128 / Skill revision `2026-08-17.85` 修复真实换卷流程中的最后一个身份交接缺口：
+  新 Chat 已创建并绑定后，原一次性 `startup` 名额仍保留 reviewer=`none`，导致“极高”核验被
+  控制器自己拒绝。现在只在同一任务、lease、profile/scope、可见 browser、规范 Chat UUID、
+  精确 URL 与 startup operation 全部一致时，把原名额原子绑定到新 Chat；无需再次申请名额、
+  重开浏览器或扫描历史。任一身份不一致仍失败关闭。
+
+- Controller 127 / Skill revision `2026-08-17.84` 修复替代 reviewer Chat 已成功创建、绑定并
+  核验“极高”后，却因同一活动名额从 `startup` 转向第一次 `submission` 被通用跨 operation
+  门禁拒绝的问题。现在只有同一任务、profile/scope、state revision、可见浏览器、精确新 Chat
+  绑定与“极高”确认全部一致时，才可把同一 lease 原子续接为第一次提交；不再二次初始化浏览器、
+  重开/刷新页面或扫描完整历史。其余跨 operation、错 Chat、旧授权和后台访问仍失败关闭。
+
+- Controller 126 / Skill revision `2026-08-17.83` 修复替代 reviewer Chat 已成功创建并初始化，
+  却因 ChatGPT 使用 UUID v8 conversation ID 而被旧版 v1-v5 校验误拒的问题。现在接受规范的
+  UUID v1-v8，仍强制 UUID variant、精确 Chat URL、新旧身份不同及同一授权绑定全部一致；临时、
+  畸形或错配身份仍安全停止。
+
+- Controller 125 / Skill revision `2026-08-17.82` 修复仓库真实复测在一个阶段结束后
+  被错误收尾的问题：`superluna_repo_retest_v1` 现在始终强制 `continuous`，旧版误写为
+  `single_stage` 的状态加载后也按持续任务执行。当用户继续同一条已授权路线且旧 reviewer
+  Chat 已达到 2/2 时，控制器会立即标记换卷、禁止再次访问旧 Chat，并要求创建一个替代 Chat。
+
+- Controller 124 / Skill revision `2026-08-17.81` 把 ChatGPT 限流保护提前到访问发生前：
+  同一 reviewer Chat 按真实 Chat 身份跨运行累计最多完成 2 次正式评审，第 3 次提交前主动换卷；
+  所有已绑定 Chat 的正常访问只能检查对话末尾，禁止扫描完整历史。旧状态自动采用当前安全上限，
+  不能继续保留更宽松的历史值。该保护减少可避免的历史访问，但不能保证平台永不对账户限流。
+- Controller 123 / Skill revision `2026-08-17.80` 修复持续开发被实施任务自行缩短的问题：
+  已经记录为 `continuous` 的目标，在 `begin-new-goal` 或复测重置时只允许继续保持持续模式；
+  传入 `single_stage` 会在修改 state 前失败关闭。阶段名称、Round 编号或任务自行生成的授权标识
+  都不能代替用户对“仅做这一阶段”的明确授权。
+
+- Controller 122 / Skill revision `2026-08-17.79` 补齐自动“极高”确认到正式提交的完整链路：
+  `in_app_browser_automatic` 在同一任务、账户名额、浏览器、绑定 Chat、fingerprint 和空请求身份
+  全部通过时，可依次进入 submission reopen、发送前对账与最终单次发送授权；错误 Chat、旧授权、
+  错误 operation、后台访问或身份不一致仍失败关闭。
+- Controller 120 / Skill revision `2026-08-16.77` 将 reviewer Chat 的“极高/Extreme”设为受控
+  自动步骤：只有精确绑定的任务、账户名额、浏览器、Chat 与 state revision 全部一致时，才允许
+  在前台可见 UI 中选择一次并回读核验；控件缺失、含糊或错 Chat 时失败关闭，不再要求用户完成
+  正常初始化中的机械点击，也不会自动改变 Codex 实施模型。
 - Controller 119 / Skill revision `2026-08-14.76` 根治长对话反复读取造成的访问放大：每个活动
-  reviewer Chat 最多 8 次正式评审，第 9 次之前必须换卷；任何真实限流都会永久停用旧 Chat。
+  reviewer Chat 最多 2 次正式评审，第 3 次之前必须换卷；任何真实限流都会永久停用旧 Chat。
   冷却到期后只创建一个带精简当前项目上下文的新 Chat，旧 Chat 不再被重开、刷新、健康探测或
   扫描，也不允许两个 reviewer Chat 并行活动。未发送的同一份材料在新 Chat 完成绑定后继续。
 - Controller 118 / Skill revision `2026-08-14.75` 修复限流恢复后重复访问固定 Chat：健康探测
@@ -353,6 +420,17 @@
   60 分钟。冷却结束后仅允许一个只读健康探测，确认恢复后才重新开放两个名额。
 - 该门只能协调当前电脑，不能证明另一台使用同一 ChatGPT 账户的电脑处于空闲；跨设备并发仍
   是未解决的真实风险。本轮仅有本地并发回归证据，不声称真实限流恢复已经通过。
+
+### 0AAAAA. 平台单次等待丢失后自动续接
+
+- 实测出现本地 state 仍保留已绑定等待任务和过期读取 claim，但平台自动任务已经不存在；普通
+  `turn_entry` 只能返回 `waiting_turn_blocked`，因此会永久显示“等待 Chat”。
+- Controller 131 在这个精确状态下返回平台任务查询合同，只允许查看 state 保存的唯一任务 ID，
+  禁止浏览器、Chat 和项目访问。
+- 平台任务仍存在时，`recover-stale-wait` 会旋转 token、清理过期 claim，并原地更新同一个任务；
+  平台返回 `not_found` 时则解除旧绑定，通过既有 bootstrap/bind barrier 只创建一个替代任务。
+- 两条路径都保持 `review_waiting`、`user_choice_required=false`；错误任务、错误实施身份、非等待态
+  或尚未过期的 claim 均保持 state 字节不变。
 
 ### 0AAAA. 固定 Chat 启动认领与页面证据不再误判
 
@@ -1084,6 +1162,8 @@
 - Windows 当前候选的功能闭环已真实完成，但无外部唤醒的自动调度闭环仍未验证；macOS 浏览器
   版本矩阵也未完成。旧 App E5 只保留为历史故障证据，不计入浏览器优先发布门。
 
-因此 Controller 119 / Alpha 63 仍只适合继续开发和技术测试。最终仓库回归数字将在本轮完整验证后写入，
-控制器回归 247/247、内置 selftest 15/15 均通过；但 Alpha 62 最终归档、真实连续闭环和
+因此 Controller 132 / Alpha 76 仍只适合继续开发和技术测试。本轮仓库回归 381/381 通过，
+控制器 selftest 15/15、closure-check、Skill、插件、决策登记、里程碑与 Beta 证据格式校验均通过；
+包含现代 UUID v6-v8 reviewer Chat 身份绑定、跨运行累计两轮上限与所有绑定 Chat 只读末尾的反例；
+Alpha 76 最终归档已通过双构建一致性校验，但这些仍是本地证据，真实连续闭环和
 平台矩阵仍未完成，不应宣称 Public Beta 或正式版本就绪。

@@ -25,7 +25,7 @@ browser, send a message, create an automation, or claim an unobserved result.
   "codex_version": "observed Codex Desktop version",
   "observed_at": "2026-08-15T00:00:00Z",
   "result": "pass",
-  "candidate_version": "0.2.0-alpha.63",
+  "candidate_version": "0.2.0-alpha.66",
   "candidate_commit": "e24edd00ec3775108e283460d4b5b5625eae8c73"
 }
 ```

@@ -71,7 +71,7 @@ class PackageTests(unittest.TestCase):
         text = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("自动模式活动期间不得输出三选一", text)
         self.assertIn("不得在每次正式提交前重复请求用户确认", text)
-        self.assertIn("只有真实的新授权阻塞", text)
+        self.assertIn("只有真实的新产品授权阻塞", text)
         self.assertIn("continuation_required=true", text)
         self.assertIn("turn_completion_allowed=false", text)
         self.assertIn("在同一 turn 继续", text)
@@ -146,6 +146,14 @@ class PackageTests(unittest.TestCase):
             self.assertIn(field, protocol)
             self.assertIn(f'"{field}"', source)
 
+    def test_readonly_monitor_must_not_share_a_task_with_another_active_state(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn(
+            "只读监测不得挂在一个已经绑定另一份活动 SuperLuna state 的实施或协调任务上",
+            skill,
+        )
+        self.assertIn("删除旧循环监测", skill)
+
     def test_controller_registry_matches_source_revision(self):
         registry = json.loads((SKILL_ROOT / "references" / "controller.json").read_text(encoding="utf-8"))
         source = (SKILL_ROOT / "scripts" / "lcrl.py").read_text(encoding="utf-8")
@@ -161,7 +169,8 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(registry["account_browser_gate_lock_timeout_seconds"], 10)
         self.assertEqual(registry["account_browser_cross_task_quiet_seconds"], 180)
         self.assertEqual(registry["account_browser_rate_limit_backoff_seconds"], [1800, 3600])
-        self.assertEqual(registry["reviewer_chat_max_formal_rounds"], 8)
+        self.assertEqual(registry["reviewer_chat_max_formal_rounds"], 2)
+        self.assertTrue(registry["bound_reviewer_chat_history_tail_only"])
         self.assertFalse(registry["rate_limited_reviewer_chat_reopen_allowed"])
         self.assertTrue(registry["reviewer_chat_rollover_after_rate_limit"])
         for requirement in (
@@ -178,7 +187,7 @@ class PackageTests(unittest.TestCase):
             "最多 2 个",
             "第三个任务只排队",
             "--outcome rate_limited",
-            "每个 reviewer Chat 最多承载 8 次正式评审",
+            "每个 reviewer Chat 最多承载 2 次正式评审",
             "旧 Chat 已退休",
             "complete-reviewer-chat-rollover",
             "reviewer_chat_rollover_required",
@@ -1010,7 +1019,7 @@ class PackageTests(unittest.TestCase):
             "初始化消息不计入正式回合",
             "providerTabId",
             "bind-browser-tab",
-            "不得自动切换模型或推理档位",
+            "不得改动实施任务模型",
             "pending_handoff",
             "promote-browser-tab-binding",
             "provisioned_url_fallback_allowed",
@@ -1260,18 +1269,21 @@ class PackageTests(unittest.TestCase):
         self.assertIn('"action": "waiting_recovery_arm_required"', source)
         self.assertIn('"waiting_check_action": "update_once"', source)
 
-    def test_startup_browser_confirmation_is_visible_user_evidence_not_model_control(self):
+    def test_startup_browser_confirmation_automates_only_the_bound_reviewer_mode(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         protocol = (SKILL_ROOT / "references" / "protocol.md").read_text(encoding="utf-8")
         for requirement in (
-            "用户亲眼确认",
-            "SuperLuna 不替用户切换",
-            "用户报告或亲眼看到档位变化",
+            "authorize-browser-review-mode-selection",
+            "in_app_browser_automatic",
+            "极高/Extreme",
+            "SuperLuna 不自动切换 Codex 实施模型",
         ):
             self.assertIn(requirement, skill)
-        self.assertIn("The user explicitly\nconfirms the visible reviewer mode", protocol)
-        self.assertIn("The workflow never switches\nmodel/reasoning", protocol)
-        self.assertIn("A bounded rollover is allowed only after eight formal", protocol)
+        self.assertIn("authorize-browser-review-mode-selection", protocol)
+        self.assertIn("in_app_browser_automatic", protocol)
+        self.assertIn("exact bound reviewer Chat", protocol)
+        self.assertIn("never changes the Codex implementation model", protocol)
+        self.assertIn("A bounded rollover is allowed only after two formal", protocol)
 
     def test_skill_preflight_uses_the_runtime_extreme_review_mode_enum(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")

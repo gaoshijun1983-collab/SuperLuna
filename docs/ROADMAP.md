@@ -71,8 +71,9 @@ safety core; the in-app browser is the formal ChatGPT transport for new runs.
 - Treat ChatGPT rate limiting separately: no reload/read/send and deterministic
   machine-wide 30/60-minute circuit breaking. Retire the affected reviewer Chat
   permanently and, after cooldown, create exactly one compact-context replacement
-  instead of probing old history. Bound every active reviewer Chat to eight formal
-  reviews. All local runs share at most two short-lived web-Chat access slots;
+  instead of probing old history. Bound every active reviewer Chat identity to two
+  formal reviews across run boundaries and inspect only the visible tail. All local
+  runs share at most two short-lived web-Chat access slots;
   the third queues before browser startup. Cross-device access remains outside
   the local controller's proof boundary.
 - Preserve receipt reconciliation and duplicate-send protection without making

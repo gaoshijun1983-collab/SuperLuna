@@ -1,5 +1,126 @@
 # Changelog
 
+## 0.2.0-alpha.76 - 2026-08-18
+
+- Packages Controller 132 / Skill revision `2026-08-18.89`.
+- Makes the legacy `retire-missing-wait` compatibility entry rebuild exactly
+  one replacement wait instead of changing a recoverable review to
+  `external_blocked`.
+- Repairs already-poisoned `platform_wait_task_not_found` states during the
+  next exact task turn entry and returns them to the same one-wait bind barrier.
+- Preserves the waiting state and keeps Chat, project, and product-decision
+  access denied until the replacement wait is bound.
+
+## 0.2.0-alpha.75 - 2026-08-18
+
+- Packages Controller 131 / Skill revision `2026-08-18.88`.
+- Detects an expired waiting-read claim during ordinary turn entry and requires
+  an exact lookup of the one bound platform wait before any other action.
+- Reuses that same wait when found or creates exactly one replacement when the
+  platform confirms it is missing, without Chat, project, or user-decision access.
+
+## 0.2.0-alpha.74 - 2026-08-18
+
+- Packages Controller 130 / Skill revision `2026-08-18.87`.
+- Separates recoverable technical blockers from real product decisions. Task
+  identity mismatches, missing capabilities, cooldowns, browser-slot conflicts,
+  recoverable waits, and controller failures now expose stable reason codes and
+  concrete system recovery actions with `user_choice_required=false`.
+- Reserves `需要你决定` for mutually exclusive product choices and requires one
+  explicit question plus two or three options with their impacts.
+
+## 0.2.0-alpha.73 - 2026-08-17
+
+- Packages Controller 129 / Skill revision `2026-08-17.86`.
+- Allows an explicitly authorized same-task repository retest to reset a fully
+  released failed cycle in its exact sandbox; cross-task same-state reuse stays
+  fail-closed.
+
+## 0.2.0-alpha.72 - 2026-08-17
+
+- Packages Controller 128 / Skill revision `2026-08-17.85`.
+- Fixes the real replacement-Chat flow where the one-time `startup` account
+  slot still carried reviewer identity `none` after the new visible Chat had
+  already been created and bound.
+- Promotes that same live slot only at the exact bound Extreme-selection gate;
+  no second slot acquisition, browser initialization, navigation, or history
+  scan is required. Wrong browser, task, scope, lease, Chat, URL, or operation
+  remains fail-closed.
+
+## 0.2.0-alpha.71 - 2026-08-17
+
+- Packages Controller 127 / Skill revision `2026-08-17.84`.
+- Lets a successfully provisioned replacement reviewer Chat atomically continue
+  from its one-time `startup` slot to that new Chat's first `submission` while
+  preserving the same lease, visible tab, exact binding, and tail-only access.
+- Keeps every other cross-operation reuse fail-closed and adds negative coverage
+  for an unbound or mismatched reviewer identity.
+
+## 0.2.0-alpha.70 - 2026-08-17
+
+- Packages Controller 126 / Skill revision `2026-08-17.83`.
+- Accepts modern canonical UUID versions 6, 7, and 8 for real ChatGPT
+  conversation identities while retaining the UUID variant, exact URL, and
+  replacement-binding checks.
+- Fixes a safe-stop after a replacement reviewer Chat was visibly created and
+  initialized but its valid version-8 identity was rejected as non-canonical.
+
+## 0.2.0-alpha.69 - 2026-08-17
+
+- Packages Controller 125 / Skill revision `2026-08-17.82`.
+- Forces repository self-retests to remain continuous, including legacy states
+  that were incorrectly stored as `single_stage`.
+- Beginning the next authorized goal after 2/2 formal reviews now retires the
+  old reviewer Chat and requires one replacement before any further access.
+
+## 0.2.0-alpha.68 - 2026-08-17
+
+- Packages Controller 124 / Skill revision `2026-08-17.81`.
+- Proactively rolls a reviewer Chat over before its third formal review, counting
+  the exact Chat identity across new goals and run bindings instead of resetting
+  the safety budget with each run.
+- Requires tail-only inspection for every normal operation on an already bound
+  reviewer Chat and denies full-history scanning before a real rate limit occurs.
+
+## 0.2.0-alpha.67 - 2026-08-17
+
+- Packages Controller 123 / Skill revision `2026-08-17.80`.
+- Prevents an implementation task from changing an already continuous goal to
+  `single_stage` during `begin-new-goal` or retest reset.
+- The downgrade is rejected before state mutation; stage names, round numbers,
+  and task-generated authorization labels do not override the continuous goal.
+
+## 0.2.0-alpha.66 - 2026-08-17
+
+- Packages Controller 122 / Skill revision `2026-08-17.79`.
+- Completes the automatic reviewer-mode handoff through pre-send reconciliation
+  and the one-shot formal send authorization. The previous release fixed reopen
+  but could still stop immediately before the first request.
+- Both trusted browser confirmation sources retain the same exact task, slot,
+  browser, reviewer Chat, fingerprint, foreground, and identity checks.
+
+## 0.2.0-alpha.65 - 2026-08-17
+
+- Packages Controller 121 / Skill revision `2026-08-17.78`.
+- Fixes a contract mismatch where a valid `in_app_browser_automatic` Extreme
+  confirmation was persisted but the subsequent submission-reopen gate still
+  accepted only the legacy manual `in_app_browser` source.
+- The reopen remains bound to the same task, live submission account slot,
+  browser, reviewer Chat, fingerprint, visible foreground mode, and empty
+  request identity; all mismatches remain fail-closed.
+
+## 0.2.0-alpha.64 - 2026-08-16
+
+- Packages Controller 120 / Skill revision `2026-08-16.77`.
+- Removes the normal manual click from reviewer Chat setup: after exact browser
+  and Chat binding, a live startup-slot-scoped controller authorization allows
+  one foreground selection of `极高/Extreme`, followed by a visible read-back.
+- The authorization is bound to the implementation task, account slot, browser,
+  reviewer Chat, target, and state revision. Missing, stale, cross-Chat, or
+  ambiguous evidence fails closed without changing workflow state.
+- Keeps automatic Codex implementation-model switching disabled; this release
+  changes only the user-approved reviewer Chat selector.
+
 ## 0.2.0-alpha.63 - 2026-08-14
 
 - Packages Controller 119 / Skill revision `2026-08-14.76`.

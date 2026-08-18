@@ -19,6 +19,21 @@ the conversation id in `https://chatgpt.com/c/<conversation-id>` plus the claime
 browser tab; title and focus are display hints only. `app_chat_review` remains a
 saved-state compatibility transport, not the default for new work.
 
+After that exact bound reviewer Chat is visible in the foreground and a live
+`startup` account slot exists, the controller may issue
+`authorize-browser-review-mode-selection --target extreme`. The same task may
+then select the visible `极高/Extreme` control and must confirm it with
+`confirm-review-mode --source in_app_browser_automatic`, the exact authorization
+revision, account slot, browser, and reviewer identity. Missing or ambiguous UI
+fails closed. This automatic action applies only to the exact bound reviewer Chat;
+it never changes the Codex implementation model or any other Chat. A bounded
+rollover is allowed only after two formal reviews or a real rate-limit event.
+After that confirmation is durably recorded, submission reopen, pre-send
+reconciliation, and final one-shot send authorization accept its
+`in_app_browser_automatic` source under the same exact Chat, task, browser,
+account-slot, operation, foreground, and revision checks as the manual
+`in_app_browser` source. It grants no broader browser or model authority.
+
 ### Repository self-retest profile
 
 SuperLuna's own source-repository development and real-loop retests use the
@@ -43,9 +58,11 @@ By default the workflow never creates a Chat. One explicit user request for a
 new reviewer conversation authorizes exactly one visible browser Chat plus one
 initialization message, as defined in `browser_chat_provisioning.md`; that setup
 exchange is not a formal review cycle. Ordinary browser recovery never creates
-a replacement Chat. A bounded rollover is allowed only after eight formal
-reviews or a real rate limit; it retires the old Chat and provisions exactly one
-replacement with compact current context. The workflow never switches
+a replacement Chat. A bounded rollover is allowed only after two formal
+reviews, counted by exact Chat identity across run boundaries, or a real rate
+limit; it retires the old Chat and provisions exactly one replacement with
+compact current context. Normal operations on a bound Chat are tail-only and
+return `full_history_scan_allowed=false`. The workflow never switches
 model/reasoning or sends through a second transport. The user explicitly
 confirms the visible reviewer mode unless the new Chat already shows the
 required label.
@@ -102,12 +119,19 @@ snapshot phrases such as `你说：` or `ChatGPT 说：`. Composer readiness use
 actual interactive and disabled state; visible Extreme remains separate visual
 evidence rather than a whole-DOM substring test.
 
-If a bound local wait outlives its platform task, only a host automation lookup
-of that exact id returning `not_found`, plus current user authorization, may
-invoke `retire-missing-wait`. The command requires the matching active local
-wait and no read lease, clears every wait identity, and moves to
-`external_blocked`. A task's own assertion, an id mismatch, or any live platform
-task cannot retire the wait.
+When a bound wait has an expired `waiting_review_poll` claim, ordinary turn
+entry returns `waiting_platform_lookup_required` instead of blocking forever.
+The host may inspect only the exact saved platform task id. The same
+implementation task then invokes `recover-stale-wait` with `found` or
+`not_found`: `found` rotates the token and updates that task in place;
+`not_found` clears the dead binding and enters the normal one-replacement bind
+barrier. Both paths remain in the same waiting state, grant no Chat or project
+access, and keep `user_choice_required=false`.
+
+`retire-missing-wait` remains a compatibility path for explicitly authorized
+terminal retirement of an orphan wait that is not in this recoverable expired
+claim state. A task assertion, id mismatch, wrong implementation identity, or
+live claim cannot recover or retire the wait.
 
 The read-only observer reports the active one-shot waiting identity as its
 effective `automation_id` whenever a wait is bound. It also exposes
@@ -190,7 +214,9 @@ bound platform wait.
 The guard also requires the exact implementation-task identity before granting
 any ordinary work lease. A missing identity or one belonging to another task
 fails closed even when no lease is currently active; it cannot bootstrap access
-to the state. Same-task serial recovery remains limited to an ordinary
+to the state. This is reported as `implementation_task_mismatch` with a concrete
+same-task recovery action and never as a vague product choice. Same-task serial
+recovery remains limited to an ordinary
 `turn_entry` or `apply_result` lease.
 
 An explicitly terminated retest does not escape this established state by
@@ -400,8 +426,14 @@ the account slot still belongs to the same implementation task with the exact
 wrong-task, or wrong-operation slots return `account_browser_slot_required` and
 do not authorize browser initialization. Stale or duplicate occurrences do not
 read the page or mutate the project.
-Slot acquisition never re-labels an existing lease: same-task reuse requires
-the same operation. `account_browser_operation_conflict` identifies the stale
+Slot acquisition normally never re-labels an existing lease: same-task reuse
+requires the same operation. The only controller-owned exception is a one-time
+replacement-Chat provisioning `startup` that atomically continues to that new
+Chat's first `submission` after exact task, profile/scope, state revision,
+reviewer binding, visible browser, and Extreme confirmation all match. It keeps
+the same lease and visible tab, permits tail-only inspection, and forbids a
+second browser initialization, navigation, refresh, or full-history scan.
+`account_browser_operation_conflict` identifies the stale
 lease for explicit release, but grants no browser access; a waiting occurrence
 then rearms state before moving the same platform wait.
 The first executable action of a due heartbeat must be the local `waiting-check`

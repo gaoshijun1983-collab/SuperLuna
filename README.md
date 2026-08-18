@@ -24,10 +24,47 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.63`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 119 / Skill revision
-`2026-08-14.76` bounds each active reviewer Chat to eight formal reviews. Before
-a ninth review, or immediately after a real rate-limit notice, the old Chat is
+The current source candidate is `0.2.0-alpha.76`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 132 / Skill revision
+`2026-08-18.89` makes the legacy missing-wait command converge on the same
+one-replacement recovery barrier as the current controller path, so an older
+running task cannot turn a recoverable wait into `external_blocked`; a state
+already poisoned by that legacy path is repaired at the next exact task turn
+entry without project or browser access. Controller
+131 repairs the gap where local state still waited on a platform
+one-shot that had stopped or disappeared: the exact task is looked up first,
+then updated in place when found or replaced exactly once when missing. This
+recovery never opens Chat, reads the project, or asks for a product decision.
+Controller 130 no longer presents recoverable technical failures as vague user
+decisions: stable reason codes describe the failure and the exact system recovery,
+while only mutually exclusive product choices set `user_choice_required=true`.
+Controller 129 lets the same repository-retest task cleanly reset an explicitly
+terminated failed cycle while preserving its exact sandbox. Controller 128 binds
+the still-unidentified one-time `startup` account slot to
+the exact replacement Chat at the already-bound visible Extreme-selection gate.
+This closes the real flow's gap without reacquiring a slot or reopening the
+browser; wrong task, lease, scope, browser, Chat, operation, or URL still fails
+closed. Controller 127 lets one successfully provisioned replacement reviewer Chat
+atomically continue from its one-time `startup` slot to that new Chat's first
+`submission`, reusing the same lease and visible tab without a second browser
+initialization, navigation, refresh, or full-history scan. Every other
+cross-operation transition remains fail-closed. Controller 126 accepts modern
+canonical UUID versions 6-8 for real ChatGPT
+conversation identities without relaxing exact URL or binding checks. Controller 125 keeps repository self-retests continuous: a stage completion
+cannot terminate the whole run, and an exhausted 2/2 reviewer Chat is retired
+and replaced before the next authorized goal continues. Controller 124
+proactively limits reviewer-history traffic: each exact Chat
+identity is counted across run boundaries, rolls over before its third formal
+review, and permits only tail inspection rather than a full-history scan.
+Controller 123 prevents an implementation task from downgrading an already
+continuous goal to `single_stage` when beginning a new goal or resetting a
+retest. Controller 122 preserves an automatically and visibly verified `极高/Extreme`
+confirmation through submission reopen, pre-send reconciliation, and final
+one-shot send authorization for the same exact bound reviewer Chat.
+It never changes the Codex implementation model or another Chat, and ambiguous UI
+fails closed instead of silently continuing on Medium. Controller 119 bounds each
+active reviewer Chat to two formal reviews. Before
+a third review, or immediately after a real rate-limit notice, the old Chat is
 retired permanently and exactly one replacement Chat receives compact current
 context. Cooldown recovery never reopens, refreshes, health-probes, or scans the
 retired long conversation. Controller 118's same-tab recovery is superseded
@@ -339,8 +376,10 @@ same completion contract. Controller 35 / revision `2026-08-10.22` also makes
 automatic mode truly choice-free during active work: submission-pending is no
 longer reported as a user decision, normal fixed-Chat review sends do not ask for
 repeated confirmation, and active stages cannot end with task-result A/B/C
-choices. Only a new identity, permission, capability, evidence, high-impact, or
-product-direction blocker may ask one concrete question. Controller 34 / revision
+choices. Controller 130 supersedes the old broad blocker wording: identity,
+capability, cooldown, slot, and recoverable-wait failures now produce a technical
+recovery action, while only a mutually exclusive product-direction choice may ask
+one concrete question. Controller 34 / revision
 `2026-08-10.21` made successful startup rebind explicitly require same-turn local
 continuation; a task may no longer treat binding recovery as a completed deliverable. Controller
 33 / revision `2026-08-10.20` added
@@ -482,14 +521,16 @@ health-probed or reopened. Leaving the waiting phase stops every browser check.
 3. Start a new Codex task and invoke `$luna-chatgpt-review-loop`.
 4. Confirm the selected conversation and the reasoning label you can actually
    see. SuperLuna records that confirmation but never changes the setting.
-5. Let the implementation task perform the loop. A user decision is requested
-   only for ambiguity, changed identity, missing capability, high-impact action,
-   or conflicting evidence.
+5. Let the implementation task perform the loop. Identity, capability, cooldown,
+   slot, and recoverable-wait failures are handled as technical recovery without
+   asking for a product choice. A user decision appears only for mutually
+   exclusive changes to the confirmed product goal, scope, or risk boundary.
 
 ## Guarantees and limits
 
 - One implementation task and one active reviewer Chat at a time. A reviewer
-  volume is limited to eight formal reviews.
+  volume is limited to two formal reviews across run boundaries; bound Chat
+  access is tail-only.
 - A normal browser error never creates a replacement Chat. Reaching the round
   budget, or a real rate limit, authorizes exactly one bounded rollover; the old
   Chat is archived and cannot be accessed again by that workflow.

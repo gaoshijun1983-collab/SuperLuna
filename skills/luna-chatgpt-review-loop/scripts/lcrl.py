@@ -32,8 +32,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 119
-SKILL_REVISION = "2026-08-14.76"
+CONTROLLER_VERSION = 132
+SKILL_REVISION = "2026-08-18.89"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -110,7 +110,7 @@ ACCOUNT_BROWSER_SLOT_SECONDS = 600
 ACCOUNT_BROWSER_CROSS_TASK_QUIET_SECONDS = 180
 ACCOUNT_BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS = 1800
 ACCOUNT_BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS = 3600
-REVIEWER_CHAT_MAX_FORMAL_ROUNDS = 8
+REVIEWER_CHAT_MAX_FORMAL_ROUNDS = 2
 MAX_RETIRED_REVIEWER_CHATS = 32
 SUPERLUNA_REPO_RETEST_PROFILE = "superluna_repo_retest_v1"
 RESERVED_REPO_RETEST_PROFILE_PREFIX = "superluna_repo_retest"
@@ -183,7 +183,7 @@ def visible_browser_surface_contract(
         "foreground_conversation_url": conversation_url,
     }
 CHATGPT_UUID_PATTERN = re.compile(
-    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
     re.IGNORECASE,
 )
 POLICY_PATTERNS = [
@@ -785,21 +785,47 @@ def default_account_browser_gate_path() -> Path:
     ).resolve()
 
 
-def source_checkout_root() -> Path:
-    """Return and verify the checkout containing this bundled controller."""
-    checkout = Path(__file__).resolve().parents[3]
-    plugin_manifest = checkout / ".codex-plugin" / "plugin.json"
-    try:
-        plugin = json.loads(plugin_manifest.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise LCRLError(
-            f"SuperLuna source checkout manifest is unavailable: {plugin_manifest}"
-        ) from exc
-    if plugin.get("name") != "luna-review-loop":
+def source_checkout_root(path_hint: str | Path | None = None) -> Path:
+    """Return the verified source checkout for bundled or installed controllers.
+
+    An installed Skill lives under the Codex home, but repository retests use an
+    explicit path inside the source checkout. In that case the trusted path is
+    discovered from the supplied retest path rather than from the installed
+    controller location. Generic installed use remains independent of a source
+    manifest.
+    """
+    candidates = [Path(__file__).resolve().parents[3]]
+    if path_hint not in (None, "", "none"):
+        hint = _lexical_absolute_path(path_hint)
+        candidates.extend((hint, *hint.parents))
+
+    seen: set[Path] = set()
+    unavailable: Path | None = None
+    identity_mismatch = False
+    for checkout in candidates:
+        checkout = checkout.resolve(strict=False)
+        if checkout in seen:
+            continue
+        seen.add(checkout)
+        plugin_manifest = checkout / ".codex-plugin" / "plugin.json"
+        if unavailable is None:
+            unavailable = plugin_manifest
+        try:
+            plugin = json.loads(plugin_manifest.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if plugin.get("name") != "luna-review-loop":
+            identity_mismatch = True
+            continue
+        return checkout
+
+    if identity_mismatch:
         raise LCRLError(
             "SuperLuna source checkout identity must be luna-review-loop"
         )
-    return checkout.resolve()
+    raise LCRLError(
+        f"SuperLuna source checkout manifest is unavailable: {unavailable}"
+    )
 
 
 def source_checkout_development_mode() -> bool:
@@ -881,11 +907,14 @@ def _path_uses_symlink(root: Path, target: Path) -> bool:
     return False
 
 
-def _repo_retest_expected_scope(implementation_thread_id: str) -> dict[str, str]:
+def _repo_retest_expected_scope(
+    implementation_thread_id: str,
+    path_hint: str | Path | None = None,
+) -> dict[str, str]:
     task_id = title_component(
         implementation_thread_id, "implementation_thread_id", 240,
     )
-    checkout = source_checkout_root().resolve()
+    checkout = source_checkout_root(path_hint).resolve()
     run_id = hashlib.sha256(task_id.encode("utf-8")).hexdigest()[:16]
     run_root = checkout / ".superluna" / "retest-runs" / run_id
     return {
@@ -944,7 +973,9 @@ def validate_repo_retest_scope(
             "state_path": "none",
         }
 
-    expected = _repo_retest_expected_scope(implementation_thread_id)
+    expected = _repo_retest_expected_scope(
+        implementation_thread_id, project_path or state_path,
+    )
     if project_path in (None, "", "none") or state_path in (None, "", "none"):
         raise LCRLError(
             "SuperLuna repository retest scope requires exact project and state paths"
@@ -1321,6 +1352,141 @@ def _account_browser_slot_authorizes_state_operation(
     )
 
 
+def _promote_provisioning_startup_slot_reviewer_identity(
+    state: dict[str, Any], state_path: str | Path, lease_id: str,
+    browser_id: str, registry_path: str | Path | None, at: str | None,
+) -> bool:
+    """Bind one live replacement-Chat startup slot to its verified identity.
+
+    The startup slot is intentionally acquired before a new Chat has a real
+    conversation id.  Once rollover completion has persisted the exact visible
+    browser, canonical Chat URL and new reviewer identity, the same startup
+    lease may be promoted in place.  This avoids a second browser acquisition
+    while keeping every task, scope, lease and visible-surface check fail-closed.
+    """
+    if not lease_id or lease_id == "none":
+        return False
+    automation = state.get("automation", {})
+    confirmation = state.get("confirmation", {})
+    reviewer_chat = state.get("reviewer_chat", {})
+    binding = state.get("browser_binding", {})
+    review = state.get("review", {})
+    reviewer_id = str(confirmation.get("reviewer_thread_id", "none"))
+    task_id = str(automation.get("implementation_thread_id", "none"))
+    if not (
+        reviewer_id != "none"
+        and CHATGPT_UUID_PATTERN.fullmatch(reviewer_id)
+        and reviewer_chat.get("status") == "active"
+        and int(reviewer_chat.get("generation", 0)) >= 2
+        and review.get("transport") == "in_app_browser"
+        and review.get("status") in {"local_work", "review_submit_pending"}
+        and binding.get("status") == "bound"
+        and binding.get("provisioned_chat") is True
+        and binding.get("browser_id") == browser_id
+        and binding.get("conversation_id") == reviewer_id
+        and binding.get("conversation_url") == f"https://chatgpt.com/c/{reviewer_id}"
+    ):
+        return False
+    gate_path = (
+        Path(registry_path).expanduser().resolve()
+        if registry_path else default_account_browser_gate_path()
+    )
+    now = _account_gate_now(at)
+    requested_scope = account_browser_scope_for_state(state, state_path)
+    try:
+        with acquire_state_lock(
+            gate_path, timeout=ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS,
+        ):
+            gate = load_account_browser_gate(gate_path)
+            revision = gate["revision"]
+            gate["slots"] = _live_account_browser_slots(gate, now)
+            slot = next(
+                (
+                    item for item in gate["slots"]
+                    if item.get("lease_id") == lease_id
+                    and item.get("implementation_thread_id") == task_id
+                ),
+                None,
+            )
+            if slot is None or not (
+                slot.get("operation") == "startup"
+                and slot.get("new_chat_authorization_id", "none") != "none"
+                and slot.get("scope", _generic_account_browser_scope())
+                == requested_scope
+            ):
+                return False
+            current_reviewer_id = str(slot.get("reviewer_thread_id", "none"))
+            if current_reviewer_id == reviewer_id:
+                return True
+            if current_reviewer_id != "none":
+                return False
+            slot["reviewer_thread_id"] = reviewer_id
+            slot["reuse_visible_tab_required"] = True
+            slot["history_tail_only_required"] = True
+            slot["provisioning_identity_promoted"] = True
+            _save_account_browser_gate_locked(
+                gate_path, gate, expected_revision=revision,
+            )
+            return True
+    except (LCRLError, OSError, TypeError, ValueError):
+        return False
+
+
+def _provisioning_startup_can_continue_to_submission(
+    existing: dict[str, Any], args: argparse.Namespace,
+    task_id: str, reviewer_id: str, requested_scope: dict[str, str],
+) -> bool:
+    """Allow one bound replacement Chat to reuse its visible startup lease.
+
+    This is deliberately narrower than general cross-operation reuse.  The
+    startup slot must be the one-time provisioning slot, the persisted state
+    must bind the same task/scope/new Chat, and the visible reasoning-mode
+    confirmation must already be complete.  Any missing fact falls back to the
+    normal fail-closed operation conflict.
+    """
+    if not (
+        existing.get("operation") == "startup"
+        and getattr(args, "operation", None) == "submission"
+        and existing.get("new_chat_authorization_id", "none") != "none"
+        and reviewer_id != "none"
+        and existing.get("reviewer_thread_id", "none") == reviewer_id
+    ):
+        return False
+    state_path = getattr(args, "state", None)
+    if state_path in (None, "", "none"):
+        return False
+    try:
+        state = load_state(state_path)
+        automation = state.get("automation", {})
+        confirmation = state.get("confirmation", {})
+        binding = state.get("browser_binding", {})
+        review = state.get("review", {})
+        reviewer_chat = state.get("reviewer_chat", {})
+        return bool(
+            automation.get("implementation_thread_id") == task_id
+            and account_browser_scope_for_state(state, state_path) == requested_scope
+            and confirmation.get("reviewer_thread_id") == reviewer_id
+            and confirmation.get("reviewer_reasoning_observed_thread_id")
+            == reviewer_id
+            and confirmation.get("reviewer_reasoning_confirmed") is True
+            and confirmation.get("reviewer_reasoning_control_source")
+            in {"in_app_browser", "in_app_browser_automatic"}
+            and review.get("transport") == "in_app_browser"
+            and review.get("status") in {"local_work", "review_submit_pending"}
+            and reviewer_chat.get("status") == "active"
+            and int(reviewer_chat.get("generation", 0)) >= 2
+            and binding.get("status") == "bound"
+            and binding.get("provisioned_chat") is True
+            and binding.get("browser_id") not in {None, "", "none"}
+            and binding.get("provider_tab_id") not in {None, "", "none"}
+            and binding.get("conversation_id") == reviewer_id
+            and binding.get("conversation_url")
+            == f"https://chatgpt.com/c/{reviewer_id}"
+        )
+    except (LCRLError, OSError, TypeError, ValueError):
+        return False
+
+
 def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, Any]:
     task_id = resolve_scoped_implementation_thread_id(
         args.implementation_thread_id, getattr(args, "profile", None),
@@ -1461,6 +1627,43 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                     "registry": str(gate_path),
                 }
             if existing["operation"] != args.operation:
+                if _provisioning_startup_can_continue_to_submission(
+                    existing, args, task_id, reviewer_id, requested_scope,
+                ):
+                    existing["operation"] = "submission"
+                    existing["continued_from_operation"] = "startup"
+                    existing["provisioning_startup_continuation"] = True
+                    existing["reuse_visible_tab_required"] = True
+                    existing["history_tail_only_required"] = True
+                    existing["expires_at"] = (
+                        now + timedelta(seconds=ACCOUNT_BROWSER_SLOT_SECONDS)
+                    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+                    _save_account_browser_gate_locked(
+                        gate_path, gate, expected_revision=revision,
+                    )
+                    return {
+                        "ok": True,
+                        "action": (
+                            "account_browser_provisioning_continued_to_submission"
+                        ),
+                        "slot_acquired": True,
+                        "browser_skill_read_allowed": True,
+                        "browser_runtime_initialization_allowed": False,
+                        "reuse_visible_tab_required": True,
+                        "history_tail_only_required": True,
+                        "full_history_scan_allowed": False,
+                        "provisioning_home_navigation_allowed": False,
+                        "operation": "submission",
+                        "lease_id": existing["lease_id"],
+                        "expires_at": existing["expires_at"],
+                        "max_active": ACCOUNT_BROWSER_MAX_ACTIVE,
+                        "active_count": len(gate["slots"]),
+                        "scope": deepcopy(requested_scope),
+                        "registry": str(gate_path),
+                        **visible_browser_surface_contract(
+                            f"https://chatgpt.com/c/{reviewer_id}"
+                        ),
+                    }
                 return {
                     "ok": True,
                     "action": "account_browser_operation_conflict",
@@ -1479,8 +1682,16 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
                     "active_count": len(gate["slots"]),
                     "registry": str(gate_path),
                 }
+            existing_changed = False
             if reviewer_id != "none" and existing_reviewer_id == "none":
                 existing["reviewer_thread_id"] = reviewer_id
+                existing_changed = True
+            if reviewer_id != "none" and not existing.get(
+                "history_tail_only_required", False
+            ):
+                existing["history_tail_only_required"] = True
+                existing_changed = True
+            if existing_changed:
                 _save_account_browser_gate_locked(
                     gate_path, gate, expected_revision=revision,
                 )
@@ -1630,6 +1841,12 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             "expires_at": expires_at,
             "scope": deepcopy(requested_scope),
         }
+        if reviewer_id != "none":
+            # Once a concrete reviewer Chat is bound, normal startup,
+            # submission and waiting reads may inspect only its visible tail.
+            # Replaying the whole conversation is unnecessary for identity
+            # matching and is a major source of avoidable history traffic.
+            slot["history_tail_only_required"] = True
         if recovery_rollover_allowed:
             slot["rate_limit_recovery_rollover"] = True
         if new_chat_authorization_id != "none":
@@ -1652,6 +1869,12 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             "health_probe_home_navigation_allowed": args.operation == "health_probe",
             "provisioning_home_navigation_allowed": new_chat_authorization_id != "none",
             "rate_limit_recovery_rollover": recovery_rollover_allowed,
+            "history_tail_only_required": bool(
+                slot.get("history_tail_only_required", False)
+            ),
+            "full_history_scan_allowed": not bool(
+                slot.get("history_tail_only_required", False)
+            ),
             "operation": args.operation,
             "provisioning_home_url": (
                 "https://chatgpt.com/" if new_chat_authorization_id != "none" else "none"
@@ -2057,6 +2280,11 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     runtime.setdefault("browser_submission_send_authorized_fingerprint", "none")
     runtime.setdefault("browser_submission_send_authorized_review_run_binding_id", "none")
     runtime.setdefault("browser_submission_send_authorized_revision", 0)
+    runtime.setdefault("browser_review_mode_selection_authorized_account_slot_lease_id", "none")
+    runtime.setdefault("browser_review_mode_selection_authorized_browser_id", "none")
+    runtime.setdefault("browser_review_mode_selection_authorized_reviewer_thread_id", "none")
+    runtime.setdefault("browser_review_mode_selection_authorized_target", "none")
+    runtime.setdefault("browser_review_mode_selection_authorized_revision", 0)
     runtime.setdefault("resume_checkpoint", checkpoint_for_status(
         state.get("review", {}).get("status", "local_work")
     ))
@@ -2073,13 +2301,21 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     # Alpha states did not distinguish a reviewed stage from the whole goal.
     # Keep their historical single-stage meaning; new runs record this choice.
     review.setdefault("goal_mode", "single_stage")
+    # Repository self-retests exercise the autonomous continuous product loop.
+    # A task-local stage label must never turn that loop into a terminal
+    # single-stage run, including when an older state is reopened by a newer
+    # controller.
+    if automation.get("profile") == SUPERLUNA_REPO_RETEST_PROFILE:
+        review["goal_mode"] = "continuous"
     review.setdefault("overall_completion_confirmed", False)
     review.setdefault("overall_completion_evidence", "none")
     review.setdefault("run_binding", legacy_review_run_binding(state))
     reviewer_chat = state.setdefault("reviewer_chat", {})
     reviewer_chat.setdefault("mode", "bounded_series_v1")
     reviewer_chat.setdefault("generation", 1)
-    reviewer_chat.setdefault("max_formal_rounds", REVIEWER_CHAT_MAX_FORMAL_ROUNDS)
+    # This is a controller-owned safety policy, not user state.  Always adopt
+    # the current cap so older states cannot retain a more permissive limit.
+    reviewer_chat["max_formal_rounds"] = REVIEWER_CHAT_MAX_FORMAL_ROUNDS
     reviewer_chat.setdefault("status", "active")
     reviewer_chat.setdefault("rollover_reason", "none")
     reviewer_chat.setdefault("rollover_authorization_id", "none")
@@ -2353,6 +2589,8 @@ def new_state(
         raise LCRLError("implementation_role must be luna_medium or terra_medium")
     if goal_mode not in VALID_GOAL_MODES:
         raise LCRLError("goal_mode must be continuous or single_stage")
+    if profile == SUPERLUNA_REPO_RETEST_PROFILE and goal_mode != "continuous":
+        raise LCRLError("repository retest goals must remain continuous")
     retest_scope = validate_repo_retest_scope(
         profile, implementation_thread_id, project_path, state_path,
     )
@@ -2540,6 +2778,11 @@ def new_state(
             "browser_submission_send_authorized_browser_id": "none",
             "browser_submission_send_authorized_fingerprint": "none",
             "browser_submission_send_authorized_revision": 0,
+            "browser_review_mode_selection_authorized_account_slot_lease_id": "none",
+            "browser_review_mode_selection_authorized_browser_id": "none",
+            "browser_review_mode_selection_authorized_reviewer_thread_id": "none",
+            "browser_review_mode_selection_authorized_target": "none",
+            "browser_review_mode_selection_authorized_revision": 0,
             "resume_checkpoint": "local_work",
             "resume_checkpoint_at": now,
         },
@@ -2754,7 +2997,7 @@ def validate_state(state: dict[str, Any]) -> None:
         if confirmation.get("reviewer_reasoning_mode") != "extreme":
             errors.append("confirmed reviewer reasoning must be extreme")
         control_source = confirmation.get("reviewer_reasoning_control_source")
-        if control_source not in {"user", "main_app", "native_app", "in_app_browser"}:
+        if control_source not in {"user", "main_app", "native_app", "in_app_browser", "in_app_browser_automatic"}:
             errors.append("confirmed reviewer reasoning requires a trusted control source")
         if confirmation.get("reviewer_reasoning_observed_label") != "极高":
             errors.append("confirmed reviewer reasoning requires an observed 极高 label")
@@ -2763,9 +3006,9 @@ def validate_state(state: dict[str, Any]) -> None:
         native_instance = confirmation.get("reviewer_reasoning_native_app_instance_id", "none")
         if control_source == "native_app" and native_instance in (None, "", "none"):
             errors.append("native App reasoning confirmation requires an App instance identity")
-        if control_source in {"user", "main_app", "in_app_browser"} and native_instance not in (None, "", "none"):
+        if control_source in {"user", "main_app", "in_app_browser", "in_app_browser_automatic"} and native_instance not in (None, "", "none"):
             errors.append("non-native reasoning confirmation cannot claim a native App instance")
-        if review_transport == "in_app_browser" and control_source != "in_app_browser":
+        if review_transport == "in_app_browser" and control_source not in {"in_app_browser", "in_app_browser_automatic"}:
             errors.append("in-app browser review requires browser reasoning confirmation")
         if review_transport == "in_app_browser" and browser_binding_status != "bound":
             errors.append("in-app browser reasoning confirmation requires a browser tab binding")
@@ -3613,6 +3856,19 @@ def active_action_lease(state: dict[str, Any]) -> bool:
     return bool(expiry and datetime.now(timezone.utc) < expiry)
 
 
+def waiting_claim_stale(state: dict[str, Any]) -> bool:
+    """Return whether a bound one-shot stopped after claiming its read lease."""
+    runtime = state.get("runtime", {})
+    return bool(
+        state.get("review", {}).get("status") in MONITOR_STATUSES
+        and state.get("automation", {}).get("waiting_check_claimed_id", "none")
+        != "none"
+        and runtime.get("action_lease_reason", "none") == "waiting_review_poll"
+        and runtime.get("action_lease_id", "none") != "none"
+        and not active_action_lease(state)
+    )
+
+
 def clear_action_lease(state: dict[str, Any]) -> None:
     state["runtime"].update({
         "action_lease_id": "none",
@@ -3638,7 +3894,7 @@ def checkpoint_for_status(status: str) -> str:
         "review_waiting": "review_submission_confirmed",
         "result_received": "reply_consumed",
         "result_quarantined": "needs_user_decision",
-        "external_blocked": "needs_user_decision",
+        "external_blocked": "technical_recovery_required",
         "completed": "completed",
     }.get(status, "unknown")
 
@@ -3668,15 +3924,140 @@ def user_status_label(status: str) -> str:
     return USER_STATUS_LABELS.get(status, "需要你决定")
 
 
-def user_status_exit(status: str) -> dict[str, Any]:
+TECHNICAL_REASON_PROFILES: dict[str, tuple[str, str, str, str]] = {
+    "implementation_task_mismatch": (
+        "当前状态属于另一个实施任务，本任务没有执行任何动作。",
+        "This state belongs to a different implementation task; this task did not act.",
+        "由原实施任务继续；当前任务保持停止。",
+        "Resume from the original implementation task; keep this task stopped.",
+    ),
+    "missing_capability": (
+        "当前环境缺少完成这一步所需的能力，系统已在访问项目或 Chat 前停止。",
+        "The current environment lacks a required capability and stopped before project or Chat access.",
+        "在同一任务补齐缺失能力后重新运行预检。",
+        "Restore the missing capability in the same task, then rerun preflight.",
+    ),
+    "cooldown_active": (
+        "Chat 正在冷却，系统没有继续访问页面。",
+        "Chat is cooling down; the system did not continue accessing the page.",
+        "等待控制器记录的冷却时间结束，再执行唯一一次恢复。",
+        "Wait for the controller-recorded cooldown to end, then run one recovery attempt.",
+    ),
+    "account_slot_conflict": (
+        "浏览器使用名额与当前任务不匹配，系统已停止本次浏览器动作。",
+        "The browser slot does not match this task, so the browser action was stopped.",
+        "释放冲突名额，由当前任务重新取得正确名额后继续。",
+        "Release the conflicting slot and let this task acquire the correct slot before continuing.",
+    ),
+    "recoverable_wait": (
+        "等待检查没有完成，但现有状态仍可安全恢复。",
+        "The waiting check did not finish, but the existing state remains safely recoverable.",
+        "由同一个单次等待任务恢复，不重复读取或发送。",
+        "Recover through the same one-shot wait without duplicate reads or sends.",
+    ),
+    "platform_wait_task_not_found": (
+        "平台中的单次等待任务已不存在，旧等待已安全作废。",
+        "The platform one-shot wait no longer exists, and the stale wait was safely retired.",
+        "由原实施任务重新建立一次等待或按已授权恢复路径继续。",
+        "Let the original implementation task recreate one wait or use the authorized recovery path.",
+    ),
+    "controller_error": (
+        "控制器遇到技术故障，已安全停止当前动作。",
+        "The controller encountered a technical failure and safely stopped the current action.",
+        "由原实施任务按错误代码恢复；不改变产品方向。",
+        "Recover in the original implementation task using the reason code; do not change product direction.",
+    ),
+}
+
+
+def classify_controller_error(exc: BaseException) -> str:
+    """Map internal exceptions to stable, non-sensitive operational reason codes."""
+    text = str(exc).lower()
+    if "different implementation task" in text or "belongs to a different implementation task" in text:
+        return "implementation_task_mismatch"
+    if "cooldown" in text or "silent period" in text or "rate limit" in text:
+        return "cooldown_active"
+    if "slot" in text or "unexpired action lease" in text:
+        return "account_slot_conflict"
+    if "waiting" in text and ("recover" in text or "check" in text):
+        return "recoverable_wait"
+    if "capability" in text or "unavailable" in text:
+        return "missing_capability"
+    return "controller_error"
+
+
+def technical_status_exit(reason_code: str) -> dict[str, Any]:
+    code = reason_code if reason_code in TECHNICAL_REASON_PROFILES else "controller_error"
+    message, message_en, next_action, next_action_en = TECHNICAL_REASON_PROFILES[code]
+    return {
+        "user_status": "正在开发",
+        "user_message": message,
+        "user_message_en": message_en,
+        "user_next_choice": "无需选择产品方向。",
+        "user_next_choice_en": "No product-direction choice is required.",
+        "user_choice_required": False,
+        "choice_output_allowed": False,
+        "turn_completion_allowed": True,
+        "blocker_kind": "technical",
+        "reason_code": code,
+        "system_next_action": next_action,
+        "system_next_action_en": next_action_en,
+    }
+
+
+def product_decision_exit(reason_code: str = "review_reply_requires_product_decision") -> dict[str, Any]:
+    options = [
+        {
+            "id": "keep_scope",
+            "label": "保持当前范围",
+            "impact": "忽略超出范围或高风险部分，只执行已授权的安全内容。",
+        },
+        {
+            "id": "change_goal",
+            "label": "修改目标",
+            "impact": "先更新本轮目标和边界，再重新提交评审。",
+        },
+        {
+            "id": "end_review",
+            "label": "结束本轮",
+            "impact": "保留现有成果，不再执行或送审。",
+        },
+    ]
+    return {
+        "user_status": "需要你决定",
+        "user_message": "评审意见包含互相冲突、超出授权或高影响的产品方向，系统没有执行。",
+        "user_message_en": "The review contains conflicting, out-of-scope, or high-impact product directions and was not applied.",
+        "user_next_choice": "请选择本轮应如何处理。",
+        "user_next_choice_en": "Choose how this review should proceed.",
+        "user_choice_required": True,
+        "choice_output_allowed": True,
+        "turn_completion_allowed": True,
+        "blocker_kind": "product_decision",
+        "reason_code": reason_code,
+        "decision_reason": "评审意见会改变已确认的产品目标、范围或风险边界。",
+        "decision_question": "本轮应保持当前范围、修改目标，还是结束本轮？",
+        "decision_options": options,
+    }
+
+
+def user_status_exit(status: str, *, reason_code: str | None = None) -> dict[str, Any]:
     """The only plain-language status surface intended for people."""
+    if status == "result_quarantined" or (
+        status == "external_blocked"
+        and str(reason_code or "").endswith("reply_requires_user_decision")
+    ):
+        return product_decision_exit(
+            str(reason_code or "review_reply_requires_product_decision")
+        )
+    if status == "external_blocked":
+        return technical_status_exit(str(reason_code or "controller_error"))
     label = user_status_label(status)
     message, next_choice = USER_STATUS_MESSAGES[label]
     return {
         "user_status": label,
         "user_message": message,
         "user_next_choice": next_choice,
-        "user_choice_required": status in {"result_quarantined", "external_blocked"},
+        "user_choice_required": False,
         "choice_output_allowed": False,
         "turn_completion_allowed": status in {
             "review_receipt_pending", "review_waiting", "external_blocked", "completed",
@@ -3800,7 +4181,10 @@ def add_user_status_exit(result: dict[str, Any]) -> dict[str, Any]:
     """Attach the stable five-state view without removing internal controller data."""
     output = add_platform_wait_contract(result)
     if "status" in output:
-        output.update(user_status_exit(str(output["status"])))
+        output.update(user_status_exit(
+            str(output["status"]),
+            reason_code=str(output.get("reason_code") or output.get("recovery_action") or ""),
+        ))
         if (
             (
                 str(output["status"]) in MONITOR_STATUSES
@@ -3849,8 +4233,8 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
         "review_receipt_pending": ("评审内容已准备好。", "请核对原 Chat 后确认本轮提交。"),
         "review_waiting": ("本轮已交给 Chat。", "无需操作；原任务会在回复到达后继续。"),
         "result_received": ("已读到 Chat 的意见。", "Codex 正在按意见修改并验证。"),
-        "result_quarantined": ("已收到需要人工判断的意见。", "请说明要继续、调整方向，还是停止。"),
-        "external_blocked": ("自动可做部分已经完成。", "请说明要继续、调整方向，还是停止。"),
+        "result_quarantined": ("已收到会改变产品方向或授权边界的意见。", "请选择明确列出的处理方式。"),
+        "external_blocked": ("当前动作因技术问题安全停止。", "系统将按记录的恢复动作处理。"),
         "completed": ("用户总体目标已经完成。", "无需操作。"),
     }[status]
     observation = state.get("browser_reply_observation", empty_browser_reply_observation())
@@ -3864,14 +4248,7 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
         "no_complete_reply": "no_complete_reply",
         "staged": "complete_reply",
     }.get(observation_status, "not_checked")
-    runtime = state.get("runtime", {})
-    waiting_claim_stale = bool(
-        status in MONITOR_STATUSES
-        and state.get("automation", {}).get("waiting_check_claimed_id", "none") != "none"
-        and runtime.get("action_lease_reason", "none") == "waiting_review_poll"
-        and runtime.get("action_lease_id", "none") != "none"
-        and not active_action_lease(state)
-    )
+    stale_waiting_claim = waiting_claim_stale(state)
     output = {
         "ok": True,
         "completed_step": completed_step,
@@ -3879,9 +4256,12 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
         "chat_read_observed": chat_read_observed,
         "last_chat_check_outcome": last_chat_check_outcome,
         "last_chat_check_at": observation.get("staged_at", "none") if chat_read_observed else "none",
-        "waiting_check_health": "stale_claim_recoverable" if waiting_claim_stale else "normal",
-        "waiting_check_needs_recovery": waiting_claim_stale,
-        **user_status_exit(status),
+        "waiting_check_health": "stale_claim_recoverable" if stale_waiting_claim else "normal",
+        "waiting_check_needs_recovery": stale_waiting_claim,
+        **user_status_exit(
+            status,
+            reason_code=str(state.get("review", {}).get("recovery_action", "")),
+        ),
     }
     if waiting_check_binding_pending(state):
         output.update({
@@ -4469,7 +4849,7 @@ def autonomous_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
             next_choice = "请选择前台继续，或先补齐等待检查能力。"
         return {
             "ok": True,
-            "action": "needs_user_decision",
+            "action": "technical_blocked",
             "ready": False,
             "dispatch_allowed": False,
             "monitor_task_allowed": False,
@@ -4479,9 +4859,11 @@ def autonomous_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
             "chat_owner": "implementation_task",
             "coordinator_role": "exception_only",
             "missing": missing,
-            "user_status": "需要你决定",
+            **technical_status_exit("missing_capability"),
             "user_message": message,
-            "user_next_choice": next_choice,
+            "user_message_en": "A required startup capability is unavailable; the automatic loop did not start.",
+            "system_next_action": next_choice,
+            "system_next_action_en": "Restore the listed capability in the same task, then rerun preflight.",
         }
 
     return {
@@ -4520,9 +4902,11 @@ def workspace_preflight_command(args: argparse.Namespace) -> dict[str, Any]:
         "browser_access_allowed": False,
         "chat_creation_allowed": False,
         "state_creation_allowed": False,
-        "user_status": "需要你决定",
-        "user_message": "当前任务的工作目录不可用于本轮测试。",
-        "user_next_choice": "请为当前任务提供一个已经存在且可写的工作目录。",
+        **technical_status_exit("missing_capability"),
+        "user_message": "当前任务的工作目录不可用于本轮测试，系统没有启动浏览器。",
+        "user_message_en": "The task workspace is unavailable, so the browser was not started.",
+        "system_next_action": "由当前任务恢复一个已存在且可写的工作目录，再重新预检。",
+        "system_next_action_en": "Restore an existing writable workspace in the same task, then rerun preflight.",
     }
     profile = str(getattr(args, "profile", None) or "generic").strip()
     supplied_thread_id = str(
@@ -4876,13 +5260,14 @@ def resume_command(args: argparse.Namespace) -> dict[str, Any]:
     if checkpoint == "unknown":
         result = {
             "ok": True,
-            "action": "needs_user_decision",
+            "action": "technical_blocked",
             "status": state["review"]["status"],
             "recovered_from": "unknown",
+            "reason_code": "recoverable_wait",
         }
-        result.update(user_status_exit("external_blocked"))
-        result["user_message"] = "无法确认上次已经做到哪里。"
-        result["user_next_choice"] = "请选择：重新核对后继续，或停止并说明新的处理方式。"
+        result.update(technical_status_exit("recoverable_wait"))
+        result["user_message"] = "无法确认上次已经做到哪里，系统没有重复执行。"
+        result["system_next_action"] = "由原实施任务重新核对已保存进度，再从唯一安全边界继续。"
         return result
     if state["runtime"].get("action_lease_id", "none") != "none":
         revision = state["revision"]
@@ -5493,9 +5878,37 @@ def current_state_review_round_number(state: dict[str, Any]) -> int:
 def reviewer_chat_round_budget_exhausted(state: dict[str, Any]) -> bool:
     """Return whether the active Chat has reached its safe formal-review cap."""
     reviewer_chat = state.get("reviewer_chat", {})
-    return current_state_review_round_number(state) >= int(
+    return current_reviewer_chat_formal_rounds(state) >= int(
         reviewer_chat.get("max_formal_rounds", REVIEWER_CHAT_MAX_FORMAL_ROUNDS)
     )
+
+
+def current_reviewer_chat_formal_rounds(state: dict[str, Any]) -> int:
+    """Count formal requests for the active Chat across review-run changes.
+
+    A new goal creates a new review-run binding, but it does not make the
+    underlying Chat history shorter.  The proactive rollover budget therefore
+    follows the reviewer conversation identity rather than the run identity.
+    """
+    reviewer_id = str(
+        state.get("confirmation", {}).get("reviewer_thread_id", "none")
+    )
+    if reviewer_id in {"", "none"}:
+        return 0
+    archived = sum(
+        1 for item in state.get("review_history", [])
+        if (
+            item.get("request_message_id") not in (None, "", "none")
+            and item.get("run_binding", {}).get("reviewer_thread_id") == reviewer_id
+        )
+    )
+    current_binding = state.get("review", {}).get("run_binding", {})
+    current = int(
+        state.get("review", {}).get("request_message_id")
+        not in (None, "", "none")
+        and current_binding.get("reviewer_thread_id") == reviewer_id
+    )
+    return archived + current
 
 
 def mark_reviewer_chat_rollover_required(
@@ -5598,7 +6011,7 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
     retired_entry = {
         "reviewer_thread_id": old_reviewer_id,
         "reason": reviewer_chat["rollover_reason"],
-        "formal_rounds": current_state_review_round_number(state),
+        "formal_rounds": current_reviewer_chat_formal_rounds(state),
         "retired_at": getattr(args, "at", None) or utc_now(),
     }
     reviewer_chat["retired"].append(retired_entry)
@@ -5994,7 +6407,8 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
         ))
         and confirmation.get("reviewer_reasoning_confirmed") is True
         and confirmation.get("reviewer_reasoning_mode") == "extreme"
-        and confirmation.get("reviewer_reasoning_control_source") == "in_app_browser"
+        and confirmation.get("reviewer_reasoning_control_source")
+        in {"in_app_browser", "in_app_browser_automatic"}
         and confirmation.get("reviewer_reasoning_observed_thread_id")
         == confirmation.get("reviewer_thread_id")
         and _bound_browser_chat_can_reopen(state)
@@ -6172,7 +6586,8 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
         and _bound_browser_chat_can_reopen(state)
         and confirmation.get("reviewer_reasoning_confirmed") is True
         and confirmation.get("reviewer_reasoning_mode") == "extreme"
-        and confirmation.get("reviewer_reasoning_control_source") == "in_app_browser"
+        and confirmation.get("reviewer_reasoning_control_source")
+        in {"in_app_browser", "in_app_browser_automatic"}
         and confirmation.get("reviewer_reasoning_observed_thread_id")
         == reviewer_thread_id
         and all(review.get(field) in (None, "", "none") for field in (
@@ -6309,7 +6724,8 @@ def reconcile_browser_submission_command(args: argparse.Namespace) -> dict[str, 
         ))
         and confirmation.get("reviewer_reasoning_confirmed") is True
         and confirmation.get("reviewer_reasoning_mode") == "extreme"
-        and confirmation.get("reviewer_reasoning_control_source") == "in_app_browser"
+        and confirmation.get("reviewer_reasoning_control_source")
+        in {"in_app_browser", "in_app_browser_automatic"}
         and confirmation.get("reviewer_reasoning_observed_thread_id") == reviewer_thread_id
         and _bound_browser_chat_can_reopen(state)
         and binding.get("conversation_id") == reviewer_thread_id
@@ -7130,8 +7546,136 @@ def deactivate_waiting_check(state: dict[str, Any]) -> str:
     return automation_id
 
 
+def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Recover one expired wait claim after an exact host task lookup.
+
+    The command never accesses Chat or a project.  A still-present platform
+    task is updated in place; a proven-missing task is replaced by one new
+    bootstrap reservation through the normal bind barrier.
+    """
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    review = state["review"]
+    automation = state["automation"]
+    automation_id = str(args.automation_id or "").strip()
+    implementation_thread_id = str(
+        args.implementation_thread_id or ""
+    ).strip()
+    lookup_result = str(args.platform_lookup_result or "").strip()
+    expected_implementation_thread_id = str(
+        automation.get("implementation_thread_id", "none")
+    )
+
+    if lookup_result not in {"found", "not_found"}:
+        raise LCRLError("stale wait recovery requires an exact platform lookup result")
+    if review.get("status") not in MONITOR_STATUSES:
+        raise LCRLError("stale wait recovery requires an active waiting state")
+    if automation.get("waiting_check_active") is not True:
+        raise LCRLError("stale wait recovery requires an active local wait")
+    if automation.get("waiting_check_kind") != "review_reply":
+        raise LCRLError("stale wait recovery only applies to a reviewer reply wait")
+    if automation_id in {"", "none"}:
+        raise LCRLError("stale wait recovery requires the exact platform task identity")
+    if automation.get("waiting_check_automation_id") != automation_id:
+        raise LCRLError("platform task identity does not match the local wait")
+    if implementation_thread_id in {"", "none"}:
+        raise LCRLError("stale wait recovery requires the exact implementation task identity")
+    if implementation_thread_id != expected_implementation_thread_id:
+        raise LCRLError("stale wait recovery belongs to a different implementation task")
+    if not waiting_claim_stale(state):
+        raise LCRLError("stale wait recovery requires an expired waiting read claim")
+
+    clear_action_lease(state)
+    automation["waiting_check_claimed_id"] = "none"
+    automation["waiting_check_token"] = "wait-" + secrets.token_hex(8)
+    automation["waiting_check_expected_rdate"] = waiting_check_rdate()
+    automation["waiting_check_recovery_armed_lease_id"] = "none"
+    automation["waiting_check_recovery_armed_rdate"] = "none"
+    if lookup_result == "not_found":
+        automation["waiting_check_automation_id"] = "none"
+    state.setdefault("review_history", []).append({
+        "event": "stale_platform_wait_recovered",
+        "automation_id": automation_id,
+        "platform_lookup_result": lookup_result,
+        "replacement_required": lookup_result == "not_found",
+        "recorded_at": utc_now(),
+    })
+    state["review_history"] = state["review_history"][-20:]
+    save_state(path, state, expected_revision=revision)
+    state = load_state(path)
+
+    result = add_user_status_exit({
+        "ok": True,
+        "action": "stale_wait_recovered",
+        "status": state["review"]["status"],
+        "reason_code": "stale_platform_wait_recovered",
+        "platform_lookup_result": lookup_result,
+        "execution_allowed": False,
+        "project_read_allowed": False,
+        "project_write_allowed": False,
+        "browser_access_allowed": False,
+        "waiting_check_only": True,
+        "waiting_check_action": "update_once" if lookup_result == "found" else "schedule_once",
+        "waiting_check_token": state["automation"]["waiting_check_token"],
+        "waiting_check_automation_id": state["automation"]["waiting_check_automation_id"],
+        "waiting_check_expected_rdate": state["automation"]["waiting_check_expected_rdate"],
+        "revision": state["revision"],
+        "continuation_required": True,
+        "turn_completion_allowed": False,
+    })
+    if lookup_result == "found":
+        result.update({
+            "mandatory_next_tool": "codex_app__automation_update",
+            "mandatory_next_tool_mode": "update",
+            "mandatory_next_action_sequence": [
+                "update_same_platform_wait_with_new_rdate_and_prompt",
+                "leave_waiting_state_unchanged",
+            ],
+            "platform_wait_update": {
+                "id": automation_id,
+                "kind": "heartbeat",
+                "status": "ACTIVE",
+                "name": f"SuperLuna wait {implementation_thread_id[-8:]}",
+                "target_thread_id": implementation_thread_id,
+                "rrule": state["automation"]["waiting_check_expected_rdate"],
+                "prompt": _waiting_check_prompt(
+                    path,
+                    state,
+                    state["automation"]["waiting_check_token"],
+                    automation_id,
+                ),
+            },
+        })
+    else:
+        result.update(platform_wait_binding_barrier_contract(path, state))
+    result.update({
+        "user_status": "正在开发",
+        "user_message": (
+            "旧等待任务仍在，正在更新同一个单次检查。"
+            if lookup_result == "found"
+            else "旧等待任务已丢失，正在重建一个单次检查。"
+        ),
+        "user_next_choice": "无需操作。",
+        "user_choice_required": False,
+        "choice_output_allowed": False,
+        "system_next_action": (
+            "update the same platform wait and continue waiting"
+            if lookup_result == "found"
+            else "create and bind one replacement platform wait"
+        ),
+    })
+    return result
+
+
 def retire_missing_wait_command(args: argparse.Namespace) -> dict[str, Any]:
-    """Retire a local wait only after the host proved its platform task absent."""
+    """Compatibility entry for a platform wait proven missing.
+
+    Older task instructions called this command to retire the local wait and
+    stop.  That behavior can strand an otherwise recoverable review.  Keep the
+    CLI surface for already-running tasks, but converge it on the same
+    fail-closed one-replacement binding barrier as ``recover-stale-wait``.
+    """
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
     revision = state["revision"]
@@ -7154,31 +7698,54 @@ def retire_missing_wait_command(args: argparse.Namespace) -> dict[str, Any]:
     if active_action_lease(state):
         raise LCRLError("missing-wait retirement requires the waiting read lease to be released")
 
-    deactivate_waiting_check(state)
-    review.update({
-        "status": "external_blocked",
-        "recovery_action": "platform_wait_task_not_found",
-        "last_progress_at": utc_now(),
-    })
+    clear_action_lease(state)
+    automation["waiting_check_claimed_id"] = "none"
+    automation["waiting_check_token"] = "wait-" + secrets.token_hex(8)
+    automation["waiting_check_expected_rdate"] = waiting_check_rdate()
+    automation["waiting_check_recovery_armed_lease_id"] = "none"
+    automation["waiting_check_recovery_armed_rdate"] = "none"
+    automation["waiting_check_automation_id"] = "none"
     state.setdefault("review_history", []).append({
-        "event": "platform_wait_task_not_found",
+        "event": "stale_platform_wait_recovered",
         "automation_id": automation_id,
         "platform_lookup_result": "not_found",
         "authorization_id": authorization_id,
+        "replacement_required": True,
+        "compatibility_entry": "retire-missing-wait",
         "recorded_at": utc_now(),
     })
     state["review_history"] = state["review_history"][-20:]
-    record_resume_checkpoint(state)
     save_state(path, state, expected_revision=revision)
-    return add_user_status_exit({
+    state = load_state(path)
+    result = add_user_status_exit({
         "ok": True,
-        "action": "missing_wait_retired",
-        "status": "external_blocked",
-        "retired_automation_id": automation_id,
-        "waiting_check_active": False,
-        "next_action": "reset_for_retest_or_user_authorized_recovery",
+        "action": "stale_wait_recovered",
+        "status": state["review"]["status"],
+        "reason_code": "stale_platform_wait_recovered",
+        "platform_lookup_result": "not_found",
+        "execution_allowed": False,
+        "project_read_allowed": False,
+        "project_write_allowed": False,
+        "browser_access_allowed": False,
+        "waiting_check_only": True,
+        "waiting_check_action": "schedule_once",
+        "waiting_check_token": state["automation"]["waiting_check_token"],
+        "waiting_check_automation_id": "none",
+        "waiting_check_expected_rdate": state["automation"]["waiting_check_expected_rdate"],
         "revision": state["revision"],
+        "continuation_required": True,
+        "turn_completion_allowed": False,
     })
+    result.update(platform_wait_binding_barrier_contract(path, state))
+    result.update({
+        "user_status": "正在开发",
+        "user_message": "旧等待任务已丢失，正在重建一个单次检查。",
+        "user_next_choice": "无需操作。",
+        "user_choice_required": False,
+        "choice_output_allowed": False,
+        "system_next_action": "create and bind one replacement platform wait",
+    })
+    return result
 
 
 def register_binding_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -7927,6 +8494,90 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
     expected_implementation_thread_id = state["automation"].get(
         "implementation_thread_id", "none"
     )
+    legacy_missing_wait_proof = next(
+        (
+            event for event in reversed(state.get("review_history", []))
+            if isinstance(event, dict)
+            and event.get("event") == "platform_wait_task_not_found"
+            and event.get("platform_lookup_result") == "not_found"
+        ),
+        None,
+    )
+    legacy_missing_wait_poisoned = bool(
+        status == "external_blocked"
+        and state["review"].get("recovery_action") == "platform_wait_task_not_found"
+        and legacy_missing_wait_proof is not None
+        and state["review"].get("request_message_id", "none") != "none"
+        and state["review"].get("request_turn_id", "none") != "none"
+        and state["automation"].get("heartbeat_mode") == "waiting_only"
+        and state["automation"].get("waiting_check_active") is False
+        and state["automation"].get("waiting_check_token") == "none"
+        and state["automation"].get("waiting_check_automation_id") == "none"
+        and not active_action_lease(state)
+    )
+    if legacy_missing_wait_poisoned:
+        if implementation_thread_id == "none":
+            raise LCRLError("guard requires the exact implementation task identity")
+        if implementation_thread_id != expected_implementation_thread_id:
+            raise LCRLError(
+                "legacy missing-wait recovery belongs to a different implementation task"
+            )
+        state["review"]["status"] = "review_waiting"
+        state["review"]["recovery_action"] = "legacy_missing_wait_state_repaired"
+        state["review"]["last_progress_at"] = utc_now()
+        state["automation"].update({
+            "waiting_check_token": "wait-" + secrets.token_hex(8),
+            "waiting_check_active": True,
+            "waiting_check_kind": "review_reply",
+            "waiting_check_account_registry": "none",
+            "waiting_check_automation_id": "none",
+            "waiting_check_claimed_id": "none",
+            "waiting_check_expected_rdate": waiting_check_rdate(),
+            "waiting_check_recovery_armed_lease_id": "none",
+            "waiting_check_recovery_armed_rdate": "none",
+        })
+        state.setdefault("review_history", []).append({
+            "event": "legacy_missing_wait_state_repaired",
+            "platform_proof_automation_id": legacy_missing_wait_proof.get(
+                "automation_id", "none"
+            ),
+            "implementation_thread_id": implementation_thread_id,
+            "recorded_at": utc_now(),
+        })
+        state["review_history"] = state["review_history"][-20:]
+        record_resume_checkpoint(state)
+        save_state(path, state, expected_revision=revision)
+        state = load_state(path)
+        result = add_user_status_exit({
+            "ok": True,
+            "action": "waiting_binding_recovery_required",
+            "status": "review_waiting",
+            "reason_code": "legacy_missing_wait_state_repaired",
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "platform_wait_binding_allowed": True,
+            "waiting_check_only": True,
+            "lease_id": "none",
+            "revision": state["revision"],
+            "waiting_check_action": "schedule_once",
+            "waiting_check_token": state["automation"]["waiting_check_token"],
+            "waiting_check_automation_id": "none",
+            "waiting_check_expected_rdate": state["automation"][
+                "waiting_check_expected_rdate"
+            ],
+        })
+        result.update(platform_wait_binding_barrier_contract(path, state))
+        result.update({
+            "user_status": "正在开发",
+            "user_message": "旧版本误停的等待状态已修复，正在重建一个单次检查。",
+            "user_next_choice": "无需操作。",
+            "user_choice_required": False,
+            "choice_output_allowed": False,
+            "system_next_action": "create and bind one replacement platform wait",
+        })
+        return result
     if status in MONITOR_STATUSES and waiting_check_binding_pending(state):
         if implementation_thread_id == "none":
             raise LCRLError("guard requires the exact implementation task identity")
@@ -7969,6 +8620,55 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             ],
             **platform_wait_binding_barrier_contract(path, state),
         })
+    if status in MONITOR_STATUSES and waiting_claim_stale(state):
+        if implementation_thread_id == "none":
+            raise LCRLError("guard requires the exact implementation task identity")
+        if implementation_thread_id != expected_implementation_thread_id:
+            raise LCRLError("stale wait lookup belongs to a different implementation task")
+        automation_id = str(
+            state["automation"].get("waiting_check_automation_id", "none")
+        )
+        if automation_id == "none":
+            raise LCRLError("stale wait lookup requires the exact platform task identity")
+        result = add_user_status_exit({
+            "ok": True,
+            "action": "waiting_platform_lookup_required",
+            "status": status,
+            "reason_code": "stale_platform_wait_lookup_required",
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "platform_wait_lookup_allowed": True,
+            "waiting_check_only": True,
+            "lease_id": "none",
+            "revision": revision,
+            "platform_wait_lookup_required": True,
+            "platform_wait_lookup": {
+                "id": automation_id,
+                "mode": "view",
+            },
+            "mandatory_next_tool": "codex_app__automation_update",
+            "mandatory_next_tool_mode": "view",
+            "mandatory_next_action_sequence": [
+                "view_exact_platform_wait",
+                "run_recover_stale_wait_with_found_or_not_found",
+                "update_or_create_exactly_one_platform_wait",
+            ],
+            "continuation_required": True,
+            "turn_completion_allowed": False,
+        })
+        result.update({
+            "user_status": "正在开发",
+            "user_message": "等待检查意外中断，正在核对并自动恢复，无需操作。",
+            "user_next_choice": "无需操作。",
+            "user_choice_required": False,
+            "choice_output_allowed": False,
+            "system_next_action": (
+                "look up the exact platform wait, then reuse it or rebuild one replacement"
+            ),
+        })
+        return result
     if status in MONITOR_STATUSES:
         return add_user_status_exit({
             "ok": True,
@@ -8053,6 +8753,11 @@ def begin_new_goal_command(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("new goal requires an explicit user authorization identity")
     if stage in {"", "none"} or len(stage) > 256:
         raise LCRLError("new goal requires a concrete initial stage")
+    if (
+        review.get("goal_mode") == "continuous"
+        or automation.get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
+    ) and args.goal_mode == "single_stage":
+        raise LCRLError("continuous goal cannot be downgraded to single_stage")
     if not (
         args.lease_id == runtime.get("action_lease_id")
         and runtime.get("action_lease_reason") == "turn_entry"
@@ -8122,6 +8827,13 @@ def begin_new_goal_command(args: argparse.Namespace) -> dict[str, Any]:
     state["recovery"]["consecutive_no_progress_checks"] = 0
     state["recovery"]["user_notified_stall"] = False
     record_resume_checkpoint(state)
+    rollover_authorization_id = "none"
+    rollover_required = reviewer_chat_round_budget_exhausted(state)
+    if rollover_required:
+        rollover_authorization_id = mark_reviewer_chat_rollover_required(
+            state, "round_budget",
+        )
+        review["recovery_action"] = "new_goal_requires_reviewer_chat_rollover"
     save_state(path, state, expected_revision=revision)
     return add_user_status_exit({
         "ok": True,
@@ -8130,11 +8842,22 @@ def begin_new_goal_command(args: argparse.Namespace) -> dict[str, Any]:
         "stage": stage,
         "authorization_id": authorization_id,
         "lease_id": args.lease_id,
-        "review_chat_reused": state["confirmation"].get("reviewer_thread_id") != "none",
-        "review_mode_reconfirmation_required": True,
+        "review_chat_reused": (
+            state["confirmation"].get("reviewer_thread_id") != "none"
+            and not rollover_required
+        ),
+        "reviewer_chat_rollover_required": rollover_required,
+        "rollover_authorization_id": rollover_authorization_id,
+        "old_chat_access_allowed": not rollover_required,
+        "browser_runtime_initialization_allowed": False if rollover_required else None,
+        "review_mode_reconfirmation_required": not rollover_required,
         "continuation_required": True,
         "turn_completion_allowed": False,
-        "next_action": "reconfirm_bound_chat_then_continue_local_work",
+        "next_action": (
+            "provision_one_replacement_reviewer_chat"
+            if rollover_required
+            else "reconfirm_bound_chat_then_continue_local_work"
+        ),
         "revision": state["revision"],
     })
 
@@ -8164,6 +8887,8 @@ def reset_for_retest_command(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("retest reset requires an explicit user authorization identity")
     if stage in {"", "none"} or len(stage) > 256:
         raise LCRLError("retest reset requires a concrete initial stage")
+    if review.get("goal_mode") == "continuous" and args.goal_mode == "single_stage":
+        raise LCRLError("continuous goal cannot be downgraded to single_stage")
     if active_action_lease(state):
         raise LCRLError("retest reset requires all action leases to be released")
     if (
@@ -8173,7 +8898,10 @@ def reset_for_retest_command(args: argparse.Namespace) -> dict[str, Any]:
         or automation.get("waiting_check_claimed_id") != "none"
     ):
         raise LCRLError("retest reset requires every waiting identity to be retired")
-    if automation.get("profile") == SUPERLUNA_REPO_RETEST_PROFILE:
+    if (
+        automation.get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
+        and implementation_thread_id != previous_implementation_thread_id
+    ):
         raise LCRLError(
             "repository retest handoff requires a new task-local sandbox and state; "
             "same-state reset is unavailable"
@@ -8293,6 +9021,56 @@ def release_action(args: argparse.Namespace) -> dict[str, Any]:
     return {"ok": True, "released": True, "revision": state["revision"]}
 
 
+def authorize_browser_review_mode_selection_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Authorize one visible Extreme selection in the exact bound reviewer Chat."""
+    if args.target != "extreme":
+        raise LCRLError("automatic reviewer mode selection only supports extreme")
+    path = Path(args.state).resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    if state["review"].get("transport") != "in_app_browser":
+        raise LCRLError("automatic reviewer mode selection requires the in-app browser")
+    binding = state.get("browser_binding", {})
+    if binding.get("status") != "bound":
+        raise LCRLError("automatic reviewer mode selection requires the bound reviewer Chat")
+    if binding.get("browser_id") != args.browser_id:
+        raise LCRLError("automatic reviewer mode selection must use the bound browser")
+    reviewer_thread_id = state["confirmation"].get("reviewer_thread_id", "none")
+    if binding.get("conversation_id") != reviewer_thread_id:
+        raise LCRLError("automatic reviewer mode selection target does not match the bound Chat")
+    if state["review"].get("status") not in {"local_work", "review_submit_pending"}:
+        raise LCRLError("reviewer mode can only be selected before a formal submission")
+    slot_authorized = _account_browser_slot_authorizes_state_operation(
+        state, path, args.account_slot_lease_id, "startup", args.registry, args.at,
+    )
+    if not slot_authorized:
+        slot_authorized = _promote_provisioning_startup_slot_reviewer_identity(
+            state, path, args.account_slot_lease_id, args.browser_id,
+            args.registry, args.at,
+        )
+    if not slot_authorized:
+        raise LCRLError("a live startup account browser slot is required")
+    state["runtime"].update({
+        "browser_review_mode_selection_authorized_account_slot_lease_id": args.account_slot_lease_id,
+        "browser_review_mode_selection_authorized_browser_id": args.browser_id,
+        "browser_review_mode_selection_authorized_reviewer_thread_id": reviewer_thread_id,
+        "browser_review_mode_selection_authorized_target": "extreme",
+        "browser_review_mode_selection_authorized_revision": revision + 1,
+    })
+    save_state(path, state, expected_revision=revision)
+    return {
+        "ok": True,
+        "action": "browser_review_mode_selection_authorized",
+        "target": "extreme",
+        "accepted_visible_labels": ["极高", "Extreme"],
+        "visible_foreground_required": True,
+        "background_browser_access_allowed": False,
+        "reviewer_thread_id": reviewer_thread_id,
+        "browser_id": args.browser_id,
+        "authorization_revision": state["revision"],
+    }
+
+
 def confirm_review_mode(args: argparse.Namespace) -> dict[str, Any]:
     if args.mode != "extreme":
         raise LCRLError("the review reasoning mode must be extreme")
@@ -8304,11 +9082,11 @@ def confirm_review_mode(args: argparse.Namespace) -> dict[str, Any]:
     observed_thread_id = getattr(args, "reviewer_thread_id", None) or state["confirmation"]["reviewer_thread_id"]
     native_instance_id = getattr(args, "native_app_instance_id", None) or "none"
     review_transport = state["review"].get("transport", "app_chat_review")
-    if source not in {"user", "main_app", "native_app", "in_app_browser"}:
+    if source not in {"user", "main_app", "native_app", "in_app_browser", "in_app_browser_automatic"}:
         raise LCRLError(
             "review mode confirmation must come from the selected formal review surface"
         )
-    if review_transport == "in_app_browser" and source != "in_app_browser":
+    if review_transport == "in_app_browser" and source not in {"in_app_browser", "in_app_browser_automatic"}:
         raise LCRLError("in-app browser review mode must be confirmed in the bound web Chat")
     if (
         review_transport == "in_app_browser"
@@ -8319,18 +9097,45 @@ def confirm_review_mode(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("browser reasoning evidence cannot confirm an App Chat review")
     if source == "native_app" and native_instance_id == "none":
         raise LCRLError("native App reasoning confirmation requires an App instance identity")
-    if source in {"user", "main_app", "in_app_browser"} and native_instance_id != "none":
+    if source in {"user", "main_app", "in_app_browser", "in_app_browser_automatic"} and native_instance_id != "none":
         raise LCRLError("non-native reasoning confirmation cannot claim a native App instance")
-    if observed_label != "极高":
-        raise LCRLError("the observed review reasoning label must be 极高")
+    if observed_label not in {"极高", "Extreme"}:
+        raise LCRLError("the observed review reasoning label must be 极高 or Extreme")
     if observed_thread_id != state["confirmation"]["reviewer_thread_id"]:
         raise LCRLError("review mode evidence must come from the bound reviewer Chat")
+    if source == "in_app_browser_automatic":
+        runtime = state["runtime"]
+        authorization_revision = getattr(args, "authorization_revision", None)
+        account_slot_lease_id = str(getattr(args, "account_slot_lease_id", "") or "").strip()
+        browser_id = str(getattr(args, "browser_id", "") or "").strip()
+        if not (
+            authorization_revision == revision
+            and runtime.get("browser_review_mode_selection_authorized_revision") == revision
+            and runtime.get("browser_review_mode_selection_authorized_account_slot_lease_id") == account_slot_lease_id
+            and runtime.get("browser_review_mode_selection_authorized_browser_id") == browser_id
+            and runtime.get("browser_review_mode_selection_authorized_reviewer_thread_id") == observed_thread_id
+            and runtime.get("browser_review_mode_selection_authorized_target") == "extreme"
+            and state.get("browser_binding", {}).get("browser_id") == browser_id
+            and _account_browser_slot_authorizes_state_operation(
+                state, path, account_slot_lease_id, "startup",
+                getattr(args, "registry", None), getattr(args, "at", None),
+            )
+        ):
+            raise LCRLError("fresh automatic reviewer mode selection authorization is required")
+        runtime.update({
+            "browser_review_mode_selection_authorized_account_slot_lease_id": "none",
+            "browser_review_mode_selection_authorized_browser_id": "none",
+            "browser_review_mode_selection_authorized_reviewer_thread_id": "none",
+            "browser_review_mode_selection_authorized_target": "none",
+            "browser_review_mode_selection_authorized_revision": 0,
+        })
     state["confirmation"].update({
         "reviewer_reasoning_mode": "extreme",
         "reviewer_reasoning_confirmed": True,
         "reviewer_reasoning_confirmed_at": args.at or utc_now(),
         "reviewer_reasoning_control_source": source,
-        "reviewer_reasoning_observed_label": observed_label,
+        "reviewer_reasoning_observed_label": "极高",
+        "reviewer_reasoning_observed_display_label": observed_label,
         "reviewer_reasoning_observed_thread_id": observed_thread_id,
         "reviewer_reasoning_native_app_instance_id": native_instance_id,
     })
@@ -8619,7 +9424,7 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
             "action": "reviewer_chat_rollover_required",
             "status": old_status,
             "reviewer_chat_generation": state["reviewer_chat"]["generation"],
-            "completed_formal_rounds": current_state_review_round_number(state),
+            "completed_formal_rounds": current_reviewer_chat_formal_rounds(state),
             "max_formal_rounds": REVIEWER_CHAT_MAX_FORMAL_ROUNDS,
             "rollover_reason": "round_budget",
             "rollover_authorization_id": authorization_id,
@@ -9440,6 +10245,7 @@ def resume_from_reply_command(args: argparse.Namespace) -> dict[str, Any]:
                 return add_user_status_exit({
                     "ok": True, "action": "needs_user_decision", "consumed": True,
                     "status": "external_blocked",
+                    "reason_code": quarantine_reason,
                     "response_message_id": response_message_id, "lease_id": "none", "source": source,
                     "waiting_check_action": "already_deleted" if source == "waiting_check" else "cancel_once",
                     "waiting_check_automation_id": cancelled_id,
@@ -10352,6 +11158,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     retire_missing_wait.add_argument("--authorization-id", required=True)
 
+    recover_stale_wait = sub.add_parser("recover-stale-wait")
+    recover_stale_wait.add_argument("--state", required=True)
+    recover_stale_wait.add_argument("--automation-id", required=True)
+    recover_stale_wait.add_argument(
+        "--platform-lookup-result", required=True,
+        choices=("found", "not_found"),
+    )
+    recover_stale_wait.add_argument("--implementation-thread-id", required=True)
+
     network = sub.add_parser("record-network-error")
     network.add_argument("--state", required=True)
     network.add_argument("--message", required=True)
@@ -10397,13 +11212,25 @@ def build_parser() -> argparse.ArgumentParser:
     review_mode.add_argument("--state", required=True)
     review_mode.add_argument("--mode", required=True, choices=("extreme",))
     review_mode.add_argument(
-        "--source", choices=("user", "main_app", "native_app", "in_app_browser"),
+        "--source", choices=("user", "main_app", "native_app", "in_app_browser", "in_app_browser_automatic"),
         default="user",
     )
     review_mode.add_argument("--reviewer-thread-id")
     review_mode.add_argument("--observed-label", default="极高")
     review_mode.add_argument("--native-app-instance-id")
+    review_mode.add_argument("--authorization-revision", type=int)
+    review_mode.add_argument("--account-slot-lease-id")
+    review_mode.add_argument("--browser-id")
+    review_mode.add_argument("--registry")
     review_mode.add_argument("--at")
+
+    authorize_review_mode = sub.add_parser("authorize-browser-review-mode-selection")
+    authorize_review_mode.add_argument("--state", required=True)
+    authorize_review_mode.add_argument("--target", choices=("extreme",), required=True)
+    authorize_review_mode.add_argument("--account-slot-lease-id", required=True)
+    authorize_review_mode.add_argument("--browser-id", required=True)
+    authorize_review_mode.add_argument("--registry")
+    authorize_review_mode.add_argument("--at")
 
     submission = sub.add_parser("confirm-review-submission")
     submission.add_argument("--state", required=True)
@@ -10716,6 +11543,8 @@ def main(argv: list[str] | None = None) -> int:
             result = complete_reviewer_chat_rollover_command(args)
         elif args.command == "retire-missing-wait":
             result = retire_missing_wait_command(args)
+        elif args.command == "recover-stale-wait":
+            result = recover_stale_wait_command(args)
         elif args.command == "record-network-error":
             result = record_network_error_command(args)
         elif args.command == "set-monitor-mode":
@@ -10730,6 +11559,8 @@ def main(argv: list[str] | None = None) -> int:
             result = release_action(args)
         elif args.command == "confirm-review-mode":
             result = confirm_review_mode(args)
+        elif args.command == "authorize-browser-review-mode-selection":
+            result = authorize_browser_review_mode_selection_command(args)
         elif args.command == "confirm-review-submission":
             result = confirm_review_submission_command(args)
         elif args.command == "invalidate-review-mode":
@@ -10788,10 +11619,11 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("unknown command")
         output(result)
         return 0
-    except (LCRLError, OSError, ValueError):
+    except (LCRLError, OSError, ValueError) as exc:
+        reason_code = classify_controller_error(exc)
         print(json.dumps({
             "ok": False,
-            **user_status_exit("external_blocked"),
+            **technical_status_exit(reason_code),
         }, ensure_ascii=False), file=sys.stderr)
         return 2
 

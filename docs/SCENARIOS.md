@@ -94,7 +94,10 @@ overrides. Review findings and acceptance criteria may still be used.
 
 ## Real external blocker
 
-Enter `external_blocked` only for a required user decision, permission, or
-irreplaceable input. Notify once and keep waiting checks retired until state
-changes. Network/load failure and rate limiting are recovery conditions, not a
-claim that the project failed.
+Enter `external_blocked` for a true product decision, a missing external
+permission/input, or a fail-closed technical condition that cannot continue in
+the current turn. Technical conditions must expose a stable reason code and
+system recovery with `user_choice_required=false`; only a mutually exclusive
+product choice may show `需要你决定`. Notify once and keep waiting checks retired
+until state changes. Network/load failure and rate limiting are recovery
+conditions, not a claim that the project failed.

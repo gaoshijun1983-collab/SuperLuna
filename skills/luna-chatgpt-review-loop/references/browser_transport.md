@@ -40,9 +40,15 @@ schedule. The implementation task keeps the same foreground turn alive, performs
 a bounded local wait until `retry_not_before`, and reacquires before browser
 initialization. It must not create an automation or finish at the active boundary.
 Only an existing waiting occurrence may redate its same one-shot check.
-An active slot may be reused only when the new request has the exact same
-`operation`. A same-task request that changes from `submission` to
-`waiting_read` (or between any other operation pair) returns
+An active slot may normally be reused only when the new request has the exact
+same `operation`. The sole exception is a controller-verified replacement Chat:
+the same task may atomically continue its one-time provisioning `startup` slot
+to that new Chat's first `submission` only while the exact profile/scope, state
+revision, reviewer binding, visible browser, and Extreme confirmation still
+match. The continuation keeps the same lease and visible tab, performs no
+second browser initialization/navigation/refresh, and remains tail-only. Any
+other operation change, including a same-task request from `submission` to
+`waiting_read`, returns
 `account_browser_operation_conflict`, no browser authority, and the exact stale
 lease to release. A waiting occurrence releases that old lease and atomically
 rearms its waiting lease before updating the same platform task.
@@ -170,9 +176,12 @@ to defer work to another wakeup.
 Run `startup-diagnostics --workspace ready_before_browser
 --account-slot acquired_before_browser` and then
 `autonomous-preflight --transport in_app_browser`, then create state with
-`init --review-transport in_app_browser`. The user confirms the visible reviewer
-mode with `confirm-review-mode --source in_app_browser`; SuperLuna never changes
-the model or reasoning level automatically.
+`init --review-transport in_app_browser`. After binding, SuperLuna obtains a live
+startup-slot-scoped `authorize-browser-review-mode-selection` decision, visibly
+selects `极高/Extreme` in the exact active reviewer Chat, reads the selector back,
+and confirms it with `confirm-review-mode --source in_app_browser_automatic`.
+Missing or ambiguous UI fails closed. This does not change the Codex
+implementation model or any other Chat.
 
 Capture the visible message baseline immediately before submitting. Send the
 packet once through the bound tab's visible composer only after
@@ -219,6 +228,11 @@ Stale fingerprints, wrong URLs, ambiguous matches, missing bindings, and missing
 remain fail-closed. An ordinary provider tab may use the same lease only after
 the same exact-count gate; this never authorizes a new Chat, different
 conversation, duplicate send, or skipped page verification.
+The reopen, pre-send reconciliation, and final one-shot send gates accept only a previously completed `in_app_browser` or
+`in_app_browser_automatic` Extreme confirmation. The automatic source does not
+relax any boundary: the exact reviewer Chat, browser/account-slot scope,
+confirmation revision, operation, foreground surface, and task identity must
+still match, while stale authorization or identity drift remains fail-closed.
 
 If the first `goto` or navigation call for that authorized open times out, the
 **navigation result is uncertain**; the timeout is not proof that loading has

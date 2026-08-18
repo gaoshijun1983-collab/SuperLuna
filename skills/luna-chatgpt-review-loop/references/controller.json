@@ -1,7 +1,7 @@
 {
-  "controller_version": 119,
+  "controller_version": 132,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-14.76",
+  "skill_revision": "2026-08-18.89",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",
@@ -20,11 +20,16 @@
   "account_browser_gate_lock_timeout_seconds": 10,
   "account_browser_cross_task_quiet_seconds": 180,
   "account_browser_rate_limit_backoff_seconds": [1800, 3600],
-  "reviewer_chat_max_formal_rounds": 8,
+  "reviewer_chat_max_formal_rounds": 2,
+  "bound_reviewer_chat_history_tail_only": true,
   "rate_limited_reviewer_chat_reopen_allowed": false,
   "reviewer_chat_rollover_after_rate_limit": true,
+  "automatic_bound_reviewer_extreme_selection": true,
+  "automatic_extreme_submission_reopen": true,
+  "replacement_chat_startup_submission_atomic_continuation": true,
   "account_browser_health_followup_reuses_visible_tab": true,
   "account_browser_health_followup_tail_only": true,
+  "stale_platform_wait_auto_recovery": true,
   "max_heartbeat_bytes": 1200,
   "max_waiting_automation_id_chars": 64
 }

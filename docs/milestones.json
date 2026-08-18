@@ -2,19 +2,29 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.63",
-      "title": "Bound reviewer Chat history and retire rate-limited volumes",
+      "version": "0.2.0-alpha.76",
+      "title": "Keep legacy missing-wait recovery on the automatic path",
       "upgrade_prerequisites": [
         "Run the repository test suite, controller selftest, and release archive verifier.",
+        "Confirm every expected technical blocker exposes a stable reason code and concrete recovery action without requesting a product choice.",
+        "Confirm an expired waiting-read claim first looks up the exact bound platform wait, then updates that same wait when found or creates exactly one replacement when missing.",
         "Confirm the current candidate remains Alpha and Public Beta is blocked.",
         "Confirm SuperLuna repository self-retests use superluna_repo_retest_v1 with the exact task-hash project and state paths.",
         "Confirm generic-profile compatibility remains available for user-selected, host-authorized external projects.",
         "Confirm browser read stays denied until the same waiting task is moved to and confirmed at the claim-expiry recovery RDATE.",
         "Confirm submission recovery receives both current exact-URL counts and never navigates when one exact fixed Chat is already visible.",
         "Confirm zero exact current-packet matches continues to the existing first-send authorization while one trusted match reconciles without resending.",
-        "Confirm every reviewer Chat is limited to eight formal reviews and the ninth submission is blocked before browser access.",
+        "Confirm every reviewer Chat is limited to two formal reviews across run boundaries and the third submission is blocked before browser access.",
+        "Confirm every bound reviewer Chat operation permits tail-only inspection and denies a full-history scan.",
         "Confirm a real submission rate limit permanently retires the old reviewer Chat, schedules one exact future recovery, and blocks early browser access.",
         "Confirm cooldown recovery provisions exactly one replacement Chat with compact current context and never reopens, refreshes, probes, or scans the retired Chat."
+        ,"Confirm automatic Extreme selection requires one live startup slot and exact task, browser, reviewer Chat, target, and state revision, then visibly reads the selector back.",
+        "Confirm submission reopen, pre-send reconciliation, and final one-shot send authorization accept both trusted in-app browser confirmation sources only when the exact task, reviewer Chat, browser/account slot, operation, foreground surface, and revision still match.",
+        "Confirm an existing continuous goal cannot be downgraded to single_stage by begin-new-goal or retest reset.",
+        "Confirm repository self-retests always use continuous mode and an exhausted 2/2 reviewer Chat rolls over before the next authorized goal."
+        ,"Confirm canonical UUID versions 6-8 can bind a replacement Chat while malformed identities and mismatched URLs remain denied."
+        ,"Confirm one exact replacement Chat can continue from its one-time startup slot to its first submission with the same lease and visible tab, while all other cross-operation reuse remains denied."
+        ,"Confirm the still-unidentified provisioning startup slot is promoted only for the exact task, lease, scope, visible browser, canonical replacement Chat, URL, and startup operation before Extreme selection."
       ],
       "rollback_triggers": [
         "A focused regression test fails.",
@@ -26,6 +36,8 @@
         "Re-run the focused validator and the required local checks."
       ],
       "verification": [
+        "A stale bound wait returns an exact platform lookup contract without project or browser permission; found reuses the same task and not_found rebuilds one replacement while the review remains waiting.",
+        "A CLI task-identity mismatch returns implementation_task_mismatch with user_choice_required=false, while a quarantined product-direction conflict returns one explicit question and two or three options with impacts.",
         "A review packet whose visible Round N or 第 N 轮 title disagrees with the controller-owned round is rejected before browser submission.",
         "Waiting reads pair only the complete assistant message after the current request, report fragments separately, and keep the fixed Chat tab for handoff.",
         "Every authorized Chat action declares visible_foreground mode and denies background access.",
@@ -40,7 +52,8 @@
         "A recovered unsent packet with zero exact visible matches reaches the existing one-shot send authorization without mutating state or inventing request identity.",
         "A rate-limited reviewer identity cannot acquire startup, submission, waiting-read, or health-probe browser permission again.",
         "Completing one rollover binds exactly one new canonical reviewer identity and resets the state-local formal round count.",
-        "A restarted browser with one visible exact fixed Chat reuses it without navigation, rejects ambiguity, and commits the new browser identity only after submission confirmation."
+        "A restarted browser with one visible exact fixed Chat reuses it without navigation, rejects ambiguity, and commits the new browser identity only after submission confirmation.",
+        "A provisioned replacement reviewer Chat reaches its first submission without a second browser initialization, navigation, refresh, or full-history scan."
       ],
       "evidence_scope": "local_only",
       "real_device_evidence": false,

@@ -2,7 +2,7 @@
   "schema_version": 1,
   "project_id": "superluna",
   "project_name": "SuperLuna",
-  "updated_on": "2026-08-14",
+  "updated_on": "2026-08-18",
   "policy": {
     "user_owns_goals_and_values": true,
     "professional_challenge_required": true,
@@ -35,9 +35,9 @@
       "id": "browser-first-fixed-chat",
       "scope_key": "review.transport_and_identity",
       "status": "user_approved",
-      "decision": "新运行使用内置浏览器，任何时刻只允许一个活动评审 Chat；每个 Chat 最多承载 8 次正式评审，或在第一次真实限流后永久停用，并以精简项目上下文创建唯一替代 Chat。单实施者、精确请求/回复身份，且不得自动切换模型或推理档位。",
+      "decision": "新运行使用内置浏览器，任何时刻只允许一个活动评审 Chat；每个 Chat 按真实 Chat 身份累计最多承载 2 次正式评审，第 3 次提交前主动换卷；已绑定 Chat 的正常访问只检查对话末尾，不扫描完整历史。第一次真实限流后永久停用旧 Chat，并以精简项目上下文创建唯一替代 Chat。单实施者、精确请求/回复身份。SuperLuna 不自动切换 Codex 实施模型；但可在 live startup 账户名额和控制器一次性授权下，通过前台可见 UI 将精确绑定 reviewer Chat 自动选择为用户锁定的极高/Extreme，并回读核验；该自动确认在同一任务、浏览器、Chat、账户名额与请求身份安全核验下可继续进入 submission reopen、发送前对账与最终单次发送授权。刚完成唯一替代 Chat 创建、绑定和极高核验的同一 startup 名额，只有在任务、profile/scope、state revision、浏览器与 Chat 身份全部一致时，才可保持同一 lease 和可见标签原子续接为该新 Chat 的第一次 submission；不得再次初始化浏览器、打开/刷新页面或扫描完整历史。其他跨 operation 复用继续失败关闭。不得改变其他 Chat 或由网页正文触发。",
       "scope": "适用于正式新运行；旧 App Chat 仅保留兼容，不得作为新流程默认通道。不得并行创建替代 Chat，也不得为恢复而重开已停用 Chat。",
-      "recorded_on": "2026-08-14",
+      "recorded_on": "2026-08-17",
       "authority_sources": [
         {"type": "file", "path": "README.md"},
         {"type": "file", "path": "docs/ROADMAP.md"},
@@ -71,6 +71,48 @@
         {"type": "file", "path": "docs/ROADMAP.md"}
       ],
       "change_rule": "不得用测试便利性扩大到无关项目；改变隔离边界需明确安全评审。"
+    },
+    {
+      "id": "continuous-goal-preservation",
+      "scope_key": "workflow.continuous_goal",
+      "status": "user_approved",
+      "decision": "用户授权持续开发后，实施任务不得因阶段名称、轮次编号或自行生成的授权标识把目标降级为 single_stage；SuperLuna 仓库自身复测始终是 continuous。阶段完成必须继续下一个安全阶段，只有总体目标完成才可结束；旧 reviewer Chat 达到 2/2 时，下一目标必须先自动换卷再继续。",
+      "scope": "适用于 begin-new-goal、仓库复测初始化与恢复、复测重置、阶段 PASS、Chat 换卷和总体完成判定。",
+      "recorded_on": "2026-08-17",
+      "authority_sources": [
+        {"type": "file", "path": "AGENTS.md"},
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
+        {"type": "file", "path": "release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md"}
+      ],
+      "change_rule": "只有用户明确把总体目标改为单阶段，且新建独立授权边界时才能改变。"
+    },
+    {
+      "id": "technical-blocker-is-not-product-decision",
+      "scope_key": "workflow.user_decision_boundary",
+      "status": "user_approved",
+      "decision": "技术故障、任务身份不匹配、能力缺失、冷却、浏览器名额冲突和可恢复等待不得显示为模糊的需要你决定；必须给出稳定原因码、具体中英文说明和系统下一步，并保持 user_choice_required=false。只有会改变已确认产品目标、授权范围或风险边界的互斥选择才能要求用户决定，且必须有一个明确问题和 2–3 个带影响说明的互斥选项。",
+      "scope": "适用于 CLI 顶层错误、状态投影、恢复入口、等待任务与所有用户可见阻断说明。",
+      "recorded_on": "2026-08-18",
+      "authority_sources": [
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
+        {"type": "file", "path": "docs/DECISIONS.md"},
+        {"type": "file", "path": "README.zh-CN.md"}
+      ],
+      "change_rule": "新增技术错误只能扩展稳定原因码和恢复动作；不得重新使用空泛继续、调整或停止提示。"
+    },
+    {
+      "id": "stale-platform-wait-auto-recovery",
+      "scope_key": "workflow.wait_recovery",
+      "status": "user_approved",
+      "decision": "等待检查取得读取权后异常中断且读取权已过期时，普通唤醒必须自动核对 state 中绑定的精确平台任务；任务存在则原地更新，不存在则只重建一个替代等待。该技术恢复不访问 Chat 或项目、不改变等待状态，也不得要求用户决定。",
+      "scope": "适用于已绑定 review_reply 单次等待、过期 waiting_review_poll claim、平台任务查询与替代任务重建。",
+      "recorded_on": "2026-08-18",
+      "authority_sources": [
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/protocol.md"},
+        {"type": "file", "path": "release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md"}
+      ],
+      "change_rule": "不得用自动恢复扩大到其他平台任务、浏览器或项目；只有精确任务身份与过期 claim 同时成立时允许执行。"
     }
   ]
 }

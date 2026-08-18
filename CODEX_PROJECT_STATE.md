@@ -10,7 +10,7 @@ intervention.
 ## Success criteria
 
 - One writer, one active reviewer Chat at a time, one state-local review run.
-- At most eight formal reviews per Chat; a rate-limited Chat is never reopened.
+- At most two formal reviews per Chat identity across run boundaries; the third submission proactively rolls over, bound Chat access is tail-only, and a rate-limited Chat is never reopened.
 - No duplicate send/read/apply and no recurring background polling.
 - Safe recovery across task, waiting occurrence, browser, and network restarts.
 - Real macOS and Windows consecutive-cycle evidence before Public Beta.
@@ -25,6 +25,9 @@ intervention.
 - Zero exact packet matches after recovery continue to the ordinary first-send
   gate; one trusted match reconciles without resending; ambiguity stops.
 - Same-one-shot recovery when a waiting read claim expires before a real read.
+- Exact platform reconciliation for a stale claimed wait: reuse the same
+  one-shot when present or rebuild exactly one when the platform reports it
+  missing, without Chat or project access.
 - Exact-URL fixed-Chat recovery after browser restart: reuse one visible match
   without navigation or open once when absent; ambiguity fails closed.
 - Formal review-title validation plus complete post-request assistant pairing;
@@ -32,11 +35,70 @@ intervention.
 - Repository-local self-retest profile plus installed `generic` compatibility.
 - Candidate-bound Beta evidence recorder that accepts only repository evidence,
   resets a consecutive streak on failure, and never starts Chat or automation.
+- Stable technical-blocker reporting that keeps identity, capability, cooldown,
+  browser-slot, and recoverable-wait failures out of the product-decision state.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.63`, Controller 119, Skill `2026-08-14.76`.
-- Repository tests: 361/361; controller tests: 250/250.
+- Source candidate: `0.2.0-alpha.76`, Controller 132, Skill `2026-08-18.89`.
+- Alpha 76 repository regression passed 381/381. Controller selftest passed
+  15/15; closure-check, Skill, plugin, decision-register, milestone, and
+  Beta-evidence validators also passed. Two independent builds produced the
+  same verified 98-file source archive. This is local Alpha evidence only.
+- Alpha 76 makes the legacy missing-wait compatibility command converge on the
+  automatic one-replacement binding barrier. It no longer changes a recoverable
+  waiting review to `external_blocked` when an older running task calls it.
+- Alpha 75 closes the missing-platform-wait deadlock. An ordinary wake on an
+  expired waiting claim can only inspect the exact saved platform task; a found
+  task is updated in place, while `not_found` rotates the wait identity and
+  creates one replacement through the existing bind barrier. The review remains
+  waiting and no Chat, project, or user decision is involved.
+- Alpha 75 repository regression passed 380/380. Controller selftest 15/15,
+  closure-check, Skill, plugin, decision-register, milestone, and Beta-evidence
+  format validators also passed; this remains local-only evidence.
+- Alpha 74 separates technical recovery from product decisions. Expected
+  controller faults expose a stable reason code and concrete system next action
+  with `user_choice_required=false`; only mutually exclusive changes to product
+  goal, authorized scope, or risk boundary may show `需要你决定`.
+- Alpha 74 repository regression passed 377/377. Controller selftest 15/15,
+  closure-check, Skill, plugin, decision-register, milestone, and Beta-evidence
+  format validators also passed; this remains local-only evidence.
+- A replacement Chat created under a one-time startup slot can bind that same
+  live slot from reviewer `none` to its exact canonical Chat identity at the
+  visible Extreme-selection gate. This removes the real flow's missing
+  reacquisition step without opening the browser twice or weakening identity
+  checks.
+- A newly provisioned replacement reviewer Chat can atomically continue from
+  its one-time `startup` slot to its first `submission` only when exact task,
+  scope, state, visible browser, reviewer binding, and Extreme confirmation
+  still match; it reuses the same lease/tab and remains tail-only.
+- Repository self-retests are always continuous. A stage boundary cannot end
+  the run, and an exhausted 2/2 reviewer Chat rolls over before the next goal.
+- Continuous goals cannot be downgraded to `single_stage` by implementation-task
+  arguments during `begin-new-goal` or retest reset.
+- Automatic reviewer Extreme selection is locally covered by exact task/slot/browser/Chat/revision authorization and visible-label confirmation tests.
+- Automatic Extreme confirmation now remains valid through submission reopen,
+  pre-send reconciliation, and final one-shot send authorization for the same
+  task, account slot, browser, reviewer Chat, and request fingerprint.
+- Alpha 69 local validation passed: repository 370/370 and controller selftest
+  15/15; these results remain local-only and do not satisfy the real macOS or
+  Public Beta gates.
+- Alpha 70 local validation passed: repository 371/371 plus controller,
+  milestone, Beta-evidence, decision-register, Skill, and plugin validators.
+  A real replacement-Chat resume still requires macOS evidence.
+- Alpha 71 repository regression passed 373/373. The replacement-Chat
+  `startup → submission` continuation and its fail-closed negative path are
+  locally covered; real visible macOS continuation remains unverified.
+- Alpha 72 repository regression passed 374/374. The real replacement-Chat
+  flow no longer needs a second startup-slot acquisition after binding: the
+  original live slot is promoted only at the exact visible Extreme-selection
+  gate, while a mismatched browser or Chat remains fail-closed. Real visible
+  macOS continuation remains unverified.
+- Alpha 73 adds a narrow same-task repository-retest reset: after an explicitly
+  terminated failed cycle and full lease/wait cleanup, the same implementation
+  task may reuse its exact hashed sandbox and state. Cross-task handoff remains
+  rejected and requires a new task-local sandbox. Repository regression passed
+  375/375; this remains local-only evidence.
 - Controller selftest: 15/15.
 - Milestone, Skill, and plugin validators pass.
 - Beta evidence matrix and CI truth validator are present; all six real-device
@@ -48,12 +110,15 @@ intervention.
 
 - Product remains a Codex plugin, not a standalone desktop app.
 - New runs use the in-app browser; legacy App Chat state is compatibility only.
-- SuperLuna never changes model or reasoning level automatically.
+- SuperLuna never changes the Codex implementation model; it may automatically
+  select Extreme only in the exact bound reviewer Chat under controller authorization.
 - Local validation never counts as real-device or Public Beta evidence.
 
 ## Constraints and risks
 
-- Alpha 63 archive and deterministic verification are complete.
+- Alpha 76 source archive and deterministic rebuild verification are complete.
+- The current source contains validated but not yet committed Alpha 76 changes;
+  it is not a frozen Git candidate until those changes are committed.
 - The browser-restart recovery fix still needs a new real macOS loop.
 - Controller 119 bounded rollover, permanent rate-limited-Chat retirement, and
   replacement binding are locally regression-tested but still require a fresh
