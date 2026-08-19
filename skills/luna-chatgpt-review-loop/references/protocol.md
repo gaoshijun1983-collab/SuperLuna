@@ -125,6 +125,12 @@ advertisement with credential helpers disabled. Missing identity, dirty state,
 unknown remote, absent remote tracking, unreachable commit, or missing canaries
 stays blocked with zero browser authority. Success restores `rollover_pending`
 but leaves the replacement Chat repository access receipt unconfirmed.
+SuperLuna publishes the atomic tracked pair `SUPERLUNA_REVIEW_CANARY.txt` and
+`review-canary/NESTED_CANARY.txt` for this proof. Preparation requires both paths
+to be regular blobs in the exact commit and returns their exact blob SHAs. A
+missing half, symlink, or path mismatch fails closed rather than silently using
+a volatile README or source file. Generic repositories without this dedicated
+pair may still use deterministic root+nested regular blobs.
 It cannot inherit only a prose summary or the previous Chat receipt. Normal operations on a bound Chat are tail-only and
 return `full_history_scan_allowed=false`. The workflow never switches
 model/reasoning or sends through a second transport. The user explicitly

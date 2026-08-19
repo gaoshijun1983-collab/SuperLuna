@@ -20,8 +20,11 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.85`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 141 / Skill revision `2026-08-19.98` 会让普通 turn-entry 在旧附件阻断
+当前源码候选版本是 `0.2.0-alpha.86`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 142 / Skill revision `2026-08-19.99` 在仓库根目录与嵌套目录提供一对稳定、
+tracked、无敏感内容的 reviewer-access canary。repository preparation 会原子选择这对 canary，要求
+两者都是 exact commit 中的普通 blob；缺失一项、symlink 或身份不符都在浏览器动作前失败关闭。
+Controller 141 / Skill revision `2026-08-19.98` 会让普通 turn-entry 在旧附件阻断
 停止原 state-owner 之前，返回稳定的 `repository_rollover_preparation_required` 和唯一控制器入口
 `prepare-repository-rollover-recovery`。该入口只接受精确任务身份、clean worktree、canonical HTTPS
 origin、已被远端跟踪的 exact HEAD、无凭据可达的 exact commit、完整 tree 与根/嵌套 canary；失败时

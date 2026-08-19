@@ -122,6 +122,13 @@ class TruthfulProjectContextTests(unittest.TestCase):
             path.write_text(value, encoding="utf-8")
         (root / "src").mkdir(exist_ok=True)
         (root / "src" / "nested.py").write_text("nested = True\n", encoding="utf-8")
+        (root / "SUPERLUNA_REVIEW_CANARY.txt").write_text(
+            "SuperLuna repository review root canary v1\n", encoding="utf-8",
+        )
+        (root / "review-canary").mkdir(exist_ok=True)
+        (root / "review-canary" / "NESTED_CANARY.txt").write_text(
+            "SuperLuna repository review nested canary v1\n", encoding="utf-8",
+        )
         subprocess.run(["git", "-C", str(root), "add", "."], check=True)
         subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
         subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/example/project.git"], check=True)
@@ -215,6 +222,36 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
                     remote_url="https://github.com/example/project/tree/main",
                 ))
 
+    def test_repository_preparation_uses_dedicated_stable_canaries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            prepared = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path)
+            )
+            self.assertEqual([item["path"] for item in prepared["canaries"]], [
+                "SUPERLUNA_REVIEW_CANARY.txt",
+                "review-canary/NESTED_CANARY.txt",
+            ])
+            for item in prepared["canaries"]:
+                expected = subprocess.check_output(
+                    ["git", "rev-parse", f"HEAD:{item['path']}"], cwd=root, text=True,
+                ).strip()
+                self.assertEqual(item["blob_sha"], expected)
+
+    def test_repository_preparation_rejects_symlink_canary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            nested = root / "review-canary" / "NESTED_CANARY.txt"
+            nested.unlink()
+            nested.symlink_to(root / "SUPERLUNA_REVIEW_CANARY.txt")
+            subprocess.run(["git", "add", "review-canary/NESTED_CANARY.txt"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "symlink canary"], cwd=root, check=True)
+            result = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path)
+            )
+            self.assertEqual(result["action"], "full_source_attachment_required")
+            self.assertEqual(result["fallback_reason"], "tree_canaries_unavailable")
+
     def test_url_string_does_not_create_repository_access_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); state_path = self.make_repo_state(root)
@@ -258,8 +295,8 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             lcrl.confirm_repository_access_receipt_command(Namespace(
                 state=str(state_path), repository_identity=prepared["repository_identity"],
                 commit_sha=prepared["head_commit"], tree_manifest_hash=prepared["tree_manifest_hash"],
-                root_canary_path="README.md", root_canary_blob_sha=prepared["canaries"][0]["blob_sha"],
-                nested_canary_path="src/nested.py", nested_canary_blob_sha=prepared["canaries"][1]["blob_sha"],
+                root_canary_path=prepared["canaries"][0]["path"], root_canary_blob_sha=prepared["canaries"][0]["blob_sha"],
+                nested_canary_path=prepared["canaries"][1]["path"], nested_canary_blob_sha=prepared["canaries"][1]["blob_sha"],
                 exact_commit_opened=True, full_tree_visible=True, visible_match_count=1, at=None,
             ))
             state = lcrl.load_state(state_path); state["reviewer_chat"]["generation"] += 1
@@ -284,8 +321,8 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             lcrl.confirm_repository_access_receipt_command(Namespace(
                 state=str(state_path), repository_identity=prepared["repository_identity"],
                 commit_sha=prepared["head_commit"], tree_manifest_hash=prepared["tree_manifest_hash"],
-                root_canary_path="README.md", root_canary_blob_sha=prepared["canaries"][0]["blob_sha"],
-                nested_canary_path="src/nested.py", nested_canary_blob_sha=prepared["canaries"][1]["blob_sha"],
+                root_canary_path=prepared["canaries"][0]["path"], root_canary_blob_sha=prepared["canaries"][0]["blob_sha"],
+                nested_canary_path=prepared["canaries"][1]["path"], nested_canary_blob_sha=prepared["canaries"][1]["blob_sha"],
                 exact_commit_opened=True, full_tree_visible=True, visible_match_count=1, at=None,
             ))
             (root / "a.py").write_text("incremental\n", encoding="utf-8")

@@ -372,6 +372,10 @@ operation 复用仍禁止。返回
    该命令再用禁用 credential helper 的 `git ls-remote` 证明 exact commit 可匿名访问，成功后原子恢复
    `rollover_pending`。remote 未知、dirty、commit 未跟踪/不可匿名访问、task identity 不符或 canary
    缺失时保持原 state 并失败关闭；全过程不得启动浏览器，也不得把 Git 可达性写成 Chat access receipt。
+   SuperLuna 仓库自身固定使用 tracked 的 `SUPERLUNA_REVIEW_CANARY.txt` 与
+   `review-canary/NESTED_CANARY.txt`。Controller 必须把这对路径作为原子 canary，核对 exact commit 中
+   两者均为普通 blob 并返回精确 blob SHA；任一缺失、symlink 或路径身份不符时不得退回 README 等
+   易变文件掩盖故障。其他没有专用 canary 的仓库可从 root+nested tracked 普通 blob 中确定性选择。
    没有可验证 Git 仓库时必须用 `prepare-project-context --scope full_source` 生成确定性脱敏完整源码包；
    在取得 `startup` 账户名额、初始化浏览器或创建首次/replacement Chat 前，必须先运行
    `declare-attachment-upload-capability`。只有宿主明确声明 `direct_file_upload` 可用时才能继续；

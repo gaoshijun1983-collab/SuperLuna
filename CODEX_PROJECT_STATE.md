@@ -40,7 +40,11 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.85`, Controller 141, Skill `2026-08-19.98`.
+- Source candidate: `0.2.0-alpha.86`, Controller 142, Skill `2026-08-19.99`.
+- The repository now owns an atomic, tracked reviewer-access canary pair:
+  `SUPERLUNA_REVIEW_CANARY.txt` and `review-canary/NESTED_CANARY.txt`.
+  Preparation accepts them only as regular exact-commit blobs, returns their
+  blob SHAs, and fails closed for a missing half or symlink.
 - Ordinary turn entry now routes a legacy attachment-blocked rollover to one
   exact repository preparation command when local repository facts are complete.
   The command additionally proves anonymous exact-commit reachability, restores
@@ -84,6 +88,10 @@ intervention.
   15/15; release, closure, Skill, plugin, decision-register, milestone, and Beta
   evidence validators passed locally. The deterministic archive contains 106
   tracked source files. Real App rollover remains unverified.
+- Alpha 86 repository regression passed 425/425 locally. Controller selftest
+  passed 15/15; release, closure, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. The deterministic archive contains 110
+  tracked source files. Real App canary matching remains pending.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

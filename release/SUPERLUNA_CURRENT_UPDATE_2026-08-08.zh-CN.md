@@ -3,28 +3,32 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.85`（Python 元数据：`0.2.0a85`）
-- 当前源码控制器：141
+- 版本：`0.2.0-alpha.86`（Python 元数据：`0.2.0a86`）
+- 当前源码控制器：142
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.98`
+- 当前源码 Skill 修订：`2026-08-19.99`
 - 候选日期：2026-08-19
-- Alpha 85 当前为本地验证候选；基线 HEAD：`a98462dd6f78bb6d764a53b8cb99aa9068ea917b`
+- Alpha 86 当前为本地验证候选；基线 HEAD：`cfc1e628b99d39ce6d98c8c8ebf4594b2e45a2a0`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：423/423 通过；控制器 selftest：15/15 通过。
+- 仓库测试：425/425 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 106 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.85.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 85 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 110 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.86.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 86 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 142 / Skill revision `2026-08-19.99` 为仓库新增稳定、tracked、无敏感内容的
+  `SUPERLUNA_REVIEW_CANARY.txt` 与 `review-canary/NESTED_CANARY.txt`。prepare 与 rollover recovery
+  现在原子选择这对 canary，并核对 exact commit 中两者都是普通 blob 后返回精确 blob SHA；任一缺失、
+  symlink 或路径身份不符时在浏览器动作前失败关闭，不再用 README 或频繁变化源码掩盖 canary 故障。
 - Controller 141 / Skill revision `2026-08-19.98` 修复普通 turn-entry 仍把旧附件阻断投影成
   无限等待上传能力的问题。若 exact repository 的本地事实完整，guard 现在返回
   `repository_rollover_preparation_required`，并指定唯一下一命令

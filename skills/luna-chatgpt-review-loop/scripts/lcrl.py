@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 141
-SKILL_REVISION = "2026-08-19.98"
+CONTROLLER_VERSION = 142
+SKILL_REVISION = "2026-08-19.99"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -8127,6 +8127,41 @@ def _repository_transient_paths(state: dict[str, Any]) -> list[str]:
     ]
 
 
+REPOSITORY_REVIEW_CANARY_PATHS = (
+    "SUPERLUNA_REVIEW_CANARY.txt",
+    "review-canary/NESTED_CANARY.txt",
+)
+
+
+def _repository_review_canaries(
+    project_root: Path, head_commit: str, tracked: Iterable[str],
+) -> list[dict[str, str]]:
+    """Select two committed regular blobs; dedicated canaries are atomic."""
+    tracked_set = set(tracked)
+    dedicated_present = [path in tracked_set for path in REPOSITORY_REVIEW_CANARY_PATHS]
+    if any(dedicated_present):
+        if not all(dedicated_present):
+            return []
+        selected = list(REPOSITORY_REVIEW_CANARY_PATHS)
+    else:
+        root_paths = sorted(path for path in tracked_set if "/" not in path)
+        nested_paths = sorted(path for path in tracked_set if "/" in path)
+        if not root_paths or not nested_paths:
+            return []
+        selected = [
+            "README.md" if "README.md" in root_paths else root_paths[0],
+            "src/nested.py" if "src/nested.py" in nested_paths else nested_paths[0],
+        ]
+    canaries = []
+    for path in selected:
+        entry = _git_output(project_root, "ls-tree", head_commit, "--", path)
+        match = re.fullmatch(r"100644 blob ([0-9a-f]{40,64})\t(.+)", entry)
+        if not match or match.group(2) != path:
+            return []
+        canaries.append({"path": path, "blob_sha": match.group(1)})
+    return canaries
+
+
 def repository_rollover_recovery_plan(
     state_path: Path, state: dict[str, Any],
 ) -> dict[str, Any]:
@@ -8160,19 +8195,12 @@ def repository_rollover_recovery_plan(
         return {"ready": False, "reason_code": "repository_commit_not_remote_tracked",
                 "system_next_action": "fetch or publish the exact commit before rollover"}
     tracked, _commit, _dirty = _git_project_inventory(project_root)
-    root_paths = [path for path in tracked if "/" not in path]
-    nested_paths = [path for path in tracked if "/" in path]
-    if not root_paths or not nested_paths:
+    canaries = _repository_review_canaries(project_root, head_commit, tracked)
+    if not canaries:
         return {"ready": False, "reason_code": "repository_tree_canaries_unavailable",
                 "system_next_action": "restore one root and one nested tracked canary"}
     tree_lines = _git_output(project_root, "ls-tree", "-r", "--full-tree", head_commit).splitlines()
     tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
-    root_canary = "README.md" if "README.md" in root_paths else root_paths[0]
-    nested_canary = "src/nested.py" if "src/nested.py" in nested_paths else nested_paths[0]
-    canaries = [
-        {"path": root_canary, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{root_canary}")},
-        {"path": nested_canary, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{nested_canary}")},
-    ]
     return {
         "ready": True,
         "project_root": str(project_root),
@@ -8369,16 +8397,9 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
         return _prepare_full_source_fallback(args, "private_repository_access_unverified")
     tree_lines = _git_output(project_root, "ls-tree", "-r", "--full-tree", head_commit).splitlines()
     tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
-    root_paths = [path for path in tracked if "/" not in path]
-    nested_paths = [path for path in tracked if "/" in path]
-    if not root_paths or not nested_paths:
+    canaries = _repository_review_canaries(project_root, head_commit, tracked)
+    if not canaries:
         return _prepare_full_source_fallback(args, "tree_canaries_unavailable")
-    preferred_root = "README.md" if "README.md" in root_paths else root_paths[0]
-    preferred_nested = "src/nested.py" if "src/nested.py" in nested_paths else nested_paths[0]
-    canaries = [
-        {"path": preferred_root, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{preferred_root}")},
-        {"path": preferred_nested, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{preferred_nested}")},
-    ]
     repository_identity = hashlib.sha256(canonical_url.encode()).hexdigest()
     rollover_handoff = _repository_rollover_handoff(
         state, project_root, getattr(args, "rollover_handoff_file", None),

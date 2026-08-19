@@ -2,8 +2,8 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.85",
-      "title": "Route legacy attachment blockers to exact repository preparation",
+      "version": "0.2.0-alpha.86",
+      "title": "Provide stable exact-commit repository review canaries",
       "upgrade_prerequisites": [
         "Run the repository test suite, controller selftest, and release archive verifier.",
         "Confirm every expected technical blocker exposes a stable reason code and concrete recovery action without requesting a product choice.",

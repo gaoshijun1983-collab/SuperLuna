@@ -24,8 +24,12 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.85`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 141 / Skill revision
+The current source candidate is `0.2.0-alpha.86`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 142 / Skill revision
+`2026-08-19.99` adds two stable, tracked, non-sensitive repository review
+canaries at the root and a nested path. Repository preparation selects this
+atomic pair, requires regular committed blobs, and rejects symlinks or a
+missing half before any browser action. Controller 141 / Skill revision
 `2026-08-19.98` makes ordinary turn entry expose the repository preparation
 continuation before an old attachment blocker can stop the state owner. The
 preparation command requires the exact task, a clean worktree, canonical HTTPS
