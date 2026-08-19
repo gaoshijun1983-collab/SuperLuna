@@ -20,8 +20,10 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.88`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 144 / Skill revision `2026-08-19.101` 明确拆分可写 implementation workspace
+当前源码候选版本是 `0.2.0-alpha.89`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 145 / Skill revision `2026-08-19.102` 会让真实账户限流 reason code 贯穿
+顶层错误和状态投影，显示精确冷却截止、冷却期零 Chat 访问，以及唯一 RDATE 单次恢复是否已绑定。
+Controller 144 / Skill revision `2026-08-19.101` 明确拆分可写 implementation workspace
 与 reviewer repository source。仓库自测的写入和执行继续锁在任务隔离 fixture，exact-commit 审核
 证据只从精确 retest scope 绑定的可信 SuperLuna source checkout 推导；generic Git 项目使用所选项目
 所属的 Git toplevel，非 Git 项目保持完整源码附件路径。历史 replacement startup provisioning

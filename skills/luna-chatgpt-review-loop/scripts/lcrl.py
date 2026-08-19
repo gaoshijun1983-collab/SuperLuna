@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 144
-SKILL_REVISION = "2026-08-19.101"
+CONTROLLER_VERSION = 145
+SKILL_REVISION = "2026-08-19.102"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -4491,6 +4491,12 @@ def rollover_future_action(state: dict[str, Any]) -> tuple[bool, str]:
 
 
 TECHNICAL_REASON_PROFILES: dict[str, tuple[str, str, str, str]] = {
+    "account_rate_limited": (
+        "账户正在冷却，系统不会在冷却期间访问 Chat。",
+        "The account is cooling down; the system will not access Chat during cooldown.",
+        "按状态记录的截止时间等待，到期只执行唯一一次恢复检查。",
+        "Wait until the recorded deadline, then run the one reserved recovery check.",
+    ),
     "implementation_task_mismatch": (
         "当前状态属于另一个实施任务，本任务没有执行任何动作。",
         "This state belongs to a different implementation task; this task did not act.",
@@ -4539,6 +4545,10 @@ TECHNICAL_REASON_PROFILES: dict[str, tuple[str, str, str, str]] = {
 def classify_controller_error(exc: BaseException) -> str:
     """Map internal exceptions to stable, non-sensitive operational reason codes."""
     text = str(exc).lower()
+    if any(marker in text for marker in (
+        "请求过于频繁", "too many requests", "rate limited", "rate_limit",
+    )):
+        return "account_rate_limited"
     if "different implementation task" in text or "belongs to a different implementation task" in text:
         return "implementation_task_mismatch"
     if "cooldown" in text or "silent period" in text or "rate limit" in text:
@@ -4883,6 +4893,45 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
         output.update(platform_wait_binding_barrier_contract(
             Path(args.state).expanduser().resolve(), state
         ))
+    if (
+        state.get("recovery", {}).get("network_state") == "rate_limited"
+        and state.get("review", {}).get("recovery_action") == "account_rate_limited"
+    ):
+        retry_not_before = state["recovery"].get("next_retry_not_before", "none")
+        bound = state["automation"].get("waiting_check_automation_id", "none") != "none"
+        output.update({
+            "workflow_status": "账户冷却中",
+            "reason_code": "account_rate_limited",
+            "user_status": "正在开发",
+            "user_message": (
+                f"账户正在冷却，截止时间为 {retry_not_before}。"
+                "冷却期间不会访问 Chat；到期只进行一次恢复检查。"
+            ),
+            "user_message_en": (
+                f"The account is cooling down until {retry_not_before}. "
+                "SuperLuna will not access Chat during cooldown and will run "
+                "only one recovery check when it expires."
+            ),
+            "user_next_choice": (
+                "无需操作；唯一单次恢复已绑定。"
+                if bound else "无需操作；系统正在绑定唯一单次恢复。"
+            ),
+            "user_next_choice_en": (
+                "No action is required; the one recovery check is bound."
+                if bound else
+                "No action is required; the one recovery check is being bound."
+            ),
+            "single_recovery_available": True,
+            "single_recovery_bound": bound,
+            "retry_not_before": retry_not_before,
+            "chat_read_allowed": False,
+            "browser_runtime_initialization_allowed": False,
+            "proactive_probe_allowed": False,
+            "recurring_recovery_allowed": False,
+            "user_choice_required": False,
+            "continuation_required": not bound,
+            "turn_completion_allowed": bound,
+        })
     return output
 
 
@@ -6628,27 +6677,87 @@ def record_reviewer_chat_rollover_failure_command(
     if args.authorization_id != reviewer_chat.get("rollover_authorization_id"):
         raise LCRLError("reviewer Chat rollover failure authorization does not match")
     failure_code = title_component(args.failure_code, "failure_code", 80)
+    gate_path = (
+        Path(args.registry).expanduser().resolve()
+        if getattr(args, "registry", None)
+        else default_account_browser_gate_path()
+    )
+    now = _account_gate_now(getattr(args, "at", None))
+    active_rate_limit_until = "none"
+    try:
+        gate = load_account_browser_gate(gate_path)
+        gate_cooldown = parse_time(gate.get("cooldown_until"))
+        if (
+            gate_cooldown is not None
+            and gate_cooldown > now
+            and int(gate.get("consecutive_rate_limits", 0)) > 0
+        ):
+            active_rate_limit_until = str(gate["cooldown_until"])
+    except LCRLError:
+        pass
+    rate_limited = active_rate_limit_until != "none" and failure_code in {
+        "controller_error", "cooldown_active", "rate_limited",
+        "account_rate_limited", "browser_rate_limited",
+    }
+    if rate_limited:
+        failure_code = "account_rate_limited"
     if reviewer_chat.get("status") == "rollover_blocked":
-        if failure_code != reviewer_chat.get("rollover_failure_code"):
+        stored_failure = reviewer_chat.get("rollover_failure_code")
+        legacy_rate_limit_migration = bool(
+            rate_limited and stored_failure in {"controller_error", "cooldown_active"}
+        )
+        if failure_code != stored_failure and not legacy_rate_limit_migration:
             raise LCRLError("the single reviewer Chat rollover recovery is already bound")
         duplicate = True
     else:
-        revision = state["revision"]
         reviewer_chat.update({
             "status": "rollover_blocked",
             "rollover_recovery_id": "rollover-recovery-" + secrets.token_hex(8),
             "rollover_failure_code": failure_code,
             "rollover_failure_count": 1,
         })
-        state["review"]["recovery_action"] = "reviewer_chat_rollover_blocked"
-        state["recovery"]["next_retry_not_before"] = (
-            (_account_gate_now(getattr(args, "at", None)) + timedelta(
-                seconds=WAITING_CHECK_DELAY_SECONDS,
-            )).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        )
-        save_state(path, state, expected_revision=revision)
         duplicate = False
-    return {
+    revision = state["revision"]
+    waiting_action = "none"
+    if rate_limited:
+        automation = state["automation"]
+        reviewer_chat["rollover_failure_code"] = "account_rate_limited"
+        state["review"]["recovery_action"] = "account_rate_limited"
+        state["recovery"].update({
+            "network_state": "rate_limited",
+            "next_retry_not_before": active_rate_limit_until,
+        })
+        expected_rdate = rdate_from_timestamp(active_rate_limit_until)
+        if automation.get("waiting_check_active") is True:
+            if (
+                automation.get("waiting_check_kind") != "submission_retry"
+                or automation.get("waiting_check_account_registry") != str(gate_path)
+            ):
+                raise LCRLError("a different one-shot recovery is already active")
+            automation["waiting_check_expected_rdate"] = expected_rdate
+            waiting_action = "keep_once"
+        else:
+            automation.update({
+                "waiting_check_token": "wait-" + secrets.token_hex(8),
+                "waiting_check_active": True,
+                "waiting_check_kind": "submission_retry",
+                "waiting_check_account_registry": str(gate_path),
+                "waiting_check_automation_id": "none",
+                "waiting_check_claimed_id": "none",
+                "waiting_check_expected_rdate": expected_rdate,
+                "waiting_check_recovery_armed_lease_id": "none",
+                "waiting_check_recovery_armed_rdate": "none",
+            })
+            waiting_action = "schedule_once"
+    else:
+        state["review"]["recovery_action"] = "reviewer_chat_rollover_blocked"
+        if state["recovery"].get("next_retry_not_before", "none") == "none":
+            state["recovery"]["next_retry_not_before"] = (
+                (now + timedelta(seconds=WAITING_CHECK_DELAY_SECONDS))
+                .replace(microsecond=0).isoformat().replace("+00:00", "Z")
+            )
+    save_state(path, state, expected_revision=revision)
+    result = {
         "ok": True,
         "action": "reviewer_chat_rollover_blocked",
         "workflow_status": "换卷受阻",
@@ -6669,6 +6778,43 @@ def record_reviewer_chat_rollover_failure_command(
         "duplicate": duplicate,
         "revision": state["revision"],
     }
+    if rate_limited:
+        result.update({
+            "reason_code": "account_rate_limited",
+            "retry_not_before": active_rate_limit_until,
+            "waiting_check_kind": "submission_retry",
+            "waiting_check_action": waiting_action,
+            "waiting_check_token": state["automation"]["waiting_check_token"],
+            "waiting_check_automation_id": state["automation"].get(
+                "waiting_check_automation_id", "none",
+            ),
+            "waiting_check_expected_rdate": state["automation"][
+                "waiting_check_expected_rdate"
+            ],
+            "user_status": "正在开发",
+            "user_message": (
+                f"账户正在冷却，截止时间为 {active_rate_limit_until}。"
+                "冷却期间不会访问 Chat；到期只进行一次恢复检查。"
+            ),
+            "user_message_en": (
+                f"The account is cooling down until {active_rate_limit_until}. "
+                "SuperLuna will not access Chat during cooldown and will run "
+                "only one recovery check when it expires."
+            ),
+            "user_next_choice": "无需操作；系统已保留唯一单次恢复。",
+            "user_next_choice_en": (
+                "No action is required; one recovery check is already reserved."
+            ),
+            "single_recovery_available": True,
+            "single_recovery_bound": (
+                state["automation"].get("waiting_check_automation_id", "none") != "none"
+            ),
+            "proactive_probe_allowed": False,
+            "recurring_recovery_allowed": False,
+        })
+        result = add_platform_wait_contract(result)
+        result.update(platform_wait_binding_barrier_contract(path, state))
+    return result
 
 
 def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -13314,6 +13460,7 @@ def build_parser() -> argparse.ArgumentParser:
     record_rollover_failure.add_argument("--state", required=True)
     record_rollover_failure.add_argument("--authorization-id", required=True)
     record_rollover_failure.add_argument("--failure-code", required=True)
+    record_rollover_failure.add_argument("--registry")
     record_rollover_failure.add_argument("--at")
 
     retire_missing_wait = sub.add_parser("retire-missing-wait")

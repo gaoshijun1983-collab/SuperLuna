@@ -2180,6 +2180,94 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(updated["review"]["status"], "local_work")
             self.assertNotEqual(updated["review"]["status"], "review_waiting")
 
+    def test_replacement_startup_rate_limit_keeps_exact_cooldown_and_one_wait(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            registry = root / "account-browser-gate.json"
+            self.transition(
+                state_path, "review_submit_pending", stage="RATE-ROLLOVER",
+                fingerprint="replacement-packet",
+            )
+            state = lcrl.load_state(state_path)
+            authorization_id = lcrl.mark_reviewer_chat_rollover_required(
+                state, "round_budget",
+            )
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            gate = lcrl.empty_account_browser_gate()
+            gate.update({
+                "cooldown_until": "2026-08-19T07:30:00Z",
+                "consecutive_rate_limits": 1,
+                "last_released_task_id": "implementation",
+            })
+            lcrl._save_account_browser_gate_locked(
+                registry, gate, expected_revision=0,
+            )
+
+            limited = lcrl.record_reviewer_chat_rollover_failure_command(Namespace(
+                state=str(state_path), authorization_id=authorization_id,
+                failure_code="controller_error", registry=str(registry),
+                at="2026-08-19T07:00:00Z",
+            ))
+            duplicate = lcrl.record_reviewer_chat_rollover_failure_command(Namespace(
+                state=str(state_path), authorization_id=authorization_id,
+                failure_code="controller_error", registry=str(registry),
+                at="2026-08-19T07:00:01Z",
+            ))
+
+            self.assertEqual(limited["reason_code"], "account_rate_limited")
+            self.assertEqual(limited["retry_not_before"], "2026-08-19T07:30:00Z")
+            self.assertIn("账户正在冷却", limited["user_message"])
+            self.assertIn("2026-08-19T07:30:00Z", limited["user_message"])
+            self.assertIn("account is cooling down", limited["user_message_en"])
+            self.assertFalse(limited["browser_runtime_initialization_allowed"])
+            self.assertFalse(limited["chat_read_allowed"])
+            self.assertFalse(limited["user_choice_required"])
+            self.assertTrue(limited["single_recovery_available"])
+            self.assertEqual(limited["waiting_check_action"], "schedule_once")
+            self.assertEqual(limited["platform_wait_rule"], "single_rdate")
+            self.assertFalse(limited["recurring_platform_rule_allowed"])
+            self.assertEqual(duplicate["waiting_check_token"], limited["waiting_check_token"])
+            self.assertEqual(duplicate["waiting_check_action"], "keep_once")
+
+            projected = lcrl.progress_query_command(Namespace(state=str(state_path)))
+            self.assertEqual(projected["reason_code"], "account_rate_limited")
+            self.assertIn("2026-08-19T07:30:00Z", projected["user_message"])
+            self.assertTrue(projected["single_recovery_available"])
+            self.assertFalse(projected["single_recovery_bound"])
+            self.assertFalse(projected["user_choice_required"])
+
+            queued = lcrl.load_state(state_path)
+            self.assertEqual(
+                queued["reviewer_chat"]["rollover_failure_code"],
+                "account_rate_limited",
+            )
+            self.assertEqual(queued["recovery"]["network_state"], "rate_limited")
+            self.assertEqual(queued["automation"]["waiting_check_kind"], "submission_retry")
+            token = queued["automation"]["waiting_check_token"]
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="rate-limit-recovery-once",
+                scheduled_rdate=lcrl.rdate_from_timestamp("2026-08-19T07:30:00Z"),
+            ))
+            bound_projection = lcrl.progress_query_command(Namespace(state=str(state_path)))
+            self.assertTrue(bound_projection["single_recovery_bound"])
+            early = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="rate-limit-recovery-once",
+                at="2026-08-19T07:15:00Z",
+            ))
+            self.assertEqual(early["action"], "submission_retry_not_due")
+            self.assertFalse(early["browser_runtime_initialization_allowed"])
+            self.assertFalse(early["chat_read_allowed"])
+            due = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="rate-limit-recovery-once",
+                at="2026-08-19T07:30:00Z",
+            ))
+            self.assertEqual(due["action"], "submission_retry_ready")
+            self.assertFalse(due["old_chat_access_allowed"])
+
     def test_waiting_round_budget_keeps_old_wait_until_replacement_is_bound(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -4285,6 +4373,13 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(blocked["blocker_kind"], "technical")
         self.assertEqual(blocked["reason_code"], "implementation_task_mismatch")
         self.assertNotEqual(blocked["user_status"], "需要你决定")
+
+        rate_limited = lcrl.technical_status_exit(
+            lcrl.classify_controller_error(lcrl.LCRLError("请求过于频繁")),
+        )
+        self.assertEqual(rate_limited["reason_code"], "account_rate_limited")
+        self.assertIn("账户正在冷却", rate_limited["user_message"])
+        self.assertFalse(rate_limited["user_choice_required"])
         self.assertIn("原实施任务", blocked["system_next_action"])
         self.assertNotIn("继续、调整方向", blocked["user_next_choice"])
 

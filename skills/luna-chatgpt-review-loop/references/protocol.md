@@ -514,6 +514,14 @@ the account slot still belongs to the same implementation task with the exact
 wrong-task, or wrong-operation slots return `account_browser_slot_required` and
 do not authorize browser initialization. Stale or duplicate occurrences do not
 read the page or mutate the project.
+For a real rate limit during replacement startup, the shared account gate's
+exact `cooldown_until` remains authoritative across the rollover failure and
+all status projections. The stable reason is `account_rate_limited`, never a
+generic controller error. Cooldown permits no Chat/browser access or proactive
+probe. The controller creates or reuses exactly one `submission_retry` RDATE
+wait, reports whether it is bound, and allows one recovery check only at expiry.
+Missing platform-wait capability is a technical blocker with an explicit host
+next action and never a product decision.
 Slot acquisition normally never re-labels an existing lease: same-task reuse
 requires the same operation. The only controller-owned exception is a one-time
 replacement-Chat provisioning `startup` that atomically continues to that new

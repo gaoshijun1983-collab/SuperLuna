@@ -24,9 +24,12 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.88`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 144 / Skill revision
-`2026-08-19.101` separates the writable implementation workspace from the
+The current source candidate is `0.2.0-alpha.89`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 145 / Skill revision
+`2026-08-19.102` preserves a real account rate limit through controller error
+handling and status projection. It reports the exact cooldown deadline, makes
+no Chat access during cooldown, and creates or reuses only one RDATE-bound
+recovery check. Controller 144 / Skill revision `2026-08-19.101` separates the writable implementation workspace from the
 reviewer repository source. Repository self-retests remain locked to their
 isolated fixture for writes and execution, while exact-commit evidence is
 derived only from the trusted SuperLuna source checkout. Generic Git projects

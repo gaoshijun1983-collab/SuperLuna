@@ -858,6 +858,10 @@ python -B <skill-root>/scripts/lcrl.py browser-network-observation \
 `waiting_read` 名额时消费回复；不得把释放推迟到下一轮提交前。
 真实限流必须以 `release-account-browser-slot --outcome rate_limited` 打开共享熔断；不得仅写入
 当前任务自己的 `browser-network-observation` 后让其他任务继续访问。
+replacement startup 一旦出现真实限流，后续 `record-reviewer-chat-rollover-failure` 必须同时传入
+账户门 registry。Controller 以其中精确 `cooldown_until` 为权威，将旧 `controller_error` 迁移为稳定
+`account_rate_limited`，并创建或复用唯一 `submission_retry` RDATE 单次恢复。中英文状态必须显示截止
+时间、冷却期零 Chat 访问和恢复是否已绑定；不得 recurring、重复 token、冷却期探测或要求用户决定。
 
 完整网页合同见 [browser_transport.md](references/browser_transport.md)，状态机细节见
 [protocol.md](references/protocol.md)。

@@ -40,7 +40,11 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.88`, Controller 144, Skill `2026-08-19.101`.
+- Source candidate: `0.2.0-alpha.89`, Controller 145, Skill `2026-08-19.102`.
+- Real replacement-startup rate limits now retain `account_rate_limited`
+  through top-level errors and status projection. The account gate's exact
+  cooldown deadline is authoritative; cooldown has zero Chat access and only
+  one RDATE-bound recovery check, whose bound/unbound state is explicit.
 - A legacy replacement-startup provisioning that was consumed without any
   browser, Chat, submission, read, or slot side effect can now be atomically
   reconciled once. The reclaim is bound to the same task, state, reviewer
@@ -110,6 +114,10 @@ intervention.
   passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. Its deterministic archive contains 112
   tracked source files. Real App orphan reconciliation remains unverified.
+- Alpha 89 repository regression passed 430/430 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Its deterministic archive contains 113
+  tracked source files. Real App cooldown expiry recovery remains unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the
