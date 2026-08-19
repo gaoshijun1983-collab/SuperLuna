@@ -24,8 +24,12 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.90`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 146 / Skill revision
+The current source candidate is `0.2.0-alpha.91`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 147 / Skill revision
+`2026-08-19.104` also migrates the real legacy combination where the reviewer
+rollover remained pending while the review was externally blocked by a generic
+controller error. It cannot return ordinary turn-entry during a matching live
+cooldown; one RDATE binding is a same-turn barrier. Controller 146 / Skill revision
 `2026-08-19.103` migrates or safely projects legacy `controller_error` rollover
 states when the account gate proves the same task, state, reviewer generation,
 and repository identity still owns an active cooldown. It reuses one bound wait

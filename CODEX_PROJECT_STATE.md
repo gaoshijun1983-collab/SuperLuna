@@ -40,7 +40,11 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.90`, Controller 146, Skill `2026-08-19.103`.
+- Source candidate: `0.2.0-alpha.91`, Controller 147, Skill `2026-08-19.104`.
+- The real legacy combination `rollover_pending + external_blocked +
+  controller_error` now enters the same strict account-rate-limit migration.
+  Guard cannot grant ordinary turn entry during the matching cooldown and must
+  preserve one RDATE binding as a same-turn completion barrier.
 - Guard and show-status now recognize legacy `controller_error/external_blocked`
   as an active account rate limit only when task, state, reviewer generation,
   repository identity, and zero-slot evidence match. Guard atomically restores
@@ -127,6 +131,10 @@ intervention.
   passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. Its deterministic archive contains 114
   tracked source files. Real App legacy cooldown migration remains unverified.
+- Alpha 91 repository regression passed 433/433 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Its deterministic archive contains 115
+  tracked source files. Real App one-shot binding remains unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

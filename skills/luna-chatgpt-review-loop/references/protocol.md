@@ -528,6 +528,11 @@ account cooldown matches the exact task, state identity, reviewer generation,
 repository identity, and there is no task slot. Migration restores the unsent
 submission and one RDATE wait. An already-bound wait is reused. Any mismatch
 leaves the state unchanged and grants zero browser authority.
+The legacy candidate also includes `rollover_pending` with no persisted
+rollover failure code when the review itself is `external_blocked` by a generic
+controller error. A matching live cooldown atomically completes the blocked
+rate-limit identity and cannot fall through to ordinary turn entry. The host
+must bind the one returned RDATE before that turn may complete.
 Slot acquisition normally never re-labels an existing lease: same-task reuse
 requires the same operation. The only controller-owned exception is a one-time
 replacement-Chat provisioning `startup` that atomically continues to that new

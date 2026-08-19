@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 146
-SKILL_REVISION = "2026-08-19.103"
+CONTROLLER_VERSION = 147
+SKILL_REVISION = "2026-08-19.104"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -1388,8 +1388,16 @@ def legacy_account_rate_limit_plan(
     failure_code = reviewer_chat.get("rollover_failure_code", "none")
     applicable = bool(
         active
-        and reviewer_chat.get("status") == "rollover_blocked"
-        and failure_code in {"controller_error", "cooldown_active", "account_rate_limited"}
+        and reviewer_chat.get("status") in {"rollover_pending", "rollover_blocked"}
+        and (
+            failure_code in {"controller_error", "cooldown_active", "account_rate_limited"}
+            or (
+                reviewer_chat.get("status") == "rollover_pending"
+                and failure_code == "none"
+                and state.get("review", {}).get("recovery_action")
+                in {"controller_error", "cooldown_active"}
+            )
+        )
         and state.get("review", {}).get("status") in {
             "external_blocked", "review_submit_pending",
         }
@@ -10942,6 +10950,12 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                     "revision": state["revision"],
                 }
         revision = state["revision"]
+        if state["reviewer_chat"]["status"] == "rollover_pending":
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_recovery_id": "rollover-recovery-" + secrets.token_hex(8),
+                "rollover_failure_count": 1,
+            })
         state["reviewer_chat"]["rollover_failure_code"] = "account_rate_limited"
         state["review"]["recovery_action"] = "account_rate_limited"
         if state["review"]["status"] == "external_blocked":
