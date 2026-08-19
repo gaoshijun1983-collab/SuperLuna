@@ -241,6 +241,10 @@ intervention.
   `candidate_freeze_requires_scoped_commit` reason instead of degrading it to
   generic `controller_error`; the current worktree still requires a scoped
   freeze before any Beta-candidate claim.
+- Local freeze commit for Alpha 103: `084b272c3cbca69be6bd55c088a5f34befa1614e`.
+  The release report and Beta matrix now point to this exact reviewed local
+  candidate; metadata calibration is recorded separately from the source
+  freeze commit.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the
