@@ -40,7 +40,7 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.93`, Controller 149, Skill `2026-08-19.106`.
+- Source candidate: `0.2.0-alpha.94`, Controller 150, Skill `2026-08-19.107`.
 - A legacy replacement Chat that rate-limited before an ephemeral mode-selection
   lease existed can now rebuild exactly one retirement record from the unique
   startup authorization, exact task/state/repository and prior-generation
@@ -151,11 +151,11 @@ intervention.
   and Beta evidence validators passed. Its deterministic archive contains 116
   tracked source files. Real App replacement-identity retirement remains
   unverified.
-- Alpha 93 repository regression passed 436/436 locally. Controller selftest
+- Alpha 94 repository regression passed 437/437 locally. Controller selftest
   passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
-  and Beta evidence validators passed. Its deterministic archive contains 117
-  tracked source files. Real App legacy bound-startup retirement rebuilding
-  remains unverified.
+  and Beta evidence validators passed. Its deterministic archive contains 118
+  tracked source files. Real App consumed-orphan provisioning recovery and the
+  subsequent unique replacement startup remain unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

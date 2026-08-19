@@ -20,8 +20,11 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.93`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 149 / Skill revision `2026-08-19.106` 修复真实限流早于临时 mode-selection
+当前源码候选版本是 `0.2.0-alpha.94`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 150 / Skill revision `2026-08-19.107` 为“首次孤儿授权回收已消费、但仍可证明
+零浏览器/Chat/消息/slot 副作用”的中断增加唯一一次确定性恢复。恢复必须严格匹配同一 task、state、
+repository exact commit/tree、generation、已正式退休的旧 reviewer，并确认账户门全局零 slot；恢复身份
+持久化且只能消费一次。Controller 149 / Skill revision `2026-08-19.106` 修复真实限流早于临时 mode-selection
 lease 时的旧 replacement Chat 退休记录。迁移必须同时核对唯一 startup authorization、task/state/
 repository identity、上一 generation、canonical provisioned browser binding、替换时间链、当前代零消息
 回执与账户门零 slot；任一不确定即失败关闭。Controller 148 / Skill revision `2026-08-19.105` 会在 rollover completion 阶段、slot

@@ -1,7 +1,7 @@
 {
-  "controller_version": 149,
+  "controller_version": 150,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-19.106",
+  "skill_revision": "2026-08-19.107",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",
@@ -40,6 +40,7 @@
   "reviewer_repository_identity_persisted": true,
   "orphaned_zero_side_effect_provisioning_reconcile": true,
   "provisioning_reclaim_single_use": true,
+  "consumed_orphaned_provisioning_zero_effect_recovery_once": true,
   "rate_limit_reason_preserved_end_to_end": true,
   "rate_limit_recovery_wait_bound_once": true,
   "legacy_rate_limit_guard_migration": true,

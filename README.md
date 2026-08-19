@@ -24,9 +24,14 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.93`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 149 / Skill revision
-`2026-08-19.106` repairs a legacy replacement Chat retirement when a real rate
+The current source candidate is `0.2.0-alpha.94`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 150 / Skill revision
+`2026-08-19.107` adds one deterministic recovery for an already reclaimed
+replacement-startup provisioning that was consumed but provably produced no
+browser, Chat, message, or slot side effect. It requires the same task, state,
+repository exact commit/tree, generation, formally retired old reviewer, and
+zero account slots; the recovery is persisted and consumable once. Controller
+149 / Skill revision `2026-08-19.106` repairs a legacy replacement Chat retirement when a real rate
 limit occurred before the ephemeral review-mode lease existed. It requires one
 exact startup authorization, task/state/repository identity, prior generation,
 the canonical provisioned browser binding and replacement timestamp chain, no

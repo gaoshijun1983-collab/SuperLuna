@@ -1409,6 +1409,133 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(blocked["action"], "orphaned_provisioning_reconcile_blocked")
             self.assertEqual(blocked["reason_code"], "account_browser_slot_uncertain")
 
+    def test_consumed_orphaned_provisioning_with_zero_side_effects_recovers_once(self):
+        """Reproduce the Alpha 93 real sequence after the first reclaim was consumed."""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            checkout.mkdir()
+            task_id = "npc-state-owner-anonymous"
+            project = checkout / "project"
+            project.mkdir()
+            state_path = checkout / "state.json"
+            registry = checkout / "account-browser-gate.json"
+            old_reviewer = "retired-reviewer-chat"
+            state = lcrl.new_state(
+                "none", task_id, project, old_reviewer,
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            authorization = lcrl.mark_reviewer_chat_rollover_required(state, "rate_limited")
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+                "rollover_failure_code": "account_browser_provisioning_already_used",
+                "rollover_failure_count": 1,
+            })
+            repository_identity = "c" * 64
+            exact_commit = "413cc2e73e653e42c2aada86635615aeeb41d244"
+            tree_hash = "b" * 64
+            state["automation"].update({
+                "reviewer_repository_root": str(checkout),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": exact_commit,
+                "reviewer_repository_tree_manifest_hash": tree_hash,
+                "reviewer_repository_identity": repository_identity,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": repository_identity,
+                "commit_sha": exact_commit,
+                "tree_manifest_hash": tree_hash,
+                "repository_access_receipt": "none",
+                "generation": state["reviewer_chat"]["generation"],
+            })
+            lcrl.save_state(state_path, state)
+            gate = lcrl.empty_account_browser_gate()
+            gate["retired_reviewer_chats"].append({
+                "reviewer_thread_id": old_reviewer,
+                "reason": "rate_limited",
+                "retired_at": "2026-08-19T05:12:00Z",
+            })
+            gate["provisioning_authorizations"].append({
+                "authorization_id": hashlib.sha256(authorization.encode()).hexdigest(),
+                "implementation_thread_id": task_id,
+                "authorized_at": "2026-08-19T05:13:54Z",
+                "scope": lcrl._generic_account_browser_scope(),
+                "state_identity": lcrl._provisioning_state_identity(state_path),
+                "reviewer_generation": state["reviewer_chat"]["generation"],
+                "repository_identity": repository_identity,
+                "reclaim_status": "consumed_after_reclaim",
+                "reclaim_count": 1,
+                "reconciled_at": "2026-08-19T05:13:53Z",
+            })
+            lcrl._save_account_browser_gate_locked(registry, gate, expected_revision=0)
+
+            missing_retirement = json.loads(json.dumps(gate))
+            missing_retirement["retired_reviewer_chats"] = []
+            self.assertEqual(
+                lcrl._orphaned_provisioning_plan_from_gate(
+                    state_path, state, missing_retirement,
+                )["reason_code"],
+                "consumed_orphaned_provisioning_retirement_unconfirmed",
+            )
+            uncertain_slot = json.loads(json.dumps(gate))
+            uncertain_slot["slots"].append({
+                "lease_id": "other-active-slot",
+                "implementation_thread_id": "other-task",
+                "reviewer_thread_id": "none",
+                "operation": "startup",
+                "acquired_at": "2026-08-19T05:30:00Z",
+                "expires_at": "2026-08-19T06:30:00Z",
+                "scope": lcrl._generic_account_browser_scope(),
+            })
+            self.assertEqual(
+                lcrl._orphaned_provisioning_plan_from_gate(
+                    state_path, state, uncertain_slot,
+                )["reason_code"],
+                "consumed_orphaned_provisioning_slot_uncertain",
+            )
+            mismatched_tree_state = json.loads(json.dumps(state))
+            mismatched_tree_state["project_context"]["tree_manifest_hash"] = "d" * 64
+            self.assertEqual(
+                lcrl._orphaned_provisioning_plan_from_gate(
+                    state_path, mismatched_tree_state, gate,
+                )["reason_code"],
+                "consumed_orphaned_provisioning_repository_evidence_unconfirmed",
+            )
+
+            with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry):
+                guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id=task_id, minutes=10, replace=False,
+                ))
+            self.assertEqual(guard["action"], "consumed_orphaned_provisioning_reconcile_required")
+            self.assertFalse(guard["browser_access_allowed"])
+            reconciled = lcrl.reconcile_orphaned_provisioning_command(Namespace(
+                state=str(state_path), registry=str(registry),
+                implementation_thread_id=task_id, at="2026-08-19T06:00:00Z",
+            ))
+            self.assertEqual(reconciled["action"], "consumed_orphaned_provisioning_reclaimed")
+            startup = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id=task_id, reviewer_thread_id="none",
+                new_chat_authorization_id=authorization,
+                new_chat_local_work_status="completed_and_verified",
+                operation="startup", state=str(state_path), registry=str(registry),
+                at="2026-08-19T06:00:01Z",
+            ))
+            self.assertTrue(startup["slot_acquired"])
+            self.assertTrue(startup["orphaned_provisioning_reclaimed"])
+            lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id=task_id, lease_id=startup["lease_id"],
+                registry=str(registry), outcome="completed", at="2026-08-19T06:00:02Z",
+            ))
+            repeated = lcrl.reconcile_orphaned_provisioning_command(Namespace(
+                state=str(state_path), registry=str(registry),
+                implementation_thread_id=task_id, at="2026-08-19T06:00:03Z",
+            ))
+            self.assertEqual(repeated["reason_code"], "consumed_orphaned_provisioning_recovery_already_used")
+
     def test_replacement_chat_startup_atomically_continues_to_first_submission(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

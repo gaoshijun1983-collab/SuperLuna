@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 149
-SKILL_REVISION = "2026-08-19.106"
+CONTROLLER_VERSION = 150
+SKILL_REVISION = "2026-08-19.107"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -1182,6 +1182,20 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
             errors.append(f"account browser provisioning authorization {index} has invalid reclaim status")
         if authorization.get("reclaim_count", 0) not in {0, 1}:
             errors.append(f"account browser provisioning authorization {index} has invalid reclaim count")
+        zero_effect_status = authorization.get("zero_effect_recovery_status", "unreconciled")
+        if zero_effect_status not in {
+            "unreconciled", "available_once", "consumed",
+        }:
+            errors.append(f"account browser provisioning authorization {index} has invalid zero-effect recovery status")
+        if zero_effect_status != "unreconciled":
+            if authorization.get("reclaim_status") != "consumed_after_reclaim":
+                errors.append(f"account browser provisioning authorization {index} zero-effect recovery requires a consumed reclaim")
+            if not re.fullmatch(r"[0-9a-f]{64}", str(authorization.get("zero_effect_recovery_id", "none"))):
+                errors.append(f"account browser provisioning authorization {index} has invalid zero-effect recovery identity")
+            if not re.fullmatch(r"[0-9a-f]{40}", str(authorization.get("zero_effect_recovery_commit_sha", "none"))):
+                errors.append(f"account browser provisioning authorization {index} has invalid zero-effect recovery commit")
+            if not re.fullmatch(r"[0-9a-f]{64}", str(authorization.get("zero_effect_recovery_tree_manifest_hash", "none"))):
+                errors.append(f"account browser provisioning authorization {index} has invalid zero-effect recovery tree")
         _validate_account_browser_scope_record(
             authorization.get("scope"), task_id,
             f"account browser provisioning authorization {index}", errors,
@@ -1273,6 +1287,10 @@ def load_account_browser_gate(path: str | Path, allow_missing: bool = False) -> 
             authorization.setdefault("repository_identity", "none")
             authorization.setdefault("state_identity", "none")
             authorization.setdefault("reconciled_at", "none")
+            authorization.setdefault("zero_effect_recovery_status", "unreconciled")
+            authorization.setdefault("zero_effect_recovery_id", "none")
+            authorization.setdefault("zero_effect_recovery_commit_sha", "none")
+            authorization.setdefault("zero_effect_recovery_tree_manifest_hash", "none")
     for slot in value.get("slots", []):
         if isinstance(slot, dict):
             slot.setdefault("scope", _generic_account_browser_scope())
@@ -1312,8 +1330,6 @@ def _orphaned_provisioning_plan_from_gate(
     bound_reviewer = str(state.get("browser_binding", {}).get("conversation_id", "none"))
     if bound_reviewer not in {"none", old_reviewer}:
         return {"ready": False, "reason_code": "replacement_chat_side_effect_uncertain"}
-    if any(slot.get("implementation_thread_id") == task_id for slot in gate.get("slots", [])):
-        return {"ready": False, "reason_code": "account_browser_slot_uncertain"}
     authorization_id = hashlib.sha256(authorization_raw.encode("utf-8")).hexdigest()
     matches = [
         item for item in gate.get("provisioning_authorizations", [])
@@ -1343,7 +1359,50 @@ def _orphaned_provisioning_plan_from_gate(
         return {"ready": False, "reason_code": "provisioning_repository_identity_mismatch"}
     status = str(record.get("reclaim_status", "unreconciled"))
     if status == "consumed_after_reclaim":
-        return {"ready": False, "reason_code": "orphaned_provisioning_reclaim_already_consumed"}
+        if gate.get("slots"):
+            return {"ready": False, "applicable": True, "reason_code": "consumed_orphaned_provisioning_slot_uncertain"}
+        retired_matches = [
+            item for item in gate.get("retired_reviewer_chats", [])
+            if item.get("reviewer_thread_id") == old_reviewer
+            and item.get("reason") == "rate_limited"
+        ]
+        if old_reviewer in {"", "none"} or len(retired_matches) != 1:
+            return {"ready": False, "applicable": True, "reason_code": "consumed_orphaned_provisioning_retirement_unconfirmed"}
+        exact_commit = str(automation.get("reviewer_repository_commit_sha", "none"))
+        tree_hash = str(automation.get("reviewer_repository_tree_manifest_hash", "none"))
+        if (
+            not re.fullmatch(r"[0-9a-f]{40}", exact_commit)
+            or not re.fullmatch(r"[0-9a-f]{64}", tree_hash)
+            or context.get("commit_sha") != exact_commit
+            or context.get("tree_manifest_hash") != tree_hash
+        ):
+            return {"ready": False, "applicable": True, "reason_code": "consumed_orphaned_provisioning_repository_evidence_unconfirmed"}
+        recovery_status = str(record.get("zero_effect_recovery_status", "unreconciled"))
+        if recovery_status == "consumed":
+            return {"ready": False, "applicable": True, "reason_code": "consumed_orphaned_provisioning_recovery_already_used"}
+        if recovery_status == "available_once" and (
+            record.get("zero_effect_recovery_commit_sha") != exact_commit
+            or record.get("zero_effect_recovery_tree_manifest_hash") != tree_hash
+            or not re.fullmatch(r"[0-9a-f]{64}", str(record.get("zero_effect_recovery_id", "none")))
+        ):
+            return {"ready": False, "applicable": True, "reason_code": "consumed_orphaned_provisioning_recovery_identity_mismatch"}
+        return {
+            "ready": True,
+            "record": record,
+            "authorization_id": authorization_id,
+            "authorization_raw": authorization_raw,
+            "task_id": task_id,
+            "scope": requested_scope,
+            "reviewer_generation": reviewer_chat["generation"],
+            "repository_identity": repository_identity,
+            "state_identity": expected_state_identity,
+            "repository_commit_sha": exact_commit,
+            "repository_tree_manifest_hash": tree_hash,
+            "already_reconciled": recovery_status == "available_once",
+            "recovery_kind": "consumed_zero_effects",
+        }
+    if any(slot.get("implementation_thread_id") == task_id for slot in gate.get("slots", [])):
+        return {"ready": False, "reason_code": "account_browser_slot_uncertain"}
     return {
         "ready": True,
         "record": record,
@@ -1355,6 +1414,7 @@ def _orphaned_provisioning_plan_from_gate(
         "repository_identity": repository_identity,
         "state_identity": expected_state_identity,
         "already_reconciled": status == "available_once",
+        "recovery_kind": "initial_zero_effects",
     }
 
 
@@ -1545,7 +1605,11 @@ def reconcile_orphaned_provisioning_command(args: argparse.Namespace) -> dict[st
             }
         if plan["already_reconciled"]:
             return {
-                "ok": True, "action": "orphaned_provisioning_reclaimed",
+                "ok": True, "action": (
+                    "consumed_orphaned_provisioning_reclaimed"
+                    if plan.get("recovery_kind") == "consumed_zero_effects"
+                    else "orphaned_provisioning_reclaimed"
+                ),
                 "duplicate": True, "slot_acquired": False,
                 "browser_runtime_initialization_allowed": False,
                 "next_action": "acquire_same_generation_replacement_startup",
@@ -1559,19 +1623,38 @@ def reconcile_orphaned_provisioning_command(args: argparse.Namespace) -> dict[st
                 "browser_runtime_initialization_allowed": False,
                 "user_choice_required": False,
             }
-        plan["record"].update({
-            "reclaim_status": "available_once",
-            "reclaim_count": 1,
-            "reviewer_generation": plan["reviewer_generation"],
-            "repository_identity": plan["repository_identity"],
-            "state_identity": plan["state_identity"],
-            "reconciled_at": getattr(args, "at", None) or utc_now(),
-        })
+        reconciled_at = getattr(args, "at", None) or utc_now()
+        if plan.get("recovery_kind") == "consumed_zero_effects":
+            recovery_seed = "|".join((
+                plan["authorization_id"], plan["task_id"], plan["state_identity"],
+                str(plan["reviewer_generation"]), plan["repository_identity"],
+                plan["repository_commit_sha"], plan["repository_tree_manifest_hash"],
+            ))
+            plan["record"].update({
+                "zero_effect_recovery_status": "available_once",
+                "zero_effect_recovery_id": hashlib.sha256(recovery_seed.encode("utf-8")).hexdigest(),
+                "zero_effect_recovery_commit_sha": plan["repository_commit_sha"],
+                "zero_effect_recovery_tree_manifest_hash": plan["repository_tree_manifest_hash"],
+                "zero_effect_reconciled_at": reconciled_at,
+            })
+        else:
+            plan["record"].update({
+                "reclaim_status": "available_once",
+                "reclaim_count": 1,
+                "reviewer_generation": plan["reviewer_generation"],
+                "repository_identity": plan["repository_identity"],
+                "state_identity": plan["state_identity"],
+                "reconciled_at": reconciled_at,
+            })
         _save_account_browser_gate_locked(
             registry_path, gate, expected_revision=gate_revision,
         )
         return {
-            "ok": True, "action": "orphaned_provisioning_reclaimed",
+            "ok": True, "action": (
+                "consumed_orphaned_provisioning_reclaimed"
+                if plan.get("recovery_kind") == "consumed_zero_effects"
+                else "orphaned_provisioning_reclaimed"
+            ),
             "duplicate": False, "slot_acquired": False,
             "browser_runtime_initialization_allowed": False,
             "provisioning_home_navigation_allowed": False,
@@ -2213,16 +2296,25 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
         ) if new_chat_authorization_id != "none" else None
         orphaned_provisioning_reclaimed = False
         if prior_provisioning:
+            consumed_zero_effect_recovery = (
+                prior_provisioning.get("reclaim_status") == "consumed_after_reclaim"
+                and prior_provisioning.get("zero_effect_recovery_status") == "available_once"
+                and state is not None
+                and state_path is not None
+            )
             if (
                 prior_provisioning.get("reclaim_status") == "available_once"
                 and state is not None
                 and state_path is not None
-            ):
+            ) or consumed_zero_effect_recovery:
                 reclaim_plan = _orphaned_provisioning_plan_from_gate(
                     state_path, state, gate,
                 )
                 if reclaim_plan.get("ready") and reclaim_plan.get("already_reconciled"):
-                    prior_provisioning["reclaim_status"] = "consumed_after_reclaim"
+                    if consumed_zero_effect_recovery:
+                        prior_provisioning["zero_effect_recovery_status"] = "consumed"
+                    else:
+                        prior_provisioning["reclaim_status"] = "consumed_after_reclaim"
                     orphaned_provisioning_reclaimed = True
                 else:
                     return {
@@ -11205,15 +11297,28 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             if implementation_thread_id != expected_implementation_thread_id:
                 raise LCRLError("orphaned provisioning belongs to a different implementation task")
             already_reconciled = provisioning_plan["already_reconciled"]
+            consumed_zero_effects = (
+                provisioning_plan.get("recovery_kind") == "consumed_zero_effects"
+            )
             return {
                 "ok": True,
                 "action": (
-                    "orphaned_provisioning_startup_required" if already_reconciled
+                    "consumed_orphaned_provisioning_startup_required"
+                    if consumed_zero_effects and already_reconciled
+                    else "consumed_orphaned_provisioning_reconcile_required"
+                    if consumed_zero_effects
+                    else "orphaned_provisioning_startup_required"
+                    if already_reconciled
                     else "orphaned_provisioning_reconcile_required"
                 ),
                 "status": state["reviewer_chat"]["status"],
                 "reason_code": (
-                    "orphaned_provisioning_reclaimed" if already_reconciled
+                    "consumed_orphaned_provisioning_reclaimed"
+                    if consumed_zero_effects and already_reconciled
+                    else "consumed_orphaned_provisioning_zero_side_effects"
+                    if consumed_zero_effects
+                    else "orphaned_provisioning_reclaimed"
+                    if already_reconciled
                     else "orphaned_provisioning_zero_side_effects"
                 ),
                 "execution_allowed": False,
@@ -11236,6 +11341,30 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                     "acquire_same_generation_replacement_startup" if already_reconciled
                     else "reconcile_orphaned_provisioning_once"
                 ),
+                "revision": state["revision"],
+            }
+        if provisioning_plan.get("applicable"):
+            if implementation_thread_id == "none":
+                raise LCRLError("guard requires the exact implementation task identity")
+            if implementation_thread_id != expected_implementation_thread_id:
+                raise LCRLError("consumed orphaned provisioning belongs to a different implementation task")
+            return {
+                "ok": True,
+                "action": "consumed_orphaned_provisioning_reconcile_blocked",
+                "status": state["reviewer_chat"]["status"],
+                "reason_code": provisioning_plan["reason_code"],
+                "execution_allowed": False,
+                "project_read_allowed": False,
+                "project_write_allowed": False,
+                "browser_access_allowed": False,
+                "chat_read_allowed": False,
+                "old_chat_access_allowed": False,
+                "mandatory_next_controller_command": "reconcile-orphaned-provisioning",
+                "registry": str(registry_path),
+                "continuation_required": True,
+                "turn_completion_allowed": False,
+                "user_choice_required": False,
+                "system_next_action": "rebuild_consumed_orphaned_provisioning_evidence_once",
                 "revision": state["revision"],
             }
     if legacy_missing_wait_poisoned:

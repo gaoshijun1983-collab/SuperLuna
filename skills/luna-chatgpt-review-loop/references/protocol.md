@@ -134,6 +134,13 @@ reviewer generation, and repository identity. Missing evidence, identity drift,
 any side effect, or a concurrent slot remains fail-closed. The recovered
 authorization can create only the original generation's one startup slot and
 does not constitute a repository access receipt.
+If that first reclaim was itself consumed at the same zero-side-effect point,
+one final deterministic recovery may be persisted. It additionally requires
+the exact commit and tree manifest, the old reviewer Chat's formal
+`rate_limited` retirement, no replacement identity or message receipt, and an
+empty account gate. Its recovery identity is single-use; missing or conflicting
+evidence yields a stable `consumed_orphaned_provisioning_*` reason and automatic
+system next action without browser access or a user choice.
 SuperLuna publishes the atomic tracked pair `SUPERLUNA_REVIEW_CANARY.txt` and
 `review-canary/NESTED_CANARY.txt` for this proof. Preparation requires both paths
 to be regular blobs in the exact commit and returns their exact blob SHAs. A

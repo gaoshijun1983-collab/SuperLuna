@@ -386,6 +386,12 @@ operation 复用仍禁止。返回
    generation 与 repository identity 下原子恢复一次同代 provisioning；恢复后仍由
    `acquire-account-browser-slot` 建立唯一 startup slot。任何缺证、不同 identity、已有副作用或并发 slot
    均失败关闭，不得创建第二个 Chat，也不得把本地 Git 事实冒充 reviewer access receipt。
+   若这次回收授权也已消费、但中断点仍能由同一 authorization、task、state、exact commit/tree、
+   generation、旧 reviewer 的正式 `rate_limited` 退休记录、零 replacement identity/消息回执和账户门
+   全局零 slot 共同证明为零副作用，Controller 可另行持久化一个确定性
+   `zero_effect_recovery_id`，且只允许消费一次。任一条件缺失必须返回具体
+   `consumed_orphaned_provisioning_*` reason code 与系统恢复动作，不得退回普通 turn-entry 或模糊
+   `controller_error`。
    SuperLuna 仓库自身固定使用 tracked 的 `SUPERLUNA_REVIEW_CANARY.txt` 与
    `review-canary/NESTED_CANARY.txt`。Controller 必须把这对路径作为原子 canary，核对 exact commit 中
    两者均为普通 blob 并返回精确 blob SHA；任一缺失、symlink 或路径身份不符时不得退回 README 等

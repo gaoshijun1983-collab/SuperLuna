@@ -3,28 +3,34 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.93`（Python 元数据：`0.2.0a93`）
-- 当前源码控制器：149
+- 版本：`0.2.0-alpha.94`（Python 元数据：`0.2.0a94`）
+- 当前源码控制器：150
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.106`
+- 当前源码 Skill 修订：`2026-08-19.107`
 - 候选日期：2026-08-19
-- Alpha 93 当前为本地验证候选；基线 HEAD：`8fd20966ddd453f9c76398c66c9fa1c00726d5e8`
+- Alpha 94 当前为本地验证候选；基线 HEAD：`bdbd936b7eb038e9dcc6c1ebe6d661c54b75cfc6`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：436/436 通过；控制器 selftest：15/15 通过。
+- 仓库测试：437/437 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 117 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.93.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 93 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 118 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.94.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 94 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 150 / Skill revision `2026-08-19.107` 修复首次孤儿 provisioning reclaim 已消费、
+  但 replacement startup 仍在零副作用点中断后再次返回 `account_browser_provisioning_already_used`
+  的问题。只有同一 task/state/repository exact commit+tree/generation、旧 reviewer 已有正式
+  `rate_limited` 退休记录、无 replacement identity/消息副作用且账户门全局零 slot 时，才持久化一个
+  确定性二次恢复身份；该身份仅可消费一次。证据不足返回具体技术 reason code 与系统恢复动作，
+  `user_choice_required=false`，不会初始化浏览器或读取旧 Chat。
 - Controller 149 / Skill revision `2026-08-19.106` 修复 Alpha92 实机中 replacement Chat 已持久绑定、
   但真实限流发生在临时 mode-selection lease 产生前，导致旧 `reviewer_thread_id=none` 退休记录无法迁移的
   问题。兼容路径不凭 state 单方认定：必须同时匹配唯一 startup authorization、精确 task/scope/state/
