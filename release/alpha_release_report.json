@@ -1,10 +1,10 @@
 {
   "product_name": "SuperLuna",
   "package_version": "0.2.0-alpha.103",
-  "candidate_commit": "084b272e552cb0b1ea29369ba8013f59328991f8",
-  "controller_version": 159,
+  "candidate_commit": "740a26525d31cf9195a2c4043387f9317f3396ad",
+  "controller_version": 160,
   "schema_version": 7,
-  "skill_revision": "2026-08-19.116",
+  "skill_revision": "2026-08-19.117",
   "source_contains_unreleased_hotfix": true,
   "dist_archive_matches_current_source": true,
   "release_validation_pending": true,
