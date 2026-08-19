@@ -40,7 +40,13 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.96`, Controller 152, Skill `2026-08-19.109`.
+- Source candidate: `0.2.0-alpha.97`, Controller 153, Skill `2026-08-19.110`.
+- A legitimate legacy `repo_retest` state whose task binding registry entry was
+  lost can now be rebuilt by ordinary guard without user choice. Recovery
+  requires the current host task, persisted implementation and reviewer IDs,
+  trusted run binding, compatible schema/version, exact retest scope, and host
+  Codex root to agree; every mismatch has a stable
+  `task_binding_recovery_*` code and zero browser/Chat authority.
 - Every missing rate-limit retirement exit now exposes one non-sensitive machine
   diagnostic with all prerequisite booleans and stable missing reason codes.
   Guard evaluates it before orphan provisioning; direct rollover uses the same
@@ -161,6 +167,13 @@ intervention.
   and Beta evidence validators passed. Its deterministic archive contains 119
   tracked source files. Real App retirement reconstruction, consumed-orphan
   recovery, and the subsequent unique replacement startup remain unverified.
+- Alpha 97 repository regression passed 441/441 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Two deterministic builds produced the
+  same 121-file archive.
+  The installed Skill reports Controller 153 / revision `2026-08-19.110`.
+  Real App legacy binding reconstruction and rollover continuation remain
+  unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

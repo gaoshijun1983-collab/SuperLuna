@@ -277,12 +277,19 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=checkout, check=True)
             thread_id = "repo-retest-reviewer-source"
             _run_root, fixture, state_path = _repo_retest_paths(checkout, thread_id)
+            codex_root = Path(directory) / "codex-home"
             fixture.mkdir(parents=True)
             (fixture / "fixture-only.txt").write_text("implementation fixture\n", encoding="utf-8")
-            with mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()):
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": thread_id, "CODEX_HOME": str(codex_root),
+                }),
+            ):
                 state = lcrl.new_state(
                     "none", thread_id, str(fixture), "reviewer-old",
                     profile="superluna_repo_retest_v1", state_path=str(state_path),
+                    codex_root=str(codex_root),
                     continuation_mode="automatic", review_transport="in_app_browser",
                 )
                 state["reviewer_chat"].update({
@@ -7862,6 +7869,111 @@ class ControllerTests(unittest.TestCase):
             diagnosis = lcrl.doctor_registry_command(Namespace(registry=str(registry_path)))
             self.assertTrue(diagnosis["ok"])
             self.assertEqual(diagnosis["task_count"], 1)
+
+    def test_repo_retest_guard_atomically_rebuilds_missing_legacy_task_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            codex_root = Path(directory) / "codex-home"
+            thread_id = "implementation-binding-recovery"
+            _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": thread_id,
+                    "CODEX_HOME": str(codex_root),
+                }),
+            ):
+                state = lcrl.new_state(
+                    "none", thread_id, str(project), "reviewer-binding-recovery",
+                    profile=lcrl.SUPERLUNA_REPO_RETEST_PROFILE,
+                    codex_root=str(codex_root), state_path=str(state_path),
+                )
+                lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+                lcrl.save_state(state_path, state)
+                diagnosis = lcrl.doctor(
+                    state_path, implementation_thread_id=thread_id,
+                )
+                self.assertEqual(
+                    diagnosis["task_binding_recovery_diagnostic"]["reason_code"],
+                    "task_binding_recovery_ready",
+                )
+                self.assertFalse(diagnosis["user_choice_required"])
+                result = lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry",
+                    implementation_thread_id=thread_id, replace=False,
+                ))
+                replay = lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry",
+                    implementation_thread_id=thread_id, replace=False,
+                ))
+                recovered = lcrl.load_state(state_path)
+            self.assertTrue(result.get("legacy_task_binding_rebuilt"), result)
+            registry_path = codex_root.resolve() / "lcrl" / "registry" / "tasks.json"
+            registry = lcrl.load_binding_registry(registry_path)
+            self.assertEqual(recovered["binding"]["status"], "bound")
+            self.assertEqual(recovered["binding"]["registry_path"], str(registry_path))
+            self.assertEqual(len(registry["tasks"]), 1)
+            self.assertEqual(registry["tasks"][0]["implementation_thread_id"], thread_id)
+            self.assertTrue(result["legacy_task_binding_rebuilt"])
+            self.assertFalse(replay["legacy_task_binding_rebuilt"])
+            self.assertTrue(replay["recovered_same_task_lease"])
+            self.assertFalse(result.get("browser_access_allowed", False))
+            self.assertNotEqual(result["action"], "task_binding_recovery_blocked")
+
+    def test_repo_retest_binding_recovery_fails_closed_for_host_or_contract_drift(self):
+        cases = ("host_mismatch", "generic_profile", "legacy_run_binding")
+        for case in cases:
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                checkout = Path(directory) / "SuperLuna"
+                checkout.mkdir()
+                codex_root = Path(directory) / "codex-home"
+                thread_id = f"implementation-binding-{case}"
+                _run_root, project, state_path = _repo_retest_paths(checkout, thread_id)
+                with mock.patch.object(
+                    lcrl, "source_checkout_root", return_value=checkout.resolve(),
+                ):
+                    state = lcrl.new_state(
+                        "none", thread_id, str(project), "reviewer-binding-recovery",
+                        profile=lcrl.SUPERLUNA_REPO_RETEST_PROFILE,
+                        codex_root=str(codex_root), state_path=str(state_path),
+                    )
+                    if case == "generic_profile":
+                        state["automation"]["profile"] = "generic"
+                        state["automation"]["retest_scope"] = "none"
+                        state["automation"]["project_path"] = str(checkout)
+                        state_path = checkout / "generic-state.json"
+                    elif case == "legacy_run_binding":
+                        state["review"]["run_binding"] = lcrl.legacy_review_run_binding(state)
+                    if case != "generic_profile":
+                        lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+                    lcrl.save_state(state_path, state)
+                    before = state_path.read_bytes()
+                    host_id = "different-host-task" if case == "host_mismatch" else thread_id
+                    with mock.patch.dict(os.environ, {
+                        "CODEX_THREAD_ID": host_id, "CODEX_HOME": str(codex_root),
+                    }):
+                        if case == "generic_profile":
+                            result = {
+                                "action": "task_binding_recovery_blocked",
+                                **lcrl.legacy_task_binding_recovery_plan(
+                                    state_path, lcrl.load_state(state_path), thread_id,
+                                ),
+                                "user_choice_required": False,
+                                "browser_access_allowed": False,
+                            }
+                        else:
+                            result = lcrl.guard_action(Namespace(
+                                state=str(state_path), minutes=20, reason="turn_entry",
+                                implementation_thread_id=thread_id, replace=False,
+                            ))
+
+                self.assertEqual(result["action"], "task_binding_recovery_blocked")
+                self.assertTrue(result["reason_code"].startswith("task_binding_recovery_"))
+                self.assertFalse(result["user_choice_required"])
+                self.assertFalse(result["browser_access_allowed"])
+                self.assertEqual(state_path.read_bytes(), before)
+                self.assertFalse((codex_root / "lcrl" / "registry" / "tasks.json").exists())
 
     def test_new_app_chat_discovery_returns_one_stable_candidate_without_binding(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -20,8 +20,12 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.96`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 152 / Skill revision `2026-08-19.109` 统一所有“限流 Chat 退休记录缺失”
+当前源码候选版本是 `0.2.0-alpha.97`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 153 / Skill revision `2026-08-19.110` 允许普通 repo-retest guard
+在宿主任务、state/run-binding、reviewer、schema/版本、精确 retest scope 与宿主 Codex root
+全部一致时，幂等原子重建遗失的唯一 task binding registry 条目并继续原 replacement rollover。
+任一漂移返回稳定 `task_binding_recovery_*`、`user_choice_required=false`，且不访问浏览器或 Chat。
+Controller 152 / Skill revision `2026-08-19.109` 统一所有“限流 Chat 退休记录缺失”
 出口：普通 guard 会在 orphan provisioning 分支之前执行同一份只读
 `retirement_recovery_diagnostic`，逐项返回布尔前置条件、稳定 `retirement_evidence_*` 缺项、当前
 Controller 与 Skill 版本；直接 rollover 命令也不再把相同问题压成 `controller_error`。新增

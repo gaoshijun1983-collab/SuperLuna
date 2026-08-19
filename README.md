@@ -24,9 +24,15 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.96`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 152 / Skill revision
-`2026-08-19.109` makes every missing rate-limit retirement exit return the same
+The current source candidate is `0.2.0-alpha.97`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 153 / Skill revision
+`2026-08-19.110` lets an ordinary repo-retest guard atomically rebuild a lost
+task-binding registry entry only when the current host task, persisted
+implementation identity, trusted review-run identity, schema/version contract,
+reviewer identity, exact retest scope, and host Codex root all agree. Doctor
+reports the same Boolean diagnostic and stable `task_binding_recovery_*` reason;
+identity drift remains fail-closed with no browser or Chat access. Controller
+152 / Skill revision `2026-08-19.109` makes every missing rate-limit retirement exit return the same
 read-only `retirement_recovery_diagnostic`: all safety prerequisites are Boolean,
 all missing facts have stable `retirement_evidence_*` codes, and runtime controller/
 Skill versions are explicit. Ordinary guard now runs this diagnostic before the

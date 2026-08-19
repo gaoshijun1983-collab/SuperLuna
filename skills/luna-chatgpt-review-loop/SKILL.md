@@ -252,6 +252,14 @@ Chat 已达到安全轮数上限，控制器必须在同一次 `begin-new-goal` 
    创建 state 时传入的 `--implementation-thread-id` 必须与当前进程的 `CODEX_THREAD_ID`
    完全相同；委派包装中的 `source_thread_id` 只是来源，禁止用于 `init`、run binding、账户门
    或等待身份。控制器会在写 state 前拒绝二者不一致。
+   对已有 `superluna_repo_retest_v1` state，若 `binding.status=unbound` 或共享 task registry
+   条目遗失，普通 `guard` 必须先执行同任务绑定诊断。仅当当前宿主 `CODEX_THREAD_ID`、命令传入
+   implementation id、state implementation id、trusted review-run binding、reviewer id、schema/
+   Controller/Skill 版本合同、精确 retest scope 与当前宿主 Codex root 全部一致时，才可在 registry
+   锁内幂等重建唯一条目并继续原 rollover generation。任一缺项返回稳定
+   `task_binding_recovery_*`、`user_choice_required=false`，且浏览器、Chat、外部项目均禁止访问。
+   `doctor --implementation-thread-id <当前任务ID>` 必须输出同一非敏感诊断，不能只显示笼统
+   `task_binding_not_registered`。
    无项目任务也必须使用自己已经分配的可写输出目录，不得硬编码 `/var/tmp`、桌面或另一个
    未授权路径，也不得为了通过预检自行创建替代目录：
 

@@ -155,6 +155,20 @@
         {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.83.md"}
       ],
       "change_rule": "不得把文件名、按钮或 filechooser 外观当作附件已加入当前 composer 的证明；不得以重复浏览器动作替代宿主能力。"
+    },
+    {
+      "id": "repo-retest-task-binding-auto-recovery",
+      "scope_key": "workflow.task_binding_recovery",
+      "status": "user_approved",
+      "decision": "合法旧 repo_retest state 的 task binding registry 条目缺失时，普通 guard 必须在同一宿主任务、state implementation identity、trusted review-run binding、reviewer identity、兼容 schema/Controller/Skill 合同、精确 retest scope 与宿主 Codex root 全部一致后，幂等原子重建唯一绑定并继续原 replacement rollover。任一证据缺失或漂移必须返回稳定 task_binding_recovery_*，user_choice_required=false，且不得访问浏览器、Chat 或外部项目。",
+      "scope": "适用于 repo_retest 旧 state、turn-entry guard、doctor、共享 binding registry 与 replacement rollover 恢复。",
+      "recorded_on": "2026-08-19",
+      "authority_sources": [
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/binding_registry.md"},
+        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.97.md"}
+      ],
+      "change_rule": "不得从相似标题、generic project、外部路径、旧任务 ID 或不兼容版本推断绑定；不得以重建绑定为由创建第二个 Chat 或等待任务。"
     }
   ]
 }

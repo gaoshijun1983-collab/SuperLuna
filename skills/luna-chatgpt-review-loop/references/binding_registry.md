@@ -47,6 +47,17 @@ The App orchestration layer may remove manual ID copying by taking a read-only `
 
 ## Recovery
 
+For a legacy `superluna_repo_retest_v1` state whose registry entry is missing,
+ordinary `guard` may rebuild exactly one entry without user input only when the
+current host task ID, persisted implementation ID, trusted review-run binding,
+reviewer ID, state schema/controller/Skill contract, exact retest scope, and
+host Codex root all match. The operation is serialized by the registry lock and
+is idempotent. `doctor --implementation-thread-id <current-task-id>` exposes the
+same non-sensitive prerequisite map and stable `task_binding_recovery_*` reason.
+Generic projects, external paths, unrecorded run bindings, version drift, or
+registry identity conflicts remain fail-closed and grant no browser or Chat
+access.
+
 If a user manually renames a surface, keep the binding because its stable ID is unchanged. Regenerate and apply the expected title at the next explicit naming event. If an ID changes, invalidate the confirmation lease and require the user to select the replacement Chat.
 
 If registry and state diverge, stop formal submission, run `doctor-registry` and `doctor`, then re-register the existing stable IDs. Never infer identity from a similar title.

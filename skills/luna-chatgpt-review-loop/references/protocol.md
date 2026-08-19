@@ -682,3 +682,11 @@ Completed closure from an earlier round may be reviewed in a later request.
 Detailed browser operations are normative in
 [browser_transport.md](browser_transport.md). Binding rules remain in
 [binding_registry.md](binding_registry.md).
+
+Legacy repository self-retests also use that registry as a recoverable safety
+index. A missing entry is never inferred from a title: ordinary guard rebuilds
+it only from the exact current host task, persisted retest scope, trusted
+review-run identity, compatible Controller/Skill/schema contract, and canonical
+host registry root. Every failed prerequisite returns a stable
+`task_binding_recovery_*` code, `user_choice_required=false`, and zero Chat or
+browser authority; success continues the pre-existing rollover generation.

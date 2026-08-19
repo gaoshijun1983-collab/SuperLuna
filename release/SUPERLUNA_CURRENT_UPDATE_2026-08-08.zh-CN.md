@@ -3,15 +3,21 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.96`（Python 元数据：`0.2.0a96`）
-- 当前源码控制器：152
+- 版本：`0.2.0-alpha.97`（Python 元数据：`0.2.0a97`）
+- 当前源码控制器：153
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.109`
+- 当前源码 Skill 修订：`2026-08-19.110`
 - 候选日期：2026-08-19
-- Alpha 96 当前为本地验证候选；基线 HEAD：`b656f194595b122d1f9740b5f03775e1c513298b`
+- Alpha 97 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
+
+Alpha 97 为合法旧 `repo_retest` state 增加同任务 task binding 自动重建。
+普通 guard 只有在宿主任务、state/run-binding、reviewer、schema/版本、精确
+retest scope 和宿主 Codex root 全部一致时，才幂等写回唯一 registry 条目并
+继续原 replacement rollover；漂移统一返回稳定 `task_binding_recovery_*`，
+`user_choice_required=false`，且零浏览器/Chat 访问。
 
 - 仓库测试：439/439 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence

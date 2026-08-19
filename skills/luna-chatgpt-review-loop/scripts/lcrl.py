@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 152
-SKILL_REVISION = "2026-08-19.109"
+CONTROLLER_VERSION = 153
+SKILL_REVISION = "2026-08-19.110"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -781,6 +781,192 @@ def save_binding_registry(path: str | Path, value: dict[str, Any], expected_revi
         timeout=BINDING_REGISTRY_LOCK_TIMEOUT_SECONDS,
     ):
         return _save_binding_registry_locked(registry_path, value, expected_revision)
+
+
+def canonical_binding_registry_path(state: dict[str, Any]) -> Path:
+    """Resolve the one host-owned binding registry without trusting state paths."""
+    host_codex_root = Path(
+        os.environ.get("CODEX_HOME") or (Path.home() / ".codex")
+    ).expanduser().resolve()
+    recorded_root = str(state.get("runtime", {}).get("codex_root", "auto"))
+    if recorded_root not in {"", "auto", "none"}:
+        if Path(recorded_root).expanduser().resolve() != host_codex_root:
+            raise LCRLError("task binding recovery Codex root does not match the current host")
+    return host_codex_root / "lcrl" / "registry" / "tasks.json"
+
+
+def legacy_task_binding_recovery_plan(
+    state_path: str | Path,
+    state: dict[str, Any],
+    supplied_implementation_thread_id: str | None,
+) -> dict[str, Any]:
+    """Prove whether one legacy repo-retest binding may be reconstructed."""
+    automation = state.get("automation", {})
+    confirmation = state.get("confirmation", {})
+    run_binding = state.get("review", {}).get("run_binding", {})
+    supplied = str(supplied_implementation_thread_id or "none").strip()
+    host = str(os.environ.get("CODEX_THREAD_ID") or "none").strip()
+    expected = str(automation.get("implementation_thread_id", "none")).strip()
+    profile = str(automation.get("profile", "generic"))
+    checks = {
+        "binding_unbound": state.get("binding", {}).get("status") == "unbound",
+        "repo_retest_profile": profile == SUPERLUNA_REPO_RETEST_PROFILE,
+        "host_task_identity_available": host not in {"", "none"},
+        "supplied_task_matches_host": supplied not in {"", "none"} and supplied == host,
+        "state_task_matches_host": expected not in {"", "none"} and expected == host,
+        "state_schema_compatible": state.get("schema_version") == SCHEMA_VERSION,
+        "run_binding_trusted": run_binding.get("status") == "trusted",
+        "run_binding_schema_matches": run_binding.get("state_schema_version") == SCHEMA_VERSION,
+        "run_binding_task_matches": run_binding.get("implementation_thread_id") == expected,
+        "run_binding_reviewer_matches": (
+            run_binding.get("reviewer_thread_id") == confirmation.get("reviewer_thread_id")
+            and confirmation.get("reviewer_thread_id") not in {None, "", "none"}
+        ),
+        "run_binding_version_recorded": (
+            isinstance(run_binding.get("controller_version"), int)
+            and 0 < run_binding.get("controller_version", 0) <= CONTROLLER_VERSION
+            and isinstance(run_binding.get("skill_revision"), str)
+            and run_binding.get("skill_revision") not in {"", "none", "unrecorded"}
+        ),
+    }
+    reason_order = (
+        ("binding_unbound", "task_binding_recovery_not_required"),
+        ("repo_retest_profile", "task_binding_recovery_profile_not_repo_retest"),
+        ("host_task_identity_available", "task_binding_recovery_host_identity_unavailable"),
+        ("supplied_task_matches_host", "task_binding_recovery_host_identity_mismatch"),
+        ("state_task_matches_host", "task_binding_recovery_state_identity_mismatch"),
+        ("state_schema_compatible", "task_binding_recovery_schema_incompatible"),
+        ("run_binding_trusted", "task_binding_recovery_run_binding_untrusted"),
+        ("run_binding_schema_matches", "task_binding_recovery_run_binding_schema_mismatch"),
+        ("run_binding_task_matches", "task_binding_recovery_run_binding_task_mismatch"),
+        ("run_binding_reviewer_matches", "task_binding_recovery_run_binding_reviewer_mismatch"),
+        ("run_binding_version_recorded", "task_binding_recovery_version_contract_incompatible"),
+    )
+    missing = [reason for check, reason in reason_order if not checks[check]]
+    registry_path = "none"
+    if not missing:
+        try:
+            registry_path = str(canonical_binding_registry_path(state))
+        except LCRLError:
+            missing.append("task_binding_recovery_codex_root_mismatch")
+    return {
+        "applicable": (
+            checks["binding_unbound"]
+            and checks["repo_retest_profile"]
+            and state.get("reviewer_chat", {}).get("status")
+            in {"rollover_pending", "rollover_blocked"}
+        ),
+        "ready": not missing,
+        "reason_code": missing[0] if missing else "task_binding_recovery_ready",
+        "missing_reason_codes": missing,
+        "checks": checks,
+        "registry_path": registry_path,
+        "state_path": str(Path(state_path).resolve()),
+        "controller_version": CONTROLLER_VERSION,
+        "skill_revision": SKILL_REVISION,
+    }
+
+
+def reconcile_legacy_task_binding(
+    state_path: str | Path,
+    supplied_implementation_thread_id: str,
+) -> dict[str, Any]:
+    """Idempotently rebuild one proven repo-retest binding under one registry lock."""
+    path = Path(state_path).resolve()
+    state = load_state(path)
+    plan = legacy_task_binding_recovery_plan(path, state, supplied_implementation_thread_id)
+    if not plan["ready"]:
+        return {"rebuilt": False, "plan": plan}
+    registry_path = Path(plan["registry_path"])
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+    task_id = "retest-" + hashlib.sha256(
+        state["automation"]["implementation_thread_id"].encode("utf-8")
+    ).hexdigest()[:16]
+    generation = int(state.get("reviewer_chat", {}).get("generation", 1))
+    display_name = "SuperLuna"
+    iteration = f"A{generation}"
+    work_status_label = "换卷恢复"
+    titles = build_binding_titles(display_name, iteration, work_status_label)
+    entry = {
+        "task_id": task_id,
+        "display_name": display_name,
+        "implementation_thread_id": state["automation"]["implementation_thread_id"],
+        "reviewer_thread_id": state["confirmation"]["reviewer_thread_id"],
+        "automation_id": state["automation"]["id"],
+        "iteration": iteration,
+        "work_status_label": work_status_label,
+        "titles": titles,
+        "naming_template_version": NAMING_TEMPLATE_VERSION,
+        "updated_at": utc_now(),
+    }
+    with acquire_state_lock(registry_path, timeout=BINDING_REGISTRY_LOCK_TIMEOUT_SECONDS):
+        latest = load_state(path)
+        latest_plan = legacy_task_binding_recovery_plan(
+            path, latest, supplied_implementation_thread_id,
+        )
+        if latest.get("binding", {}).get("status") == "bound":
+            return {"rebuilt": False, "already_bound": True, "plan": latest_plan}
+        if not latest_plan["ready"]:
+            return {"rebuilt": False, "plan": latest_plan}
+        registry = load_binding_registry(registry_path, allow_missing=True)
+        matches = [
+            item for item in registry["tasks"]
+            if item.get("task_id") == task_id
+            or item.get("implementation_thread_id") == entry["implementation_thread_id"]
+            or item.get("reviewer_thread_id") == entry["reviewer_thread_id"]
+        ]
+        if matches and any(
+            any(item.get(key) != entry.get(key) for key in (
+                "task_id", "implementation_thread_id", "reviewer_thread_id", "automation_id",
+            )) for item in matches
+        ):
+            conflict = dict(latest_plan)
+            conflict.update({
+                "ready": False,
+                "reason_code": "task_binding_recovery_registry_identity_conflict",
+                "missing_reason_codes": ["task_binding_recovery_registry_identity_conflict"],
+            })
+            return {"rebuilt": False, "plan": conflict}
+        candidate = deepcopy(registry)
+        candidate["tasks"] = [
+            item for item in registry["tasks"] if item.get("task_id") != task_id
+        ] + [entry]
+        validate_binding_registry(candidate)
+        previous_revision = latest["revision"]
+        latest["binding"] = {
+            "status": "bound", "registry_path": str(registry_path),
+            "task_id": task_id, "display_name": display_name,
+            "iteration": iteration, "work_status_label": work_status_label,
+            "naming_template_version": NAMING_TEMPLATE_VERSION,
+            "expected_work_title": titles["work"],
+            "expected_chat_title": titles["chat"],
+            "expected_automation_title": titles["automation"],
+        }
+        latest["automation"]["title"] = titles["automation"]
+        latest.setdefault("review_history", []).append({
+            "event": "legacy_task_binding_rebuilt",
+            "implementation_thread_id": entry["implementation_thread_id"],
+            "reviewer_thread_id": entry["reviewer_thread_id"],
+            "reviewer_generation": generation,
+            "recorded_at": utc_now(),
+        })
+        latest["review_history"] = latest["review_history"][-20:]
+        save_state(path, latest, expected_revision=previous_revision)
+        try:
+            _save_binding_registry_locked(
+                registry_path, candidate, expected_revision=registry["revision"],
+            )
+        except Exception:
+            rollback = load_state(path)
+            rollback["binding"] = deepcopy(state["binding"])
+            rollback["automation"]["title"] = state["automation"].get("title", "none")
+            rollback["review_history"] = [
+                item for item in rollback.get("review_history", [])
+                if item.get("event") != "legacy_task_binding_rebuilt"
+            ]
+            save_state(path, rollback, expected_revision=rollback["revision"])
+            raise
+    return {"rebuilt": True, "already_bound": False, "plan": plan}
 
 
 def default_account_browser_gate_path() -> Path:
@@ -11311,13 +11497,45 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.state).resolve()
     state = load_state(path)
     revision = state["revision"]
-    status = state["review"]["status"]
     implementation_thread_id = str(
         getattr(args, "implementation_thread_id", None) or "none"
     ).strip()
     expected_implementation_thread_id = state["automation"].get(
         "implementation_thread_id", "none"
     )
+    binding_rebuilt = False
+    binding_plan = legacy_task_binding_recovery_plan(
+        path, state, implementation_thread_id,
+    )
+    if binding_plan["applicable"]:
+        recovery = reconcile_legacy_task_binding(path, implementation_thread_id)
+        if not recovery.get("rebuilt") and not recovery.get("already_bound"):
+            blocked_plan = recovery["plan"]
+            return {
+                "ok": True,
+                "action": "task_binding_recovery_blocked",
+                "status": state["review"]["status"],
+                "reason_code": blocked_plan["reason_code"],
+                "task_binding_recovery_diagnostic": blocked_plan,
+                "execution_allowed": False,
+                "project_read_allowed": False,
+                "project_write_allowed": False,
+                "browser_access_allowed": False,
+                "chat_read_allowed": False,
+                "old_chat_access_allowed": False,
+                "user_choice_required": False,
+                "system_next_action": "verify_same_task_binding_evidence_and_retry_guard",
+                "user_message_zh": "任务绑定证据不完整，系统已安全停止；不会访问旧 Chat。",
+                "user_message_en": "Task binding evidence is incomplete; the system stopped safely without accessing the old Chat.",
+                "revision": state["revision"],
+            }
+        binding_rebuilt = bool(recovery.get("rebuilt"))
+        state = load_state(path)
+        revision = state["revision"]
+        expected_implementation_thread_id = state["automation"].get(
+            "implementation_thread_id", "none"
+        )
+    status = state["review"]["status"]
     legacy_missing_wait_proof = next(
         (
             event for event in reversed(state.get("review_history", []))
@@ -11383,6 +11601,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                 "user_choice_required": False,
                 "system_next_action": "prepare-repository-rollover-recovery",
                 "revision": state["revision"],
+                "legacy_task_binding_rebuilt": binding_rebuilt,
             }
         return {
             "ok": True,
@@ -11438,6 +11657,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                 "continuation_required": False,
                 "turn_completion_allowed": True,
                 "revision": state["revision"],
+                "legacy_task_binding_rebuilt": binding_rebuilt,
             }
         expected_rdate = rdate_from_timestamp(rate_limit_plan["retry_not_before"])
         automation = state["automation"]
@@ -11687,6 +11907,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                 "controller_version": CONTROLLER_VERSION,
                 "skill_revision": SKILL_REVISION,
                 "revision": state["revision"],
+                "legacy_task_binding_rebuilt": binding_rebuilt,
             }
         if provisioning_plan.get("applicable"):
             if implementation_thread_id == "none":
@@ -11721,6 +11942,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                 "controller_version": CONTROLLER_VERSION,
                 "skill_revision": SKILL_REVISION,
                 "revision": state["revision"],
+                "legacy_task_binding_rebuilt": binding_rebuilt,
             }
     if legacy_missing_wait_poisoned:
         if implementation_thread_id == "none":
@@ -11951,6 +12173,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         "expires_at": state["runtime"]["action_lease_expires_at"],
         "recovered_same_task_lease": recovered_same_task_lease,
         "implementation_thread_id": implementation_thread_id,
+        "legacy_task_binding_rebuilt": binding_rebuilt,
     }
 
 
@@ -13522,7 +13745,12 @@ def resume_from_reply_command(args: argparse.Namespace) -> dict[str, Any]:
     raise LCRLError("resume-from-reply could not claim a unique consumption")
 
 
-def doctor(state_path: str | Path, automation_toml: str | None = None, registry_path: str | None = None) -> dict[str, Any]:
+def doctor(
+    state_path: str | Path,
+    automation_toml: str | None = None,
+    registry_path: str | None = None,
+    implementation_thread_id: str | None = None,
+) -> dict[str, Any]:
     path = Path(state_path).resolve()
     findings: list[dict[str, str]] = []
     try:
@@ -13594,8 +13822,19 @@ def doctor(state_path: str | Path, automation_toml: str | None = None, registry_
         findings.append({"severity": "info", "code": "high_execution_unverified"})
     binding = state.get("binding", {})
     effective_registry = registry_path or (binding.get("registry_path") if binding.get("status") == "bound" else None)
+    task_binding_recovery_diagnostic = None
     if binding.get("status") != "bound":
-        findings.append({"severity": "warning", "code": "task_binding_not_registered"})
+        task_binding_recovery_diagnostic = legacy_task_binding_recovery_plan(
+            path, state, implementation_thread_id,
+        )
+        findings.append({
+            "severity": "warning",
+            "code": (
+                "task_binding_recovery_ready"
+                if task_binding_recovery_diagnostic["ready"]
+                else task_binding_recovery_diagnostic["reason_code"]
+            ),
+        })
     elif effective_registry:
         try:
             task_registry = load_binding_registry(effective_registry)
@@ -13644,6 +13883,32 @@ def doctor(state_path: str | Path, automation_toml: str | None = None, registry_
         "network": state["recovery"]["network_state"],
         "network_error_count": state["recovery"]["network_error_count"],
         "binding": state.get("binding", {}),
+        "task_binding_recovery_diagnostic": task_binding_recovery_diagnostic,
+        "user_choice_required": False,
+        "system_next_action": (
+            "run_guard_to_rebuild_same_task_binding_and_continue_rollover"
+            if task_binding_recovery_diagnostic is not None
+            and task_binding_recovery_diagnostic.get("ready")
+            else "verify_same_task_binding_evidence"
+            if task_binding_recovery_diagnostic is not None
+            else "continue_current_bound_workflow"
+        ),
+        "user_message_zh": (
+            "已确认可由同一任务自动重建绑定；下一次 guard 将原子恢复并继续换卷。"
+            if task_binding_recovery_diagnostic is not None
+            and task_binding_recovery_diagnostic.get("ready")
+            else "任务绑定证据尚不完整，系统保持失败关闭，不会访问 Chat。"
+            if task_binding_recovery_diagnostic is not None
+            else "任务绑定有效。"
+        ),
+        "user_message_en": (
+            "The same task can safely rebuild its binding; the next guard will recover it atomically and continue rollover."
+            if task_binding_recovery_diagnostic is not None
+            and task_binding_recovery_diagnostic.get("ready")
+            else "Task binding evidence is incomplete; the system remains fail-closed and will not access Chat."
+            if task_binding_recovery_diagnostic is not None
+            else "Task binding is valid."
+        ),
         "model_policy": {
             "executor": model_policy["executor"]["current"],
             "reviewer": model_policy["reviewer"]["current"],
@@ -14762,6 +15027,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_parser.add_argument("--state", required=True)
     doctor_parser.add_argument("--automation-toml")
     doctor_parser.add_argument("--registry")
+    doctor_parser.add_argument("--implementation-thread-id")
 
     audit_parser = sub.add_parser("audit")
     audit_parser.add_argument("--automation-root", required=True)
@@ -14997,7 +15263,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "resume-from-reply":
             result = resume_from_reply_command(args)
         elif args.command == "doctor":
-            result = doctor(args.state, args.automation_toml, args.registry)
+            result = doctor(
+                args.state, args.automation_toml, args.registry,
+                args.implementation_thread_id,
+            )
         elif args.command == "audit":
             result = audit(args)
         elif args.command == "revision":
