@@ -24,9 +24,45 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.76`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 132 / Skill revision
-`2026-08-18.89` makes the legacy missing-wait command converge on the same
+The current source candidate is `0.2.0-alpha.83`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 139 / Skill revision
+`2026-08-19.96` gates complete-source attachment transport before any Chat or
+browser startup. Only a host-declared `direct_file_upload` capability may be
+used; a missing capability, a filechooser failure, or a missing current-composer
+receipt fails closed without a text send, Chat read, refresh, or replacement
+package. One recovery may reuse the identical package; a second failure becomes
+the terminal `attachment_upload_capability_missing` platform blocker. Exact
+repository-commit review remains independent of attachment upload and is preferred for clean Git-backed
+projects. The current Chat must prove exact-commit/full-tree access with root and
+nested blob canaries, and every round separately proves its base-to-head diff.
+If the repository, commit, or access cannot be verified, the controller
+automatically requires the complete source attachment package. It also retains
+the Alpha 81 rule that formal review fails closed until a deterministic complete
+source package (or an explicitly verified exact Git commit) is visibly bound to
+the current reviewer Chat. A local folder path and selected inline files never
+count as complete project context. Stale platform-wait recovery still yields to the reviewer round
+budget before it can rotate a reply token or RDATE. Both `found` and `not_found`
+lookups now preserve the existing wait identity and return the one replacement-
+Chat startup continuation; a found platform wait is deleted only after the
+replacement is durably bound. Controller 135 converts a due reply wait into a distinct bounded rollover
+continuation when the reviewer round budget is exhausted. The authorization
+path now persists that routing even if a generic account-slot request acquired
+`waiting_read` first; it forbids old-Chat reads and ordinary five-minute rearm,
+releases any read slot, and supplies the exact one-time `startup` handoff for the
+replacement Chat. Existing Alpha 78 states already marked `rollover_pending`
+are migrated by the next exact `waiting-check` before any poll or rearm action
+is emitted. Controller 134 preserves the current one-shot wait when a due
+waiting occurrence hits the reviewer round budget. The original browser-capable implementation task
+must provision and durably bind exactly one replacement Chat before the host may
+delete that wait; a separate deletion-proof finalizer then atomically continues
+the one pending submission. A failed replacement retains one technical recovery
+with `user_choice_required=false`, and status/doctor reject an incomplete rollover
+that has no executable future action. Controller 133 performs the reviewer round-budget check inside the account-browser
+gate before any browser initialization or old-Chat access. An exhausted Chat is
+atomically moved to `rollover_pending`; replacement provisioning stays owned by
+the original browser-capable implementation task, and one creation failure is
+recorded as `rollover_blocked` with one idempotent recovery identity rather than
+being mislabeled as a reply wait. Controller 132 makes the legacy missing-wait command converge on the same
 one-replacement recovery barrier as the current controller path, so an older
 running task cannot turn a recoverable wait into `external_blocked`; a state
 already poisoned by that legacy path is repaired at the next exact task turn

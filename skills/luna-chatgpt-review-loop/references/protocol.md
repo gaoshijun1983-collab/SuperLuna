@@ -1,11 +1,58 @@
 # SuperLuna browser-first review protocol
 
-Review submission means one browser message to the bound reviewer Chat. It is
-not a Git commit or push. Unless the user or project acceptance contract
-explicitly requires a commit identity, verified worktree diffs and test output
-are sufficient review evidence. An unwritable external worktree index must not
-introduce a permission approval or stop the loop; record that no commit exists
-and continue with readable local evidence.
+Review submission means one browser message to the bound reviewer Chat. A local
+path is never reviewer-visible evidence. Formal full-project review requires a
+deterministic sanitized package made from Git-tracked sources plus explicitly
+declared authoritative untracked files. Its manifest records every relative
+path, byte size, SHA-256, exclusions, exact commit and dirty state. All split
+volumes must be visibly present in the current request and hash-confirmed before
+send. Partial selections must say `partial_materials` and list files, hashes and
+uncovered paths. GitHub is a separate mode: it requires a repository URL, exact
+commit SHA and verified reviewer access; a commit name alone proves nothing.
+Source coverage and machine/runtime evidence are independent evidence scopes.
+The submission is not a Git commit or push, and the workflow must not create one
+without user authorization. When Git commit review is not selected, it may
+continue with readable local evidence, but that evidence must still obey the
+partial-versus-complete coverage labels and current-Chat receipt gate above.
+
+For a clean Git-backed project the preferred mode is
+`repository_commit_review`. `prepare-repository-commit-review` binds the
+canonical origin URL, repository identity, exact local HEAD, informational
+branch label, complete tree-manifest hash, and root/nested blob canaries. A
+floating `main`, `HEAD`, branch, tree, blob, or commit-page URL cannot replace
+those identities. The current Chat must separately produce a
+`repository_access_receipt` proving it opened the exact commit, could see the
+complete tree, and matched both canaries. A URL string or visible repository
+homepage is not access proof. Replacement Chats always discard the old receipt.
+
+Every formal repository round then records exact base and head commits, verifies
+that base is an ancestor of head, hashes the complete binary diff, lists changed
+paths with head blob identities, records clean/dirty state, and indexes runtime
+evidence separately. A current tree receipt means the reviewer may read any
+relevant file at exact head without rescanning all history; it does not prove the
+round diff or runtime behavior. Dirty state, a missing/mismatched remote,
+unreachable commit, private/authentication access not independently verified, or
+a broken base-to-head chain fails closed into `full_source_attachment`; it never
+falls back to partial formal review. No controller path commits, pushes,
+publishes, or changes repository visibility.
+
+Complete-source attachment transport has a separate host-capability gate. Before
+an account slot, browser runtime, or first/replacement Chat is created,
+`declare-attachment-upload-capability` must record an explicit platform
+`direct_file_upload` declaration. An unverified or missing capability stops with
+zero browser actions and `attachment_upload_capability_missing`; DOM injection,
+system-filechooser simulation, repeated clicking, reload, and page reopen are
+not supported fallbacks. Repository-commit review bypasses this attachment gate.
+
+One `authorize-attachment-upload` attempt is allowed for the prepared package.
+A filechooser or direct-upload failure records one closed attempt, requires the
+account slot to be released, preserves the same package identity, sends no text,
+reads no Chat, and creates no replacement package. Its recovery id permits one
+controlled retry of that exact package. A second failure is terminal for the
+host capability. A successful upload is still not review-ready until
+`confirm-attachment-upload-receipt` matches the current composer identity,
+platform receipt identity, and every volume's name, byte size, and SHA-256.
+Visible filenames, buttons, or chooser state alone are not an attachment receipt.
 
 ## 1. Observable loop
 
@@ -61,7 +108,8 @@ exchange is not a formal review cycle. Ordinary browser recovery never creates
 a replacement Chat. A bounded rollover is allowed only after two formal
 reviews, counted by exact Chat identity across run boundaries, or a real rate
 limit; it retires the old Chat and provisions exactly one replacement with
-compact current context. Normal operations on a bound Chat are tail-only and
+the same-generation complete source package plus a structured rollover handoff.
+It cannot inherit only a prose summary or the previous Chat receipt. Normal operations on a bound Chat are tail-only and
 return `full_history_scan_allowed=false`. The workflow never switches
 model/reasoning or sends through a second transport. The user explicitly
 confirms the visible reviewer mode unless the new Chat already shows the

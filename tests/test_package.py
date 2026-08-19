@@ -388,7 +388,7 @@ class PackageTests(unittest.TestCase):
             "schema_version", "revision", "created_at", "updated_at", "automation",
             "policy", "confirmation", "capabilities", "review", "review_history",
             "reviewer_chat",
-            "browser_reply_observation", "browser_binding", "binding", "attachment", "capability_probes",
+            "browser_reply_observation", "browser_binding", "binding", "attachment", "project_context", "capability_probes",
             "next_operation", "model_policy", "recovery", "alternative", "runtime",
         }
 
@@ -623,7 +623,16 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(capabilities["properties"]["chat_create"]["type"], "string")
         self.assertEqual(
             schema["properties"]["capability_probes"]["required"],
-            ["terra_next_turn"],
+            ["terra_next_turn", "attachment_upload"],
+        )
+        upload_probe = schema["properties"]["capability_probes"]["properties"]["attachment_upload"]
+        self.assertEqual(
+            set(upload_probe["properties"]["status"]["enum"]),
+            {"unverified", "supported", "authorized", "blocked", "missing", "confirmed"},
+        )
+        self.assertEqual(
+            set(upload_probe["properties"]["transport"]["enum"]),
+            {"none", "direct_file_upload"},
         )
 
         mcp_rules = [

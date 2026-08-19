@@ -20,8 +20,31 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.76`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。控制器 132 / Skill revision `2026-08-18.89` 让旧版“等待任务丢失”入口也强制进入
+当前源码候选版本是 `0.2.0-alpha.83`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 139 / Skill revision `2026-08-19.96` 对干净且可访问的 Git 项目优先
+在 Chat 或浏览器启动前检查完整源码包附件能力：只有宿主明确声明
+`direct_file_upload` 可用才允许上传；能力缺失、filechooser 未触发或当前 composer 回执缺失时，
+均不发送文字、不读取 Chat、不刷新页面、不重建包。唯一恢复复用同一 package identity，第二次
+失败进入终态 `attachment_upload_capability_missing`。Git exact-commit 模式不依赖附件，仍优先
+用于干净且可访问的 Git 项目：当前 Chat 必须以根目录与嵌套 blob canary 证明 exact commit
+和完整 tree 可访问；每轮另行证明 base→head diff。remote、commit 或访问不可验证时自动要求完整
+源码附件包，不允许退成 partial。它同时保留 Alpha 81 的要求：正式审阅前，当前
+reviewer Chat 必须获得确定性完整源码包（或已明确核验可访问的 exact Git commit）。
+本机文件夹路径和零散正文永远不算完整项目上下文。stale platform wait
+恢复先服从正式轮数/换卷门：`found` 与 `not_found` 均不得再旋转普通回复 token 或 RDATE，
+而是保持原等待身份并直接返回唯一 replacement startup；平台任务仍存在时，只能在替代 Chat
+持久绑定后删除。Controller 135 把命中轮数上限的
+waiting occurrence 原子改道成独立、有界的 `rollover_continuation`：即便通用账户门先取得
+`waiting_read`，后置授权也会持久化换卷、禁止旧 Chat 和普通 5 分钟 rearm，要求释放读取名额，
+并返回唯一替代 Chat 的精确 `startup` 续接。已经处于 `rollover_pending`、但仍保存 Alpha 78
+`review_reply` kind 的旧状态，会在下一次精确 `waiting-check` 输出任何 poll/rearm 之前原子迁移。
+Controller 134 修复 waiting occurrence 触发轮数换卷后失去未来事件的问题：旧单次等待在唯一替代 Chat 成功创建并持久绑定前不得删除；
+绑定后必须以旧等待的真实删除证明原子完成换卷，再续接唯一待提交材料。创建失败只保留一个
+技术恢复，`user_choice_required=false`；status/doctor 会拒绝没有可执行未来动作的未完成换卷。
+Controller 133 / Skill revision `2026-08-18.90` 把 reviewer Chat 正式轮数检查
+收进账户浏览器门：任何浏览器初始化、旧 Chat 打开或历史读取之前，满 2 轮的 Chat 会原子进入
+`rollover_pending`，旧 Chat 权限立即关闭；唯一替代 Chat 仍由原实施任务自动创建和绑定。
+创建失败只登记一个幂等恢复身份并显示“换卷受阻”，不会伪装成“等待回复”。控制器 132 让旧版“等待任务丢失”入口也强制进入
 同一个“只重建一个单次等待”恢复门，避免已运行的旧任务把可恢复等待错转成
 `external_blocked`；已经被旧路径误停的状态，也会在原任务下一次入口自动还原，且还原过程不访问
 项目或浏览器。控制器 131 修复“本地仍在等待，但平台上的单次等待

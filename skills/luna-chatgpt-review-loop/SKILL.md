@@ -73,6 +73,22 @@ reviewer：同一时刻始终只有一个活动 Chat。新 Chat 只接收控制�
 摘要和当前待审材料，不复制或重新读取旧 Chat 全历史；绑定后正式轮数从 1 重新开始，并重新
 核验可见“极高”。
 
+账户浏览器门本身必须在发放任何名额前读取 state 并检查上述正式轮数；调用方遗漏提前检查时也
+不能取得浏览器权限。达到上限时原子进入 `rollover_pending`，返回“换卷中”，并要求具备浏览器
+能力的原实施任务在同一连续链中创建、绑定和核验唯一替代 Chat，不依赖用户发送“继续”。创建
+失败时只允许登记一个幂等恢复身份并进入 `rollover_blocked`，显示“换卷受阻”；不得改写成
+`review_waiting`、不得创建第二个替代 Chat、不得访问旧 Chat。正常 `review_waiting` 对外显示
+“等待回复”，三者必须可区分。
+
+若轮数上限是在合法 waiting occurrence 的账户门中发现，当前单次等待任务立即改作该换卷的
+唯一恢复锚点：原实施任务必须在同一连续链中建立并用
+`complete-reviewer-chat-rollover` 持久登记唯一替代 Chat。在该命令返回
+`reviewer_chat_rollover_bound` 前禁止删除旧等待；成功后才删除同一个平台任务，并以其真实 ID
+运行 `finalize-reviewer-chat-rollover --deleted-automation-id <旧等待ID>`。只有 finalizer 成功才
+进入替代 Chat 的唯一待提交续接。创建失败运行 `record-reviewer-chat-rollover-failure`，保持同一
+恢复身份和明确下一动作，`user_choice_required=false`；不得新建普通等待、不得结束为无未来事件
+的 idle 状态。
+
 凡是已经绑定 reviewer Chat 的 `startup`、`submission`、`waiting_read` 或名额复用，都必须遵守
 `history_tail_only_required=true` 与 `full_history_scan_allowed=false`，只检查可见对话末尾。
 
@@ -331,7 +347,31 @@ operation 复用仍禁止。返回
 3. 只读检查项目状态和旧 SuperLuna 状态，不创建真实自动任务。若用户当前请求已明确给出
    一次性新 Chat 授权，先确认上述第一项真实本地改动及其最小验证已经完成，再按
    `browser_chat_provisioning.md` 创建并初始化唯一 reviewer
-   conversation。创建前必须用 `render-project-context` 把与总体目标相关的真实项目规则、说明、
+   conversation。有 Git 仓库时先运行 `prepare-repository-commit-review`，默认使用
+   `repository_commit_review`：只接受 canonical remote URL、repository identity、exact commit SHA
+   和 tree manifest hash，branch 只作说明。首次或 replacement Chat 必须用
+   `confirm-repository-access-receipt` 证明当前 Chat 实际打开 exact commit、看到完整 tree，并核对一个
+   根目录及一个嵌套文件的 blob canary；URL 字符串、浮动 main/HEAD/branch 页面或摘要都不算回执。
+   每轮再运行 `prepare-repository-review-round`，分别记录 exact base→head、完整 diff hash、changed
+   path/blob manifest、clean/dirty 状态与 runtime evidence index。已有 tree 回执允许避免重复扫描完整
+   历史，但不能替代本轮 diff 覆盖。dirty、remote 缺失、commit 不可达、私库访问/认证未核验时，
+   必须自动回退 `prepare-project-context --scope full_source`，不得 partial formal review。不得自动
+   commit、push、发布或公开私有仓库。
+   没有可验证 Git 仓库时必须用 `prepare-project-context --scope full_source` 生成确定性脱敏完整源码包；
+   在取得 `startup` 账户名额、初始化浏览器或创建首次/replacement Chat 前，必须先运行
+   `declare-attachment-upload-capability`。只有宿主明确声明 `direct_file_upload` 可用时才能继续；
+   `manual`、后台 DOM 注入、系统 filechooser 模拟或未声明能力均不允许。能力缺失直接返回
+   `attachment_upload_capability_missing`，浏览器动作数为零，Git exact-commit 模式不受影响。
+   受支持时用 `authorize-attachment-upload` 取得一次上传 attempt。filechooser 未触发或直接上传失败时，
+   立即 `record-attachment-upload-failure`：不再点击、刷新或重开，不发送文字、不读 Chat、释放账户名额，
+   保留原 package identity。只允许以返回的 recovery id 再授权一次；第二次失败成为终态平台能力阻断。
+   上传后必须用 `confirm-attachment-upload-receipt` 核对当前 composer identity、平台附件 receipt、每卷
+   文件名、大小和 SHA-256；只看见文件名、按钮或选择器不构成回执，未确认前不得 formal review。
+   `render-project-context` 只表示部分正文材料，绝不能写成完整项目覆盖。材料包所有分卷必须在当前
+   请求中逐一确认名称与 SHA-256；缺卷、上传失败、附件能力缺失、身份不匹配或旧 state 缺少回执
+   时进入 `context_refresh_required`，不得正式审阅。replacement Chat 必须重新附完整源码包及结构化
+   rollover handoff，旧 Chat 回执不得继承。源码包与 machine/runtime evidence 是两种独立证据。
+   随后把与总体目标相关的真实项目规则、说明、
    状态、清单、入口和源码渲染成一个初始化上下文区块；文件数量不设固定上限，只服从单文件
    32 KiB、合计 64 KiB、项目根与敏感内容安全门。初始化消息必须包含该区块的完整原文，不能只
    列本地路径；初始化消息不计入正式回合。新建对话若暂时显示 `/c/WEB:<uuid>`，该值只是
@@ -641,10 +681,16 @@ python -B <skill-root>/scripts/lcrl.py recover-stale-wait \
   --implementation-thread-id <当前稳定实施任务ID>
 ```
 
-`found` 会清理过期 claim、旋转 token，并按返回的 `platform_wait_update` 原地更新同一个任务；
+正常未换卷状态下，`found` 会清理过期 claim、旋转 token，并按返回的 `platform_wait_update` 原地更新同一个任务；
 `not_found` 会解除旧任务绑定，再按 `platform_wait_create`、`bind-waiting-check` 和
 `render-waiting-check` 只建立一个替代任务。两条路径都保持原等待状态，不访问 Chat 或项目，
 也不要求用户决定。ID、实施任务、等待状态或过期 claim 任一不匹配时 state 字节必须不变。
+以上普通恢复只适用于 reviewer Chat 仍可访问且未达到正式轮数上限。若 state 已满轮或
+`reviewer_chat.status` 已是 `rollover_pending` / `rollover_blocked`，精确 lookup 完成后必须优先
+进入 `rollover_continuation`：保持现有 token、RDATE 与 automation identity，不得返回
+`platform_wait_update` / `platform_wait_create`，不得普通 rearm 或读取旧 Chat。`found` 的旧平台
+任务只在唯一替代 Chat 成功绑定后删除；`not_found` 的精确查询结果作为等待已退休证明。两种
+情况都在同一 occurrence 直接执行控制器返回的唯一 replacement `startup`，不得再安排回复轮询。
 
 `retire-missing-wait` 仅保留为显式终止一个**没有过期 claim** 的孤立旧等待的兼容入口；不得用它
 替代上述自动恢复路径。
@@ -708,6 +754,14 @@ python -B <skill-root>/scripts/lcrl.py confirm-waiting-recovery-arm \
    再把同一个等待项移动到返回时间；不得先更新平台；
    若返回 `account_browser_operation_conflict`，先以返回的 `existing_slot_lease_id` 释放同一任务
    遗留的旧 operation 名额，再按上述顺序 rearm；不得把该旧 lease 当作 `waiting_read`；
+   若账户门返回 `reviewer_chat_rollover_pending(round_budget)`，本 occurrence 不得 rearm 成普通
+   回复等待，也不得删除当前等待。直接使用返回的唯一 rollover authorization 在同一连续链中
+   创建并绑定替代 Chat；绑定成功后才删除当前等待并调用
+   `finalize-reviewer-chat-rollover`，随后继续唯一待提交材料；
+   若通用调用已先取得 `waiting_read`，随后 `authorize-waiting-chat-read` 才发现轮数上限，控制器
+   必须原子把当前等待 kind 改为 `rollover_continuation`，返回读取名额释放要求与唯一 `startup`
+   请求。该 action 禁止 `rearm-waiting-check`、禁止任何 `platform_wait_update` 和旧 Chat 读取；
+   同一等待任务只保留为替代 Chat 成功绑定前的恢复锚点，不再承担回复轮询；
 4. 用 `authorize-waiting-chat-read --account-slot-lease-id <waiting_read 返回的 lease_id>`
    再核验状态、token、稳定等待任务 ID、claim、等待读取 lease 与账户名额；控制器会从本机共享
    账户门重新验证该名额属于当前实施任务且 operation 恰为 `waiting_read`，并确认恢复 RDATE 已绑定

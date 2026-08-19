@@ -15,9 +15,11 @@ import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from urllib.parse import urlsplit
 from contextlib import contextmanager
 from copy import deepcopy
@@ -32,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 132
-SKILL_REVISION = "2026-08-18.89"
+CONTROLLER_VERSION = 139
+SKILL_REVISION = "2026-08-19.96"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -87,6 +89,12 @@ ALLOWED_TRANSITIONS = {
 VALID_PAYLOAD_MODES = {"inline_packet", "app_attachment", "mcp_readonly"}
 VALID_ATTACHMENT_CAPABILITIES = {"native", "manual", "unavailable"}
 VALID_FILESYSTEM_CAPABILITIES = {"inline", "mcp_verified", "unavailable"}
+VALID_PROJECT_CONTEXT_STATUSES = {
+    "context_refresh_required", "partial_materials", "package_prepared",
+    "attachment_confirmed", "github_commit_confirmed",
+    "repository_access_receipt_required", "repository_access_confirmed",
+    "repository_round_ready",
+}
 VALID_COORDINATION_CAPABILITIES = {"available", "unavailable", "unknown"}
 VALID_STARTUP_BROWSER_STATES = {"initialized", "uninitialized"}
 VALID_STARTUP_WORKSPACE_STATES = {"ready_before_browser", "missing", "checked_after_browser"}
@@ -1495,6 +1503,112 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
     # or locking a registry path, so an invalid project cannot leave a gate or
     # sidecar lock behind.
     requested_scope = account_browser_scope_from_args(args, task_id)
+    state_path_arg = getattr(args, "state", None)
+    if (
+        state_path_arg not in (None, "", "none")
+        and Path(state_path_arg).expanduser().is_file()
+    ):
+        state_path = Path(state_path_arg).expanduser().resolve()
+        state = load_state(state_path)
+        context = state.get("project_context", {})
+        upload_probe = state.get("capability_probes", {}).get("attachment_upload", {})
+        if (
+            args.operation == "startup"
+            and context.get("scope") == "full_source"
+            and context.get("status") == "package_prepared"
+            and upload_probe.get("status") not in {"supported", "authorized", "blocked"}
+        ):
+            missing = upload_probe.get("status") == "missing"
+            return {
+                "ok": True,
+                "action": (
+                    "attachment_upload_capability_missing" if missing
+                    else "attachment_upload_capability_probe_required"
+                ),
+                "reason_code": (
+                    "attachment_upload_capability_missing" if missing
+                    else "attachment_upload_capability_unverified"
+                ),
+                "slot_acquired": False,
+                "browser_runtime_initialization_allowed": False,
+                "browser_actions_allowed": 0,
+                "chat_creation_allowed": False,
+                "formal_review_allowed": False,
+                "package_identity": context.get("identity", "none"),
+                "user_choice_required": False,
+                "beta_platform_blocked": missing,
+                "revision": state["revision"],
+            }
+        reviewer_chat = state["reviewer_chat"]
+        rollover_needed = reviewer_chat_round_budget_exhausted(state)
+        if rollover_needed and reviewer_chat.get("status") == "active":
+            revision = state["revision"]
+            authorization_id = mark_reviewer_chat_rollover_required(
+                state, "round_budget",
+            )
+            if (
+                args.operation == "waiting_read"
+                and state["automation"].get("waiting_check_active") is True
+            ):
+                state["automation"]["waiting_check_kind"] = (
+                    "rollover_continuation"
+                )
+                state["review"]["recovery_action"] = (
+                    "waiting_round_budget_rollover_continuation"
+                )
+            save_state(state_path, state, expected_revision=revision)
+        else:
+            authorization_id = str(
+                reviewer_chat.get("rollover_authorization_id", "none")
+            )
+        replacement_startup = bool(
+            args.operation == "startup"
+            and str(getattr(args, "reviewer_thread_id", "none") or "none") == "none"
+            and str(getattr(args, "new_chat_authorization_id", "") or "")
+            == authorization_id
+        )
+        if (rollover_needed or reviewer_chat.get("status") in {
+            "rollover_pending", "rollover_blocked",
+        }) and not replacement_startup:
+            blocked = reviewer_chat.get("status") == "rollover_blocked"
+            if (
+                not blocked
+                and args.operation == "waiting_read"
+                and state["automation"].get("waiting_check_kind")
+                == "rollover_continuation"
+            ):
+                return _waiting_rollover_continuation_contract(
+                    state_path,
+                    state,
+                    account_registry=str(args.registry or "none"),
+                )
+            return {
+                    "ok": True,
+                    "action": (
+                        "reviewer_chat_rollover_blocked" if blocked
+                        else "reviewer_chat_rollover_pending"
+                    ),
+                    "slot_acquired": False,
+                    "browser_skill_read_allowed": False,
+                    "browser_runtime_initialization_allowed": False,
+                    "provisioning_home_navigation_allowed": False,
+                    "old_chat_access_allowed": False,
+                    "chat_read_allowed": False,
+                    "full_history_scan_allowed": False,
+                    "rollover_authorization_id": authorization_id,
+                    "new_chat_authorization_id": authorization_id,
+                    "workflow_status": "换卷受阻" if blocked else "换卷中",
+                    "continuation_required": True,
+                    "turn_completion_allowed": False,
+                    "user_choice_required": False,
+                    "choice_output_allowed": False,
+                    "implementation_task_must_continue": True,
+                    "old_wait_retirement_allowed": False,
+                    "next_action": (
+                        "run_single_rollover_recovery" if blocked
+                        else "provision_one_replacement_reviewer_chat"
+                    ),
+            }
     gate_path = Path(args.registry).expanduser().resolve() if args.registry else default_account_browser_gate_path()
     reviewer_id_raw = str(getattr(args, "reviewer_thread_id", "none") or "none").strip()
     reviewer_id = (
@@ -2319,6 +2433,10 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     reviewer_chat.setdefault("status", "active")
     reviewer_chat.setdefault("rollover_reason", "none")
     reviewer_chat.setdefault("rollover_authorization_id", "none")
+    reviewer_chat.setdefault("rollover_recovery_id", "none")
+    reviewer_chat.setdefault("rollover_failure_code", "none")
+    reviewer_chat.setdefault("rollover_failure_count", 0)
+    reviewer_chat.setdefault("pending_replacement", "none")
     reviewer_chat.setdefault("retired", [])
     browser_binding = state.setdefault("browser_binding", {})
     browser_binding.setdefault(
@@ -2356,8 +2474,16 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     attachment.setdefault("expected_names", [])
     attachment.setdefault("observed_names", [])
     attachment.setdefault("verified_at", "none")
+    context = state.setdefault("project_context", empty_project_context())
+    for key, value in empty_project_context().items():
+        context.setdefault(key, deepcopy(value))
+    if context.get("status") == "github_commit_confirmed":
+        state["project_context"] = empty_project_context()
     capability_probes = state.setdefault("capability_probes", {})
     capability_probes.setdefault("terra_next_turn", "unverified")
+    upload_probe = capability_probes.setdefault("attachment_upload", empty_attachment_upload())
+    for key, value in empty_attachment_upload().items():
+        upload_probe.setdefault(key, deepcopy(value))
     next_operation = state.setdefault("next_operation", {})
     next_operation.setdefault("status", "none")
     next_operation.setdefault("path", "none")
@@ -2702,6 +2828,10 @@ def new_state(
             "status": "active",
             "rollover_reason": "none",
             "rollover_authorization_id": "none",
+            "rollover_recovery_id": "none",
+            "rollover_failure_code": "none",
+            "rollover_failure_count": 0,
+            "pending_replacement": "none",
             "retired": [],
         },
         "review_history": [],
@@ -2735,7 +2865,11 @@ def new_state(
             "observed_names": [],
             "verified_at": "none",
         },
-        "capability_probes": {"terra_next_turn": "unverified"},
+        "project_context": empty_project_context(),
+        "capability_probes": {
+            "terra_next_turn": "unverified",
+            "attachment_upload": empty_attachment_upload(),
+        },
         "next_operation": {
             "status": "none",
             "path": "none",
@@ -2897,18 +3031,42 @@ def validate_state(state: dict[str, Any]) -> None:
         errors.append(
             f"reviewer_chat.max_formal_rounds must be {REVIEWER_CHAT_MAX_FORMAL_ROUNDS}"
         )
-    if reviewer_chat.get("status") not in {"active", "rollover_required"}:
-        errors.append("reviewer_chat.status must be active or rollover_required")
+    if reviewer_chat.get("status") not in {"active", "rollover_pending", "rollover_blocked"}:
+        errors.append("reviewer_chat.status must be active, rollover_pending, or rollover_blocked")
     rollover_reason = reviewer_chat.get("rollover_reason")
     rollover_authorization_id = reviewer_chat.get("rollover_authorization_id")
     if reviewer_chat.get("status") == "active":
         if rollover_reason != "none" or rollover_authorization_id != "none":
             errors.append("active reviewer Chat cannot retain rollover state")
+        if reviewer_chat.get("pending_replacement", "none") != "none":
+            errors.append("active reviewer Chat cannot retain a pending replacement")
     else:
         if rollover_reason not in VALID_REVIEWER_CHAT_ROLLOVER_REASONS:
             errors.append("reviewer Chat rollover requires a valid reason")
         if not re.fullmatch(r"rollover-[0-9a-f]{16}", str(rollover_authorization_id)):
             errors.append("reviewer Chat rollover requires an authorization identity")
+    recovery_id = reviewer_chat.get("rollover_recovery_id", "none")
+    failure_count = reviewer_chat.get("rollover_failure_count", 0)
+    if not isinstance(failure_count, int) or failure_count not in {0, 1}:
+        errors.append("reviewer Chat rollover permits at most one recovery")
+    if reviewer_chat.get("status") == "rollover_blocked":
+        if not re.fullmatch(r"rollover-recovery-[0-9a-f]{16}", str(recovery_id)):
+            errors.append("blocked reviewer Chat rollover requires one recovery identity")
+        if failure_count != 1 or reviewer_chat.get("rollover_failure_code") in {None, "", "none"}:
+            errors.append("blocked reviewer Chat rollover requires one recorded failure")
+    pending_replacement = reviewer_chat.get("pending_replacement", "none")
+    if pending_replacement != "none":
+        if not isinstance(pending_replacement, dict):
+            errors.append("pending reviewer Chat replacement must be an object")
+        else:
+            if review.get("status") != "review_waiting":
+                errors.append("pending reviewer Chat replacement requires the preserved reply wait")
+            if automation.get("waiting_check_active") is not True:
+                errors.append("pending reviewer Chat replacement requires the old waiting task")
+            if pending_replacement.get("waiting_check_automation_id") != automation.get(
+                "waiting_check_automation_id"
+            ):
+                errors.append("pending reviewer Chat replacement must bind the old waiting task")
     retired_chats = reviewer_chat.get("retired")
     if not isinstance(retired_chats, list) or len(retired_chats) > MAX_RETIRED_REVIEWER_CHATS:
         errors.append("reviewer_chat.retired must be a bounded list")
@@ -3050,6 +3208,18 @@ def validate_state(state: dict[str, Any]) -> None:
             errors.append("app_attachment requires attachment.required=true")
         if attachment.get("verification") not in {"verified", "manual_confirmed", "unverified"}:
             errors.append("app_attachment requires an explicit attachment verification state")
+    context = state.get("project_context", {})
+    if context.get("status") not in VALID_PROJECT_CONTEXT_STATUSES:
+        errors.append("invalid project context status")
+    if context.get("scope") not in {"full_source", "partial", "github_commit", "repository_commit_review"}:
+        errors.append("invalid project context scope")
+    for field in ("package_paths", "package_names", "package_sha256", "included_files", "uncovered_files"):
+        if not isinstance(context.get(field), list):
+            errors.append(f"project_context.{field} must be a list")
+    if context.get("status") in {"attachment_confirmed", "github_commit_confirmed"} and not project_context_ready(state):
+        errors.append("confirmed project context must be bound to the current reviewer Chat")
+    if context.get("status") == "repository_round_ready" and not project_context_ready(state):
+        errors.append("repository review round must have a current access receipt and continuous diff")
     binding = state.get("binding", {})
     if binding.get("status") not in {"unbound", "bound"}:
         errors.append("binding.status must be unbound or bound")
@@ -3061,6 +3231,20 @@ def validate_state(state: dict[str, Any]) -> None:
             errors.append("unsupported naming template version")
     if state.get("capability_probes", {}).get("terra_next_turn") not in {"unverified", "supported", "unsupported"}:
         errors.append("invalid terra_next_turn capability probe")
+    upload_probe = state.get("capability_probes", {}).get("attachment_upload", {})
+    if upload_probe.get("status") not in {"unverified", "supported", "authorized", "blocked", "missing", "confirmed"}:
+        errors.append("invalid attachment upload capability probe status")
+    if upload_probe.get("transport") not in {"none", "direct_file_upload"}:
+        errors.append("invalid attachment upload transport")
+    if not isinstance(upload_probe.get("platform_declared"), bool):
+        errors.append("attachment upload platform declaration must be boolean")
+    if not isinstance(upload_probe.get("attempt_count"), int) or upload_probe.get("attempt_count", 0) < 0 or upload_probe.get("attempt_count", 0) > 2:
+        errors.append("attachment upload attempt count must be between zero and two")
+    if upload_probe.get("status") == "confirmed" and (
+        upload_probe.get("composer_identity") in (None, "", "none")
+        or upload_probe.get("platform_receipt_id") in (None, "", "none")
+    ):
+        errors.append("confirmed attachment upload requires composer and platform receipt identities")
     recovery = state.get("recovery", {})
     if not isinstance(recovery.get("browser_consecutive_network_errors", 0), int) or recovery.get("browser_consecutive_network_errors", 0) < 0:
         errors.append("browser consecutive network error count must be a non-negative integer")
@@ -3455,13 +3639,21 @@ def validate_state(state: dict[str, Any]) -> None:
         and (
             (waiting_check_kind == "review_reply" and status in MONITOR_STATUSES)
             or (
+                waiting_check_kind == "rollover_continuation"
+                and status in MONITOR_STATUSES
+                and state.get("reviewer_chat", {}).get("status")
+                in {"rollover_pending", "rollover_blocked"}
+            )
+            or (
                 waiting_check_kind == "submission_retry"
                 and status == "review_submit_pending"
                 and state.get("recovery", {}).get("network_state") == "rate_limited"
             )
         )
     )
-    if waiting_check_kind not in {"none", "review_reply", "submission_retry"}:
+    if waiting_check_kind not in {
+        "none", "review_reply", "submission_retry", "rollover_continuation",
+    }:
         errors.append("waiting check kind is invalid")
     if bool(waiting_check_active) != (waiting_check_kind != "none"):
         errors.append("waiting check kind must exist exactly while its check is active")
@@ -3643,6 +3835,15 @@ def _waiting_check_prompt(
             "先执行检查；未到期只改期，禁止浏览器。到期先删除本任务，只新建一个替代评审 Chat；旧 Chat 永久停用。\n"
             "Run first: before due, reschedule only and do not browse. At due, delete this task and create one replacement reviewer Chat; never reopen the retired Chat."
         )
+    if state.get("automation", {}).get("waiting_check_kind") == "rollover_continuation":
+        return (
+            "SuperLuna 正在更换评审 Chat；无需操作。\n"
+            "SuperLuna is replacing the reviewer Chat; no action needed.\n\n"
+            "内部单次换卷续接 / Internal one-time rollover continuation:\n"
+            f"{command}\n"
+            "先执行以上检查；禁止读取旧 Chat、禁止重新排成回复等待。按控制器返回的 startup 请求创建并绑定唯一替代 Chat；绑定成功后才删除本任务并 finalize。\n"
+            "Run this check first. Never read the retired Chat or rearm a reply poll. Use the controller startup request to create and bind exactly one replacement Chat; delete this task and finalize only after binding succeeds."
+        )
     return (
         "SuperLuna 正在等待评审回复。\n"
         "SuperLuna is waiting for the reviewer.\n\n"
@@ -3668,6 +3869,96 @@ def _waiting_check_account_request(path: Path, state: dict[str, Any]) -> dict[st
     if state.get("automation", {}).get("profile") == SUPERLUNA_REPO_RETEST_PROFILE:
         request["state"] = str(path)
     return request
+
+
+def _waiting_rollover_continuation_contract(
+    path: Path,
+    state: dict[str, Any],
+    *,
+    account_slot_lease_id: str = "none",
+    account_registry: str | None = None,
+    platform_lookup_result: str | None = None,
+) -> dict[str, Any]:
+    """Route a due reply occurrence into one bounded replacement-Chat handoff."""
+    authorization_id = str(
+        state["reviewer_chat"].get("rollover_authorization_id", "none")
+    )
+    startup_request: dict[str, Any] = {
+        "implementation_thread_id": state["automation"]["implementation_thread_id"],
+        "reviewer_thread_id": "none",
+        "operation": "startup",
+        "state": str(path),
+        "new_chat_authorization_id": authorization_id,
+        "new_chat_local_work_status": "completed_and_verified",
+    }
+    registry_path = str(
+        account_registry
+        or state["automation"].get("waiting_check_account_registry", "none")
+        or "none"
+    )
+    if registry_path != "none":
+        startup_request["registry"] = registry_path
+    release_required = account_slot_lease_id not in {"", "none"}
+    sequence = []
+    if release_required:
+        sequence.append("release_waiting_read_account_slot")
+    sequence.extend([
+        "acquire_startup_slot_for_one_replacement_chat",
+        "open_chatgpt_home_visibly_once",
+        "create_one_replacement_reviewer_chat",
+        "complete_reviewer_chat_rollover",
+        "confirm_reasoning_mode_on_replacement_chat",
+    ])
+    if platform_lookup_result == "not_found":
+        sequence.extend([
+            "retain_not_found_as_platform_wait_retirement_proof",
+            "finalize_reviewer_chat_rollover_with_not_found_proof",
+        ])
+    else:
+        sequence.extend([
+            "delete_current_one_shot_wait_after_replacement_binding",
+            "finalize_reviewer_chat_rollover",
+        ])
+    sequence.append("continue_same_unsent_submission_once")
+    blocked = state["reviewer_chat"].get("status") == "rollover_blocked"
+    return {
+        "ok": True,
+        "action": "reviewer_chat_rollover_continuation",
+        "status": state["review"]["status"],
+        "workflow_status": "换卷受阻" if blocked else "换卷中",
+        "waiting_check_kind": "rollover_continuation",
+        "waiting_check_action": "hold_for_rollover",
+        "ordinary_wait_rearm_allowed": False,
+        "platform_wait_update_allowed": False,
+        "platform_wait_create_allowed": False,
+        "old_wait_retirement_allowed": False,
+        "old_chat_access_allowed": False,
+        "chat_read_allowed": False,
+        "browser_skill_read_allowed": False,
+        "browser_runtime_initialization_allowed": False,
+        "full_history_scan_allowed": False,
+        "account_browser_slot_release_required": release_required,
+        "account_browser_slot_lease_id": account_slot_lease_id,
+        "rollover_authorization_id": authorization_id,
+        "rollover_account_browser_slot_request": startup_request,
+        "mandatory_next_action_sequence": sequence,
+        "platform_lookup_result": platform_lookup_result or "none",
+        "platform_wait_retirement_mode": (
+            "already_absent_lookup_proof"
+            if platform_lookup_result == "not_found"
+            else "delete_after_replacement_binding"
+        ),
+        "next_action": "provision_one_replacement_reviewer_chat",
+        "implementation_task_must_continue": True,
+        "continuation_required": True,
+        "turn_completion_allowed": False,
+        "user_choice_required": False,
+        "choice_output_allowed": False,
+        "future_action_valid": authorization_id != "none",
+        "user_status": "正在开发",
+        "user_message": "已停止读取旧 Chat，正在更换唯一评审 Chat。",
+        "user_next_choice": "无需操作。",
+    }
 
 
 def _projected_waiting_check_prompt_size(path: Path, state: dict[str, Any]) -> int:
@@ -3824,6 +4115,8 @@ def choose_action(state: dict[str, Any]) -> str:
         "result_received": "apply_result",
         "result_quarantined": "quarantined_result",
     }[status]
+    if action == "review_submit" and not project_context_ready(state):
+        return "context_refresh_required"
     confirmation = state["confirmation"]
     if action == "review_submit" and state["review"].get("payload_mode") == "app_attachment":
         if state.get("attachment", {}).get("verification") not in {"verified", "manual_confirmed"}:
@@ -3922,6 +4215,45 @@ def user_status_label(status: str) -> str:
     if status == "review_receipt_pending":
         return USER_STATUS_LABELS["review_waiting"]
     return USER_STATUS_LABELS.get(status, "需要你决定")
+
+
+def workflow_status_label(state: dict[str, Any]) -> str:
+    reviewer_status = state.get("reviewer_chat", {}).get("status", "active")
+    if reviewer_status == "rollover_pending":
+        return "换卷中"
+    if reviewer_status == "rollover_blocked":
+        return "换卷受阻"
+    if state.get("review", {}).get("status") in {
+        "review_receipt_pending", "review_waiting",
+    }:
+        return "等待回复"
+    return user_status_label(str(state.get("review", {}).get("status", "external_blocked")))
+
+
+def rollover_future_action(state: dict[str, Any]) -> tuple[bool, str]:
+    """Project the one legal continuation for a non-active reviewer Chat."""
+    reviewer_chat = state.get("reviewer_chat", {})
+    status = reviewer_chat.get("status", "active")
+    if status == "active":
+        return True, "normal_workflow"
+    automation = state.get("automation", {})
+    pending_replacement = reviewer_chat.get("pending_replacement", "none")
+    if isinstance(pending_replacement, dict):
+        valid = bool(
+            automation.get("waiting_check_active") is True
+            and automation.get("waiting_check_automation_id", "none")
+            == pending_replacement.get("waiting_check_automation_id")
+        )
+        return valid, "delete_old_wait_then_finalize_rollover"
+    if status == "rollover_blocked":
+        if state.get("capability_probes", {}).get("attachment_upload", {}).get("status") == "missing":
+            return True, "wait_for_supported_attachment_upload_capability"
+        valid = bool(
+            reviewer_chat.get("rollover_recovery_id", "none") != "none"
+            and state.get("recovery", {}).get("next_retry_not_before", "none") != "none"
+        )
+        return valid, "run_single_rollover_recovery"
+    return True, "provision_one_replacement_reviewer_chat"
 
 
 TECHNICAL_REASON_PROFILES: dict[str, tuple[str, str, str, str]] = {
@@ -4071,7 +4403,7 @@ def waiting_check_binding_pending(state: dict[str, Any]) -> bool:
         automation.get("heartbeat_mode") == "waiting_only"
         and automation.get("waiting_check_active") is True
         and automation.get("waiting_check_kind", "none") in {
-            "review_reply", "submission_retry",
+            "review_reply", "submission_retry", "rollover_continuation",
         }
         and automation.get("waiting_check_token", "none") != "none"
         and automation.get("waiting_check_automation_id", "none") == "none"
@@ -4092,6 +4424,13 @@ def _waiting_check_contract_active(state: dict[str, Any]) -> bool:
             status == "review_submit_pending"
             and state.get("recovery", {}).get("network_state") == "rate_limited"
             and automation.get("waiting_check_account_registry", "none") != "none"
+        )
+    if kind == "rollover_continuation":
+        return bool(
+            status in MONITOR_STATUSES
+            and state.get("reviewer_chat", {}).get("status") in {
+                "rollover_pending", "rollover_blocked",
+            }
         )
     return False
 
@@ -4251,6 +4590,7 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
     stale_waiting_claim = waiting_claim_stale(state)
     output = {
         "ok": True,
+        "workflow_status": workflow_status_label(state),
         "completed_step": completed_step,
         "next_step": next_step,
         "chat_read_observed": chat_read_observed,
@@ -4263,6 +4603,37 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
             reason_code=str(state.get("review", {}).get("recovery_action", "")),
         ),
     }
+    future_action_valid, future_action = rollover_future_action(state)
+    output.update({
+        "future_action_valid": future_action_valid,
+        "future_action": future_action,
+    })
+    reviewer_status = state.get("reviewer_chat", {}).get("status", "active")
+    if reviewer_status in {"rollover_pending", "rollover_blocked"}:
+        blocked = reviewer_status == "rollover_blocked"
+        output.update({
+            "user_status": "正在开发",
+            "user_message": (
+                "替代评审 Chat 创建受阻，已保留唯一技术恢复。"
+                if blocked else "已停止读取旧 Chat，正在更换唯一评审 Chat。"
+            ),
+            "user_next_choice": "无需操作。",
+            "completed_step": "旧评审 Chat 已停止访问。",
+            "next_step": (
+                "SuperLuna 执行唯一技术恢复。"
+                if blocked else "SuperLuna 创建并绑定唯一替代评审 Chat。"
+            ),
+            "user_choice_required": False,
+            "continuation_required": True,
+            "turn_completion_allowed": False,
+        })
+    if not future_action_valid:
+        output.update({
+            "ok": False,
+            "reason_code": "incomplete_idle_without_future_action",
+            "user_choice_required": False,
+            "turn_completion_allowed": False,
+        })
     if waiting_check_binding_pending(state):
         output.update({
             "user_status": "正在开发",
@@ -5593,6 +5964,26 @@ def waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     """
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
+    if (
+        state["reviewer_chat"].get("status") in {
+            "rollover_pending", "rollover_blocked",
+        }
+        and state["automation"].get("waiting_check_kind") in {
+            "review_reply", "rollover_continuation",
+        }
+        and state["automation"].get("waiting_check_active") is True
+        and state["automation"].get("waiting_check_token") == args.token
+        and state["automation"].get("waiting_check_automation_id")
+        == args.automation_id
+    ):
+        if state["automation"].get("waiting_check_kind") == "review_reply":
+            revision = state["revision"]
+            state["automation"]["waiting_check_kind"] = "rollover_continuation"
+            state["review"]["recovery_action"] = (
+                "waiting_round_budget_rollover_continuation"
+            )
+            save_state(path, state, expected_revision=revision)
+        return _waiting_rollover_continuation_contract(path, state)
     if state["automation"].get("waiting_check_kind") == "submission_retry":
         return _submission_retry_waiting_check_command(path, state, args)
     state, expired_claim_recovered = _recover_expired_waiting_claim(
@@ -5748,14 +6139,26 @@ def authorize_waiting_chat_read_command(args: argparse.Namespace) -> dict[str, A
         return {"ok": True, "action": "waiting_check_expired", "chat_read_allowed": False}
     browser_transport = state["review"].get("transport") == "in_app_browser"
     if browser_transport and not reviewer_chat_browser_access_allowed(state):
-        return {
-            "ok": True,
-            "action": "reviewer_chat_rollover_required",
-            "chat_read_allowed": False,
-            "browser_skill_read_allowed": False,
-            "browser_runtime_initialization_allowed": False,
-            "reason": state["reviewer_chat"].get("rollover_reason", "round_budget"),
-        }
+        revision = state["revision"]
+        reason = str(
+            state["reviewer_chat"].get("rollover_reason", "round_budget")
+        )
+        if reason == "none":
+            reason = "round_budget"
+        mark_reviewer_chat_rollover_required(state, reason)
+        state["automation"]["waiting_check_kind"] = "rollover_continuation"
+        state["review"]["recovery_action"] = (
+            "waiting_round_budget_rollover_continuation"
+        )
+        save_state(state_path, state, expected_revision=revision)
+        return _waiting_rollover_continuation_contract(
+            state_path,
+            state,
+            account_slot_lease_id=str(
+                getattr(args, "account_slot_lease_id", "none") or "none"
+            ),
+            account_registry=getattr(args, "account_browser_registry", None),
+        )
     if browser_transport:
         recovery_armed = bool(
             automation.get("waiting_check_recovery_armed_lease_id") == args.lease_id
@@ -5918,15 +6321,19 @@ def mark_reviewer_chat_rollover_required(
     if reason not in VALID_REVIEWER_CHAT_ROLLOVER_REASONS:
         raise LCRLError("invalid reviewer Chat rollover reason")
     reviewer_chat = state["reviewer_chat"]
-    if reviewer_chat.get("status") == "rollover_required":
+    if reviewer_chat.get("status") in {"rollover_pending", "rollover_blocked"}:
         if reviewer_chat.get("rollover_reason") != reason:
             raise LCRLError("a different reviewer Chat rollover is already pending")
         return str(reviewer_chat["rollover_authorization_id"])
     authorization_id = "rollover-" + secrets.token_hex(8)
     reviewer_chat.update({
-        "status": "rollover_required",
+        "status": "rollover_pending",
         "rollover_reason": reason,
         "rollover_authorization_id": authorization_id,
+        "rollover_recovery_id": "none",
+        "rollover_failure_code": "none",
+        "rollover_failure_count": 0,
+        "pending_replacement": "none",
     })
     return authorization_id
 
@@ -5975,6 +6382,61 @@ def require_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[str
     }
 
 
+def record_reviewer_chat_rollover_failure_command(
+    args: argparse.Namespace,
+) -> dict[str, Any]:
+    """Persist one idempotent replacement-Chat recovery without faking a reply wait."""
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    reviewer_chat = state["reviewer_chat"]
+    if reviewer_chat.get("status") not in {"rollover_pending", "rollover_blocked"}:
+        raise LCRLError("reviewer Chat rollover failure requires a pending rollover")
+    if args.authorization_id != reviewer_chat.get("rollover_authorization_id"):
+        raise LCRLError("reviewer Chat rollover failure authorization does not match")
+    failure_code = title_component(args.failure_code, "failure_code", 80)
+    if reviewer_chat.get("status") == "rollover_blocked":
+        if failure_code != reviewer_chat.get("rollover_failure_code"):
+            raise LCRLError("the single reviewer Chat rollover recovery is already bound")
+        duplicate = True
+    else:
+        revision = state["revision"]
+        reviewer_chat.update({
+            "status": "rollover_blocked",
+            "rollover_recovery_id": "rollover-recovery-" + secrets.token_hex(8),
+            "rollover_failure_code": failure_code,
+            "rollover_failure_count": 1,
+        })
+        state["review"]["recovery_action"] = "reviewer_chat_rollover_blocked"
+        state["recovery"]["next_retry_not_before"] = (
+            (_account_gate_now(getattr(args, "at", None)) + timedelta(
+                seconds=WAITING_CHECK_DELAY_SECONDS,
+            )).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        save_state(path, state, expected_revision=revision)
+        duplicate = False
+    return {
+        "ok": True,
+        "action": "reviewer_chat_rollover_blocked",
+        "workflow_status": "换卷受阻",
+        "old_chat_access_allowed": False,
+        "chat_read_allowed": False,
+        "browser_skill_read_allowed": False,
+        "browser_runtime_initialization_allowed": False,
+        "review_waiting_allowed": False,
+        "single_recovery_available": True,
+        "recovery_id": reviewer_chat["rollover_recovery_id"],
+        "retry_not_before": state["recovery"]["next_retry_not_before"],
+        "implementation_task_must_continue": True,
+        "continuation_required": True,
+        "turn_completion_allowed": False,
+        "next_action": "run_single_rollover_recovery",
+        "future_action_valid": True,
+        "user_choice_required": False,
+        "duplicate": duplicate,
+        "revision": state["revision"],
+    }
+
+
 def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[str, Any]:
     """Replace one retired Chat with exactly one newly verified visible Chat."""
     path = Path(args.state).expanduser().resolve()
@@ -5983,14 +6445,22 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
     reviewer_chat = state["reviewer_chat"]
     review = state["review"]
     confirmation = state["confirmation"]
-    if reviewer_chat.get("status") != "rollover_required":
+    if reviewer_chat.get("status") not in {"rollover_pending", "rollover_blocked"}:
         raise LCRLError("reviewer Chat rollover is not pending")
     if args.authorization_id != reviewer_chat.get("rollover_authorization_id"):
         raise LCRLError("reviewer Chat rollover authorization does not match")
-    if review.get("status") not in {"local_work", "review_submit_pending"}:
+    waiting_rollover = bool(
+        review.get("status") == "review_waiting"
+        and state["automation"].get("waiting_check_active") is True
+        and state["automation"].get("waiting_check_kind") in {
+            "review_reply", "rollover_continuation",
+        }
+        and state["automation"].get("waiting_check_automation_id", "none") != "none"
+    )
+    if review.get("status") not in {"local_work", "review_submit_pending"} and not waiting_rollover:
         raise LCRLError("reviewer Chat rollover requires a local or unsent review boundary")
     empty = (None, "", "none")
-    if any(review.get(field) not in empty for field in (
+    if not waiting_rollover and any(review.get(field) not in empty for field in (
         "request_turn_id", "request_message_id", "request_persisted_at",
         "response_turn_id", "response_message_id",
     )):
@@ -6008,6 +6478,49 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
         raise LCRLError("replacement reviewer Chat URL must match its canonical identity")
     browser_id = title_component(args.browser_id, "browser_id", 240)
     provider_tab_id = title_component(args.provider_tab_id, "provider_tab_id", 240)
+    if waiting_rollover:
+        pending_replacement = reviewer_chat.get("pending_replacement", "none")
+        candidate = {
+            "conversation_id": new_reviewer_id,
+            "conversation_url": expected_url,
+            "browser_id": browser_id,
+            "provider_tab_id": provider_tab_id,
+            "observed_title": str(
+                getattr(args, "observed_title", "none") or "none"
+            )[:240],
+            "bound_at": getattr(args, "at", None) or utc_now(),
+            "waiting_check_automation_id": state["automation"][
+                "waiting_check_automation_id"
+            ],
+        }
+        if pending_replacement not in (None, "none"):
+            stable_candidate = dict(candidate)
+            stable_candidate["bound_at"] = pending_replacement.get("bound_at")
+            if pending_replacement != stable_candidate:
+                raise LCRLError("the unique replacement reviewer Chat is already bound")
+            candidate = pending_replacement
+            duplicate = True
+        else:
+            reviewer_chat["pending_replacement"] = candidate
+            review["recovery_action"] = "replacement_bound_waiting_for_old_wait_deletion"
+            save_state(path, state, expected_revision=revision)
+            duplicate = False
+        return {
+            "ok": True,
+            "action": "reviewer_chat_rollover_bound",
+            "workflow_status": "换卷中",
+            "reviewer_thread_id": new_reviewer_id,
+            "waiting_check_automation_id": candidate["waiting_check_automation_id"],
+            "old_wait_retirement_allowed": True,
+            "mandatory_next_tool": "codex_app__automation_update",
+            "mandatory_next_tool_mode": "delete",
+            "next_action": "delete_old_wait_then_finalize_rollover",
+            "continuation_required": True,
+            "turn_completion_allowed": False,
+            "user_choice_required": False,
+            "duplicate": duplicate,
+            "revision": state["revision"],
+        }
     retired_entry = {
         "reviewer_thread_id": old_reviewer_id,
         "reason": reviewer_chat["rollover_reason"],
@@ -6021,6 +6534,10 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
         "status": "active",
         "rollover_reason": "none",
         "rollover_authorization_id": "none",
+        "rollover_recovery_id": "none",
+        "rollover_failure_code": "none",
+        "rollover_failure_count": 0,
+        "pending_replacement": "none",
     })
     confirmation.update({
         "reviewer_thread_id": new_reviewer_id,
@@ -6047,6 +6564,7 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
         "observed_title": str(getattr(args, "observed_title", "none") or "none")[:240],
         "bound_at": getattr(args, "at", None) or utc_now(),
     }
+    require_project_context_refresh_for_reviewer(state)
     runtime = state["runtime"]
     for key, value in {
         "browser_submission_reopen_browser_id": "none",
@@ -6067,9 +6585,103 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
         "reviewer_thread_id": new_reviewer_id,
         "reviewer_reasoning_reconfirmation_required": True,
         "old_chat_access_allowed": False,
-        "next_action": "confirm_extreme_then_continue_unsent_review",
+        "next_action": "attach_complete_project_context_and_rollover_handoff",
         "revision": state["revision"],
         **visible_browser_surface_contract(expected_url),
+    }
+
+
+def finalize_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Commit a waiting rollover only after the old platform wait was deleted."""
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    reviewer_chat = state["reviewer_chat"]
+    review = state["review"]
+    automation = state["automation"]
+    candidate = reviewer_chat.get("pending_replacement", "none")
+    deleted_automation_id = str(args.deleted_automation_id or "").strip()
+    if reviewer_chat.get("status") not in {"rollover_pending", "rollover_blocked"}:
+        raise LCRLError("reviewer Chat rollover is not awaiting finalization")
+    if not isinstance(candidate, dict):
+        raise LCRLError("replacement reviewer Chat must be bound before wait deletion")
+    if (
+        automation.get("waiting_check_active") is not True
+        or automation.get("waiting_check_automation_id") != deleted_automation_id
+        or candidate.get("waiting_check_automation_id") != deleted_automation_id
+    ):
+        raise LCRLError("deleted waiting task does not match the rollover continuation")
+
+    stage = review.get("current_stage", "none")
+    fingerprint = review.get("submission_fingerprint", "none")
+    old_reviewer_id = str(state["confirmation"]["reviewer_thread_id"])
+    retired_entry = {
+        "reviewer_thread_id": old_reviewer_id,
+        "reason": reviewer_chat["rollover_reason"],
+        "formal_rounds": current_reviewer_chat_formal_rounds(state),
+        "retired_at": utc_now(),
+    }
+    archive_review_cycle(state, "waiting_round_budget_rollover")
+    deactivate_waiting_check(state)
+    reviewer_chat["retired"].append(retired_entry)
+    reviewer_chat["retired"] = reviewer_chat["retired"][-MAX_RETIRED_REVIEWER_CHATS:]
+    reviewer_chat.update({
+        "generation": int(reviewer_chat["generation"]) + 1,
+        "status": "active",
+        "rollover_reason": "none",
+        "rollover_authorization_id": "none",
+        "rollover_recovery_id": "none",
+        "rollover_failure_code": "none",
+        "rollover_failure_count": 0,
+        "pending_replacement": "none",
+    })
+    new_reviewer_id = candidate["conversation_id"]
+    state["confirmation"].update({
+        "reviewer_thread_id": new_reviewer_id,
+        "reviewer_context_mode": "bounded_rollover",
+        "confirmed_at": candidate["bound_at"],
+        "reviewer_reasoning_mode": "unconfirmed",
+        "reviewer_reasoning_confirmed": False,
+        "reviewer_reasoning_confirmed_at": "none",
+        "reviewer_reasoning_control_source": "none",
+        "reviewer_reasoning_observed_label": "none",
+        "reviewer_reasoning_observed_thread_id": "none",
+        "reviewer_reasoning_native_app_instance_id": "none",
+    })
+    review.update({
+        "status": "review_submit_pending",
+        "cycle_id": "cycle-" + secrets.token_hex(8),
+        "current_stage": stage,
+        "submission_fingerprint": fingerprint,
+        "recovery_action": "waiting_rollover_finalized_for_single_resubmission",
+        "last_progress_at": utc_now(),
+    })
+    review["run_binding"] = new_review_run_binding(
+        automation["implementation_thread_id"], new_reviewer_id,
+    )
+    state["browser_binding"] = {
+        "status": "bound",
+        "browser_id": candidate["browser_id"],
+        "provider_tab_id": candidate["provider_tab_id"],
+        "provisioned_chat": True,
+        "conversation_id": new_reviewer_id,
+        "conversation_url": candidate["conversation_url"],
+        "observed_title": candidate["observed_title"],
+        "bound_at": candidate["bound_at"],
+    }
+    require_project_context_refresh_for_reviewer(state)
+    save_state(path, state, expected_revision=revision)
+    return {
+        "ok": True,
+        "action": "reviewer_chat_rollover_completed",
+        "status": "review_submit_pending",
+        "retired_waiting_check_automation_id": deleted_automation_id,
+        "old_chat_access_allowed": False,
+        "next_action": "attach_complete_project_context_and_rollover_handoff",
+        "continuation_required": True,
+        "turn_completion_allowed": False,
+        "user_choice_required": False,
+        "revision": state["revision"],
     }
 
 
@@ -6500,6 +7112,13 @@ def authorize_browser_submission_send_command(args: argparse.Namespace) -> dict[
     runtime = state["runtime"]
     binding = state["browser_binding"]
     confirmation = state["confirmation"]
+    if not project_context_ready(state):
+        return {
+            "ok": True, "action": "context_refresh_required", "send_allowed": False,
+            "browser_skill_read_allowed": False,
+            "browser_runtime_initialization_allowed": False,
+            "formal_review_allowed": False,
+        }
     lease_id = str(getattr(args, "lease_id", "") or "").strip()
     browser_id = str(getattr(args, "browser_id", "") or "").strip()
     fingerprint = str(getattr(args, "fingerprint", "") or "").strip()
@@ -7182,8 +7801,8 @@ def browser_network_observation_command(args: argparse.Namespace) -> dict[str, A
         error = str(args.error or "browser page rate limited")
         count = int(recovery.get("browser_consecutive_rate_limits", 0)) + 1
         retry_after_seconds = min(
-            BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS * (2 ** min(count - 1, 2)),
-            BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS,
+            ACCOUNT_BROWSER_RATE_LIMIT_INITIAL_BACKOFF_SECONDS * (2 ** min(count - 1, 1)),
+            ACCOUNT_BROWSER_RATE_LIMIT_MAX_BACKOFF_SECONDS,
         )
         recovery["network_state"] = "rate_limited"
         recovery["browser_consecutive_network_errors"] = 0
@@ -7195,7 +7814,7 @@ def browser_network_observation_command(args: argparse.Namespace) -> dict[str, A
         recovery["next_retry_not_before"] = (
             event_time + timedelta(seconds=retry_after_seconds)
         ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        action = "schedule_browser_rate_limit_probe"
+        action = "browser_rate_limit_cooldown_no_probe"
     else:
         recovery["network_state"] = "healthy"
         recovery["browser_consecutive_network_errors"] = 0
@@ -7214,6 +7833,8 @@ def browser_network_observation_command(args: argparse.Namespace) -> dict[str, A
         "reload_same_tab_once": args.outcome == "network_error",
         "browser_consecutive_network_errors": recovery["browser_consecutive_network_errors"],
         "browser_consecutive_rate_limits": recovery["browser_consecutive_rate_limits"],
+        "proactive_probe_allowed": False,
+        "old_chat_access_allowed": args.outcome != "rate_limited",
         "waiting_check_automation_id": args.automation_id,
     })
 
@@ -7273,6 +7894,109 @@ def _project_context_text(relative: Path, content: bytes) -> str:
     return text
 
 
+def empty_project_context() -> dict[str, Any]:
+    """A legacy or fresh state never invents reviewer-visible source coverage."""
+    return {
+        "schema_version": 1,
+        "generation": 1,
+        "status": "context_refresh_required",
+        "scope": "full_source",
+        "identity": "none",
+        "manifest_path": "none",
+        "package_paths": [],
+        "package_names": [],
+        "package_sha256": [],
+        "file_count": 0,
+        "total_bytes": 0,
+        "included_files": [],
+        "uncovered_files": [],
+        "reviewer_thread_id": "none",
+        "receipt_confirmed_at": "none",
+        "repository_url": "none",
+        "repository_identity": "none",
+        "commit_sha": "none",
+        "branch": "none",
+        "tree_manifest_hash": "none",
+        "canaries": [],
+        "repository_access_receipt": "none",
+        "round_review": "none",
+        "github_access_verified": False,
+        "runtime_evidence": {"status": "not_included", "sources": [], "gaps": ["runtime behavior is not proved by source files"]},
+    }
+
+
+def empty_attachment_upload() -> dict[str, Any]:
+    return {
+        "status": "unverified",
+        "transport": "none",
+        "platform_declared": False,
+        "package_identity": "none",
+        "attempt_id": "none",
+        "attempt_count": 0,
+        "recovery_id": "none",
+        "recovery_used": False,
+        "failure_reason": "none",
+        "composer_identity": "none",
+        "platform_receipt_id": "none",
+        "confirmed_at": "none",
+    }
+
+
+def project_context_ready(state: dict[str, Any]) -> bool:
+    context = state.get("project_context", {})
+    reviewer_id = state.get("confirmation", {}).get("reviewer_thread_id")
+    generation_matches = context.get("generation") == state.get("reviewer_chat", {}).get("generation")
+    if context.get("status") == "repository_round_ready":
+        receipt = context.get("repository_access_receipt")
+        round_review = context.get("round_review")
+        return bool(
+            context.get("scope") == "repository_commit_review"
+            and generation_matches
+            and isinstance(receipt, dict)
+            and receipt.get("reviewer_thread_id") == reviewer_id
+            and receipt.get("repository_identity") == context.get("repository_identity")
+            and receipt.get("tree_manifest_hash") == context.get("tree_manifest_hash")
+            and isinstance(round_review, dict)
+            and round_review.get("repository_identity") == context.get("repository_identity")
+            and round_review.get("remote_commit_reachable") is True
+            and round_review.get("diff_chain_verified") is True
+        )
+    if context.get("status") == "github_commit_confirmed":
+        return False
+    return bool(
+        context.get("scope") == "full_source"
+        and context.get("status") == "attachment_confirmed"
+        and context.get("identity") not in (None, "", "none")
+        and generation_matches
+        and context.get("package_names")
+    )
+
+
+def require_project_context_refresh_for_reviewer(state: dict[str, Any]) -> None:
+    """Keep the same source identity/package, but never transfer a Chat receipt."""
+    context = state.setdefault("project_context", empty_project_context())
+    context["generation"] = state["reviewer_chat"]["generation"]
+    if context.get("scope") == "repository_commit_review":
+        context["status"] = "repository_access_receipt_required"
+        context["repository_access_receipt"] = "none"
+        context["round_review"] = "none"
+    else:
+        context["status"] = (
+            "package_prepared" if context.get("identity") not in (None, "", "none")
+            and context.get("package_names") else "context_refresh_required"
+        )
+    context["reviewer_thread_id"] = "none"
+    context["receipt_confirmed_at"] = "none"
+    state["attachment"] = {
+        "required": True, "verification": "unverified",
+        "expected_names": list(context.get("package_names", [])),
+        "observed_names": [], "verified_at": "none",
+    }
+    upload_probe = empty_attachment_upload()
+    upload_probe["package_identity"] = context.get("identity", "none")
+    state.setdefault("capability_probes", {})["attachment_upload"] = upload_probe
+
+
 def render_project_context_command(args: argparse.Namespace) -> str:
     """Render bounded real project files into one reviewer bootstrap packet."""
     project_root = Path(args.project_path).expanduser().resolve(strict=True)
@@ -7324,6 +8048,350 @@ def render_project_context_command(args: argparse.Namespace) -> str:
         ])
     lines.extend(["", "[/SUPERLUNA_PROJECT_CONTEXT]"])
     return "\n".join(lines) + "\n"
+
+
+def _git_project_inventory(project_root: Path) -> tuple[list[str], str, bool]:
+    try:
+        tracked = subprocess.run(
+            ["git", "-C", str(project_root), "ls-files", "-z"],
+            check=True, capture_output=True,
+        ).stdout.decode("utf-8").split("\0")
+        commit = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        dirty = bool(subprocess.run(
+            ["git", "-C", str(project_root), "status", "--porcelain"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip())
+    except (subprocess.CalledProcessError, UnicodeDecodeError) as exc:
+        raise LCRLError("full project context requires a readable Git worktree") from exc
+    return sorted(item for item in tracked if item), commit, dirty
+
+
+def _git_output(project_root: Path, *arguments: str) -> str:
+    try:
+        return subprocess.run(
+            ["git", "-C", str(project_root), *arguments], check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        raise LCRLError(f"Git evidence unavailable: {' '.join(arguments)}") from exc
+
+
+def _canonical_repository_url(value: str) -> str:
+    raw = str(value or "").strip()
+    parsed = urlsplit(raw)
+    if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
+        raise LCRLError("repository review requires one canonical HTTPS remote URL")
+    path = parsed.path.rstrip("/")
+    if re.search(r"/(?:tree|commit|commits|blob|branches)/(?:[^/]+)", path, re.IGNORECASE):
+        raise LCRLError("floating branch or commit-page URLs cannot identify a repository")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if path.count("/") < 2:
+        raise LCRLError("repository URL must identify an owner and repository")
+    return f"https://{parsed.netloc.casefold()}{path}"
+
+
+def _repository_review_dirty(project_root: Path, state_path: Path) -> bool:
+    ignored: set[str] = set()
+    try:
+        ignored.add(state_path.relative_to(project_root).as_posix())
+        ignored.add(state_path.with_name(f".{state_path.name}.lock").relative_to(project_root).as_posix())
+    except ValueError:
+        pass
+    entries = _git_output(project_root, "status", "--porcelain").splitlines()
+    for entry in entries:
+        candidate = entry[3:].split(" -> ")[-1] if len(entry) > 3 else ""
+        if candidate not in ignored:
+            return True
+    return False
+
+
+def _prepare_full_source_fallback(args: argparse.Namespace, reason: str) -> dict[str, Any]:
+    result = prepare_project_context_command(argparse.Namespace(
+        state=args.state, project_path=args.project_path,
+        output_dir=args.fallback_output_dir, scope="full_source", file=None,
+        authoritative_untracked=None,
+        max_volume_bytes=args.max_volume_bytes,
+    ))
+    result.update({
+        "action": "full_source_attachment_required",
+        "fallback_reason": reason,
+        "repository_commit_review_allowed": False,
+        "partial_review_allowed": False,
+    })
+    return result
+
+
+def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Prefer exact repository review, falling back to a complete source package."""
+    state_path = Path(args.state).expanduser().resolve()
+    state = load_state(state_path)
+    revision = state["revision"]
+    project_root = Path(args.project_path).expanduser().resolve(strict=True)
+    if project_root != Path(state["automation"]["project_path"]).resolve():
+        raise LCRLError("repository review root must match the workflow project")
+    canonical_url = _canonical_repository_url(args.remote_url)
+    try:
+        configured_remote = _canonical_repository_url(
+            _git_output(project_root, "remote", "get-url", "origin")
+        )
+    except LCRLError:
+        return _prepare_full_source_fallback(args, "remote_missing")
+    if configured_remote != canonical_url:
+        return _prepare_full_source_fallback(args, "remote_identity_mismatch")
+    tracked, head_commit, _dirty = _git_project_inventory(project_root)
+    dirty = _repository_review_dirty(project_root, state_path)
+    if dirty:
+        return _prepare_full_source_fallback(args, "dirty_worktree")
+    if getattr(args, "remote_commit_reachable", False) is not True:
+        return _prepare_full_source_fallback(args, "commit_not_verified_reachable")
+    if getattr(args, "private_access_verified", False) is not True:
+        return _prepare_full_source_fallback(args, "private_repository_access_unverified")
+    tree_lines = _git_output(project_root, "ls-tree", "-r", "--full-tree", head_commit).splitlines()
+    tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
+    root_paths = [path for path in tracked if "/" not in path]
+    nested_paths = [path for path in tracked if "/" in path]
+    if not root_paths or not nested_paths:
+        return _prepare_full_source_fallback(args, "tree_canaries_unavailable")
+    preferred_root = "README.md" if "README.md" in root_paths else root_paths[0]
+    preferred_nested = "src/nested.py" if "src/nested.py" in nested_paths else nested_paths[0]
+    canaries = [
+        {"path": preferred_root, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{preferred_root}")},
+        {"path": preferred_nested, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{preferred_nested}")},
+    ]
+    repository_identity = hashlib.sha256(canonical_url.encode()).hexdigest()
+    context = empty_project_context()
+    context.update({
+        "generation": state["reviewer_chat"]["generation"],
+        "status": "repository_access_receipt_required",
+        "scope": "repository_commit_review",
+        "identity": hashlib.sha256(f"{repository_identity}\0{head_commit}\0{tree_manifest_hash}".encode()).hexdigest(),
+        "repository_url": canonical_url,
+        "repository_identity": repository_identity,
+        "commit_sha": head_commit,
+        "branch": str(args.branch or "none"),
+        "tree_manifest_hash": tree_manifest_hash,
+        "canaries": canaries,
+    })
+    state["project_context"] = context
+    save_state(state_path, state, expected_revision=revision)
+    return {
+        "ok": True, "action": "repository_access_receipt_required",
+        "repository_commit_review_allowed": False,
+        "repository_url": canonical_url, "repository_identity": repository_identity,
+        "head_commit": head_commit, "branch": context["branch"],
+        "tree_manifest_hash": tree_manifest_hash, "canaries": canaries,
+        "exact_commit_url_required": True, "floating_ref_allowed": False,
+        "full_history_scan_required": True, "revision": state["revision"],
+    }
+
+
+def confirm_repository_access_receipt_command(args: argparse.Namespace) -> dict[str, Any]:
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    context = state["project_context"]
+    if context.get("status") != "repository_access_receipt_required":
+        raise LCRLError("repository access receipt is not currently required")
+    if not (args.exact_commit_opened is True and args.full_tree_visible is True and int(args.visible_match_count) == 1):
+        raise LCRLError("URL text or a repository page does not prove exact commit and full tree access")
+    if args.repository_identity != context.get("repository_identity"):
+        raise LCRLError("repository access receipt identity mismatch")
+    if args.commit_sha != context.get("commit_sha") or args.tree_manifest_hash != context.get("tree_manifest_hash"):
+        raise LCRLError("repository access receipt must match the exact commit and tree manifest")
+    expected = {item["path"]: item["blob_sha"] for item in context.get("canaries", [])}
+    observed = {
+        args.root_canary_path: args.root_canary_blob_sha,
+        args.nested_canary_path: args.nested_canary_blob_sha,
+    }
+    if "/" in args.root_canary_path or "/" not in args.nested_canary_path or observed != expected:
+        raise LCRLError("repository access receipt requires exact root and nested blob canaries")
+    receipt = {
+        "repository_identity": context["repository_identity"],
+        "commit_sha": context["commit_sha"],
+        "tree_manifest_hash": context["tree_manifest_hash"],
+        "root_canary": {"path": args.root_canary_path, "blob_sha": args.root_canary_blob_sha},
+        "nested_canary": {"path": args.nested_canary_path, "blob_sha": args.nested_canary_blob_sha},
+        "reviewer_thread_id": state["confirmation"]["reviewer_thread_id"],
+        "confirmed_at": args.at or utc_now(),
+    }
+    context["repository_access_receipt"] = receipt
+    context["status"] = "repository_access_confirmed"
+    context["reviewer_thread_id"] = receipt["reviewer_thread_id"]
+    context["receipt_confirmed_at"] = receipt["confirmed_at"]
+    save_state(path, state, expected_revision=revision)
+    return {"ok": True, "action": "repository_access_confirmed", "formal_review_allowed": False,
+            "complete_repository_access_verified": True, "full_history_scan_completed": True,
+            "revision": state["revision"]}
+
+
+def prepare_repository_review_round_command(args: argparse.Namespace) -> dict[str, Any]:
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    context = state["project_context"]
+    receipt = context.get("repository_access_receipt")
+    if context.get("scope") != "repository_commit_review" or not isinstance(receipt, dict):
+        raise LCRLError("incremental repository review requires a current Chat access receipt")
+    project_root = Path(state["automation"]["project_path"]).resolve()
+    base_commit = str(args.base_commit or "").strip().lower()
+    head_commit = str(args.head_commit or "").strip().lower()
+    for label, commit in (("base", base_commit), ("head", head_commit)):
+        if not re.fullmatch(r"[0-9a-f]{40,64}", commit):
+            raise LCRLError(f"repository review requires exact {label} commit SHA")
+        _git_output(project_root, "cat-file", "-e", f"{commit}^{{commit}}")
+    try:
+        subprocess.run(["git", "-C", str(project_root), "merge-base", "--is-ancestor", base_commit, head_commit],
+                       check=True, capture_output=True)
+    except subprocess.CalledProcessError as exc:
+        raise LCRLError("repository base to head diff chain is not continuous") from exc
+    if getattr(args, "remote_commit_reachable", True) is not True:
+        raise LCRLError("round head commit is not verified reachable by the current reviewer")
+    changed_paths = [item for item in _git_output(project_root, "diff", "--name-only", base_commit, head_commit).splitlines() if item]
+    diff_text = _git_output(project_root, "diff", "--binary", base_commit, head_commit)
+    changed_manifest = []
+    for item in changed_paths:
+        try:
+            blob_sha = _git_output(project_root, "rev-parse", f"{head_commit}:{item}")
+        except LCRLError:
+            blob_sha = "deleted"
+        changed_manifest.append({"path": item, "blob_sha": blob_sha})
+    round_review = {
+        "repository_identity": context["repository_identity"],
+        "base_commit": base_commit, "head_commit": head_commit,
+        "diff_sha256": hashlib.sha256(diff_text.encode()).hexdigest(),
+        "changed_paths": changed_manifest,
+        "workspace_dirty": _repository_review_dirty(project_root, path),
+        "runtime_evidence_index": str(args.runtime_evidence_index or "none"),
+        "remote_commit_reachable": True,
+        "diff_chain_verified": True,
+    }
+    if round_review["workspace_dirty"]:
+        raise LCRLError("dirty working tree cannot be represented as an exact repository review round")
+    context["round_review"] = round_review
+    context["status"] = "repository_round_ready"
+    save_state(path, state, expected_revision=revision)
+    return {"ok": True, "action": "repository_round_ready", "formal_review_allowed": True,
+            "complete_repository_access_verified": True, "round_diff_covered": True,
+            "full_history_scan_required": False, "base_commit": base_commit,
+            "head_commit": head_commit, "changed_path_manifest": changed_manifest,
+            "diff_sha256": round_review["diff_sha256"], "workspace_dirty": False,
+            "runtime_evidence_index": round_review["runtime_evidence_index"],
+            "runtime_behavior_proved": False, "revision": state["revision"]}
+
+
+def prepare_project_context_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Build deterministic, sanitized source volumes and persist their identity."""
+    state_path = Path(args.state).expanduser().resolve()
+    state = load_state(state_path)
+    revision = state["revision"]
+    project_root = Path(args.project_path).expanduser().resolve(strict=True)
+    if project_root != Path(state["automation"]["project_path"]).resolve():
+        raise LCRLError("project context root must match the workflow project")
+    scope = args.scope
+    tracked, commit, dirty = _git_project_inventory(project_root)
+    declared = sorted(set(getattr(args, "authoritative_untracked", None) or []))
+    selected = tracked + [item for item in declared if item not in tracked]
+    if scope == "partial":
+        selected = sorted(set(getattr(args, "file", None) or []))
+        if not selected:
+            raise LCRLError("partial project context requires selected files")
+    entries: list[dict[str, Any]] = []
+    payloads: list[tuple[str, bytes]] = []
+    excluded: list[dict[str, str]] = []
+    selected_set = set(selected)
+    for value in selected:
+        try:
+            relative, resolved = _project_context_relative_file(project_root, value)
+            content = resolved.read_bytes()
+            if b"\0" not in content:
+                try:
+                    text = content.decode("utf-8")
+                except UnicodeDecodeError:
+                    text = ""
+                secret_patterns = (
+                    r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----",
+                    r"\bsk-[A-Za-z0-9_-]{20,}\b", r"\bAKIA[0-9A-Z]{16}\b",
+                )
+                if any(re.search(pattern, text) for pattern in secret_patterns):
+                    raise LCRLError(f"project context file contains a credential-like value: {relative}")
+        except LCRLError as exc:
+            if value in declared:
+                raise
+            excluded.append({"path": value, "reason": str(exc)})
+            continue
+        name = relative.as_posix()
+        entries.append({"path": name, "size": len(content), "sha256": hashlib.sha256(content).hexdigest()})
+        payloads.append((name, content))
+    entries.sort(key=lambda item: item["path"])
+    payloads.sort(key=lambda item: item[0])
+    uncovered = sorted(set(tracked) - {item["path"] for item in entries})
+    manifest_core = {
+        "schema_version": 1, "scope": scope, "commit_sha": commit,
+        "dirty": dirty, "files": entries, "file_count": len(entries),
+        "total_bytes": sum(item["size"] for item in entries),
+        "excluded": excluded, "uncovered_files": uncovered,
+        "runtime_evidence": {"status": "not_included", "sources": [], "gaps": ["source archive does not prove runtime behavior"]},
+    }
+    identity = hashlib.sha256(json.dumps(manifest_core, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    manifest = {**manifest_core, "context_identity": identity}
+    output_dir = Path(args.output_dir).expanduser().resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    max_bytes = int(args.max_volume_bytes)
+    if max_bytes < 1:
+        raise LCRLError("max volume bytes must be positive")
+    volumes: list[list[tuple[str, bytes]]] = [[]]
+    volume_bytes = 0
+    for item in payloads:
+        if volumes[-1] and volume_bytes + len(item[1]) > max_bytes:
+            volumes.append([])
+            volume_bytes = 0
+        volumes[-1].append(item)
+        volume_bytes += len(item[1])
+    if not payloads:
+        raise LCRLError("project context contains no safe source files")
+    manifest_bytes = (json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
+    package_paths: list[str] = []
+    package_hashes: list[str] = []
+    for index, volume in enumerate(volumes, 1):
+        name = f"superluna-context-{identity[:16]}-part-{index:03d}-of-{len(volumes):03d}.zip"
+        target = output_dir / name
+        with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+            for archive_name, data in [("PROJECT-CONTEXT-MANIFEST.json", manifest_bytes), *volume]:
+                info = zipfile.ZipInfo(archive_name, date_time=(1980, 1, 1, 0, 0, 0))
+                info.external_attr = 0o100644 << 16
+                archive.writestr(info, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+        package_paths.append(str(target))
+        package_hashes.append(hashlib.sha256(target.read_bytes()).hexdigest())
+    manifest_path = output_dir / f"superluna-context-{identity[:16]}-manifest.json"
+    manifest_path.write_bytes(manifest_bytes)
+    status = "partial_materials" if scope == "partial" else "package_prepared"
+    state["project_context"] = {
+        **empty_project_context(), "generation": state["reviewer_chat"]["generation"],
+        "status": status, "scope": scope, "identity": identity,
+        "manifest_path": str(manifest_path), "package_paths": package_paths,
+        "package_names": [Path(item).name for item in package_paths],
+        "package_sha256": package_hashes, "file_count": len(entries),
+        "total_bytes": manifest_core["total_bytes"],
+        "included_files": [item["path"] for item in entries],
+        "uncovered_files": uncovered, "commit_sha": commit,
+    }
+    state["attachment"] = {
+        "required": scope == "full_source", "verification": "unverified" if scope == "full_source" else "not_required",
+        "expected_names": state["project_context"]["package_names"], "observed_names": [], "verified_at": "none",
+    }
+    upload_probe = empty_attachment_upload()
+    upload_probe["package_identity"] = identity
+    state.setdefault("capability_probes", {})["attachment_upload"] = upload_probe
+    save_state(state_path, state, expected_revision=revision)
+    return {"ok": True, "action": status, "formal_review_allowed": False, "context_identity": identity,
+            "file_count": len(entries), "total_bytes": manifest_core["total_bytes"],
+            "files": entries, "uncovered_files": uncovered, "excluded": excluded,
+            "packages": [{"path": path, "sha256": digest} for path, digest in zip(package_paths, package_hashes)],
+            "manifest_path": str(manifest_path), "runtime_evidence_status": "not_included", "revision": state["revision"]}
 
 
 def directory_digest(root: Path, excluded: Path | None = None) -> str:
@@ -7441,6 +8509,13 @@ def rearm_waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
     automation = state["automation"]
+    if (
+        automation.get("waiting_check_kind") == "rollover_continuation"
+        or state.get("reviewer_chat", {}).get("status") in {
+            "rollover_pending", "rollover_blocked",
+        }
+    ):
+        raise LCRLError("rollover continuation cannot be rearmed as a reply wait")
     if (automation.get("heartbeat_mode") != "waiting_only"
             or state["review"]["status"] not in MONITOR_STATUSES
             or automation.get("waiting_check_active") is not True
@@ -7585,6 +8660,40 @@ def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("stale wait recovery belongs to a different implementation task")
     if not waiting_claim_stale(state):
         raise LCRLError("stale wait recovery requires an expired waiting read claim")
+
+    rollover_required = bool(
+        reviewer_chat_round_budget_exhausted(state)
+        or state["reviewer_chat"].get("status") in {
+            "rollover_pending", "rollover_blocked",
+        }
+    )
+    if rollover_required:
+        if state["reviewer_chat"].get("status") == "active":
+            mark_reviewer_chat_rollover_required(state, "round_budget")
+        clear_action_lease(state)
+        automation["waiting_check_claimed_id"] = "none"
+        automation["waiting_check_recovery_armed_lease_id"] = "none"
+        automation["waiting_check_recovery_armed_rdate"] = "none"
+        automation["waiting_check_kind"] = "rollover_continuation"
+        review["recovery_action"] = (
+            "stale_wait_handed_to_round_budget_rollover"
+        )
+        state.setdefault("review_history", []).append({
+            "event": "stale_platform_wait_handed_to_rollover",
+            "automation_id": automation_id,
+            "platform_lookup_result": lookup_result,
+            "replacement_required": True,
+            "token_rotated": False,
+            "rdate_rotated": False,
+            "recorded_at": utc_now(),
+        })
+        state["review_history"] = state["review_history"][-20:]
+        save_state(path, state, expected_revision=revision)
+        return _waiting_rollover_continuation_contract(
+            path,
+            state,
+            platform_lookup_result=lookup_result,
+        )
 
     clear_action_lease(state)
     automation["waiting_check_claimed_id"] = "none"
@@ -7850,6 +8959,242 @@ def doctor_registry_command(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def declare_attachment_upload_capability_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Record only an explicit host capability declaration before browser startup."""
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    context = state.get("project_context", {})
+    if context.get("scope") == "repository_commit_review":
+        return {
+            "ok": True,
+            "action": "repository_commit_review_unaffected",
+            "attachment_upload_required": False,
+            "browser_runtime_initialization_allowed": False,
+            "revision": state["revision"],
+        }
+    if context.get("status") not in {"package_prepared", "attachment_confirmed"}:
+        raise LCRLError("attachment capability declaration requires a prepared full-source package")
+    status = str(args.status)
+    transport = str(args.transport)
+    platform_declared = getattr(args, "platform_declared", False) is True
+    if status == "supported":
+        if not platform_declared or transport != "direct_file_upload":
+            raise LCRLError("attachment upload is supported only when the host explicitly declares direct_file_upload")
+    elif status == "missing":
+        if transport != "none":
+            raise LCRLError("missing attachment upload capability must use transport none")
+    else:
+        raise LCRLError("attachment upload capability status must be supported or missing")
+    probe = empty_attachment_upload()
+    probe.update({
+        "status": status,
+        "transport": transport,
+        "platform_declared": platform_declared,
+        "package_identity": context["identity"],
+        "failure_reason": "attachment_upload_capability_missing" if status == "missing" else "none",
+    })
+    reviewer_chat = state.get("reviewer_chat", {})
+    if (
+        status == "supported"
+        and reviewer_chat.get("status") == "rollover_blocked"
+        and reviewer_chat.get("rollover_failure_code") == "browser_filechooser_unavailable"
+        and reviewer_chat.get("rollover_recovery_id") not in (None, "", "none")
+    ):
+        probe.update({
+            "status": "blocked",
+            "attempt_count": 1,
+            "recovery_id": reviewer_chat["rollover_recovery_id"],
+            "failure_reason": "browser_filechooser_unavailable",
+        })
+    state["capability_probes"]["attachment_upload"] = probe
+    state["capabilities"]["attachment_send"] = "native" if status == "supported" else "unavailable"
+    if status == "missing" and reviewer_chat.get("status") == "rollover_blocked":
+        reviewer_chat["rollover_failure_code"] = "attachment_upload_capability_missing"
+    save_state(path, state, expected_revision=revision)
+    if status == "missing":
+        return {
+            "ok": True,
+            "action": "attachment_upload_capability_missing",
+            "reason_code": "attachment_upload_capability_missing",
+            "package_identity": context["identity"],
+            "formal_review_allowed": False,
+            "browser_runtime_initialization_allowed": False,
+            "browser_actions_allowed": 0,
+            "chat_creation_allowed": False,
+            "single_recovery_available": False,
+            "user_choice_required": False,
+            "beta_platform_blocked": True,
+            "revision": state["revision"],
+        }
+    return {
+        "ok": True,
+        "action": "attachment_upload_capability_supported",
+        "transport": transport,
+        "upload_authorization_required": True,
+        "browser_runtime_initialization_allowed": False,
+        "revision": state["revision"],
+    }
+
+
+def authorize_attachment_upload_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Authorize one direct upload attempt, or the sole recovery attempt."""
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    context = state.get("project_context", {})
+    probe = state.get("capability_probes", {}).get("attachment_upload", {})
+    if context.get("scope") != "full_source" or context.get("status") != "package_prepared":
+        raise LCRLError("attachment upload requires the unchanged prepared full-source package")
+    if probe.get("status") not in {"supported", "blocked"}:
+        raise LCRLError("attachment upload capability is not explicitly supported")
+    if probe.get("transport") != "direct_file_upload" or probe.get("platform_declared") is not True:
+        raise LCRLError("background DOM and system filechooser upload are unsupported")
+    if probe.get("package_identity") != context.get("identity"):
+        raise LCRLError("attachment upload package identity changed")
+    recovery_id = str(getattr(args, "recovery_id", None) or "none")
+    if probe.get("status") == "blocked":
+        if recovery_id == "none" or recovery_id != probe.get("recovery_id"):
+            raise LCRLError("attachment upload recovery identity does not match")
+        if probe.get("recovery_used") is True:
+            raise LCRLError("the single attachment upload recovery was already used")
+        probe["recovery_used"] = True
+    elif recovery_id != "none":
+        raise LCRLError("attachment upload recovery was not requested")
+    elif int(probe.get("attempt_count", 0)) != 0:
+        raise LCRLError("attachment upload attempt already exists")
+    probe["attempt_count"] = int(probe.get("attempt_count", 0)) + 1
+    probe["attempt_id"] = "attachment-upload-" + secrets.token_hex(8)
+    probe["status"] = "authorized"
+    probe["failure_reason"] = "none"
+    save_state(path, state, expected_revision=revision)
+    packages = []
+    for package_path, digest in zip(context.get("package_paths", []), context.get("package_sha256", [])):
+        package = Path(package_path)
+        packages.append({"path": str(package), "name": package.name, "size": package.stat().st_size, "sha256": digest})
+    return {
+        "ok": True,
+        "action": "attachment_upload_authorized",
+        "attempt_id": probe["attempt_id"],
+        "attempt_number": probe["attempt_count"],
+        "package_identity": context["identity"],
+        "packages": packages,
+        "direct_file_upload_only": True,
+        "filechooser_simulation_allowed": False,
+        "browser_actions_allowed": 1,
+        "revision": state["revision"],
+    }
+
+
+def record_attachment_upload_failure_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Close one failed upload attempt without sending, reading, or rebuilding."""
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    probe = state.get("capability_probes", {}).get("attachment_upload", {})
+    attempt_id = str(args.attempt_id)
+    reason = title_component(args.reason, "attachment upload failure reason", 80)
+    if attempt_id != probe.get("attempt_id"):
+        raise LCRLError("attachment upload failure attempt does not match")
+    if probe.get("status") in {"blocked", "missing"}:
+        return {
+            "ok": True,
+            "action": "attachment_upload_blocked" if probe.get("status") == "blocked" else "attachment_upload_capability_missing",
+            "duplicate": True,
+            "browser_action_allowed": False,
+            "formal_review_allowed": False,
+            "recovery_id": probe.get("recovery_id", "none"),
+            "revision": state["revision"],
+        }
+    if probe.get("status") != "authorized":
+        raise LCRLError("attachment upload failure requires an authorized attempt")
+    probe["failure_reason"] = reason
+    terminal = int(probe.get("attempt_count", 0)) >= 2
+    if terminal:
+        probe["status"] = "missing"
+        state["capabilities"]["attachment_send"] = "unavailable"
+    else:
+        probe["status"] = "blocked"
+        existing_recovery_id = state.get("reviewer_chat", {}).get("rollover_recovery_id", "none")
+        probe["recovery_id"] = (
+            existing_recovery_id
+            if re.fullmatch(r"rollover-recovery-[0-9a-f]{16}", str(existing_recovery_id))
+            else "rollover-recovery-" + secrets.token_hex(8)
+        )
+    reviewer_chat = state.get("reviewer_chat", {})
+    if reviewer_chat.get("status") in {"rollover_pending", "rollover_blocked"}:
+        reviewer_chat["status"] = "rollover_blocked"
+        reviewer_chat["rollover_failure_code"] = reason if not terminal else "attachment_upload_capability_missing"
+        reviewer_chat["rollover_failure_count"] = 1
+        reviewer_chat["rollover_recovery_id"] = probe.get("recovery_id", "none")
+    save_state(path, state, expected_revision=revision)
+    return {
+        "ok": True,
+        "action": "attachment_upload_capability_missing" if terminal else "attachment_upload_blocked",
+        "reason_code": "attachment_upload_capability_missing" if terminal else reason,
+        "duplicate": False,
+        "package_identity": probe["package_identity"],
+        "browser_action_allowed": False,
+        "text_send_allowed": False,
+        "chat_read_allowed": False,
+        "replacement_package_allowed": False,
+        "account_slot_release_required": True,
+        "single_recovery_available": not terminal,
+        "recovery_id": probe.get("recovery_id", "none"),
+        "formal_review_allowed": False,
+        "user_choice_required": False,
+        "revision": state["revision"],
+    }
+
+
+def confirm_attachment_upload_receipt_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Confirm exact current-composer attachment identity before any text send."""
+    path = Path(args.state).expanduser().resolve()
+    state = load_state(path)
+    revision = state["revision"]
+    context = state.get("project_context", {})
+    probe = state.get("capability_probes", {}).get("attachment_upload", {})
+    if probe.get("status") != "authorized" or args.attempt_id != probe.get("attempt_id"):
+        raise LCRLError("attachment receipt requires the current authorized upload attempt")
+    if args.context_identity != context.get("identity") or probe.get("package_identity") != context.get("identity"):
+        raise LCRLError("attachment receipt package identity mismatch")
+    composer_identity = title_component(args.composer_identity, "composer identity", 180)
+    receipt_id = title_component(args.platform_receipt_id, "platform attachment receipt", 180)
+    if composer_identity == "none" or receipt_id == "none":
+        raise LCRLError("attachment filenames or buttons do not prove a current composer receipt")
+    expected = sorted(zip(
+        context.get("package_names", []),
+        context.get("package_sha256", []),
+        [Path(item).stat().st_size for item in context.get("package_paths", [])],
+    ))
+    observed = sorted(zip(args.observed_name, args.observed_sha256, [int(item) for item in args.observed_size]))
+    if expected != observed:
+        raise LCRLError("attachment receipt must match every package name, size, and SHA-256")
+    now = args.at or utc_now()
+    probe.update({"status": "confirmed", "composer_identity": composer_identity, "platform_receipt_id": receipt_id, "confirmed_at": now})
+    state["attachment"] = {
+        "required": True, "verification": "verified",
+        "expected_names": list(context["package_names"]),
+        "observed_names": list(args.observed_name), "verified_at": now,
+    }
+    context.update({
+        "status": "attachment_confirmed",
+        "reviewer_thread_id": state["confirmation"]["reviewer_thread_id"],
+        "receipt_confirmed_at": now,
+    })
+    save_state(path, state, expected_revision=revision)
+    return {
+        "ok": True,
+        "action": "attachment_upload_confirmed",
+        "formal_review_allowed": project_context_ready(state),
+        "text_send_allowed": project_context_ready(state),
+        "package_identity": context["identity"],
+        "composer_identity": composer_identity,
+        "platform_receipt_id": receipt_id,
+        "revision": state["revision"],
+    }
+
+
 def confirm_attachment_command(args: argparse.Namespace) -> dict[str, Any]:
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
@@ -7865,8 +9210,24 @@ def confirm_attachment_command(args: argparse.Namespace) -> dict[str, Any]:
         "observed_names": observed,
         "verified_at": args.at or utc_now(),
     }
+    context = state.get("project_context", {})
+    if context.get("status") == "package_prepared":
+        raise LCRLError(
+            "prepared project packages require confirm-attachment-upload-receipt; "
+            "names and buttons are not a composer attachment receipt"
+        )
     save_state(path, state, expected_revision=revision)
-    return {"ok": True, "verification": args.mode, "attachments": observed, "revision": state["revision"]}
+    return {"ok": True, "verification": args.mode, "attachments": observed,
+            "project_context_status": context.get("status", "context_refresh_required"),
+            "formal_review_allowed": project_context_ready(state), "revision": state["revision"]}
+
+
+def confirm_github_project_context_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Retire the URL-only Alpha 81 contract; it cannot prove repository access."""
+    raise LCRLError(
+        "URL-only GitHub context is insufficient; use prepare-repository-commit-review "
+        "and confirm-repository-access-receipt"
+    )
 
 
 def reset_attachment_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -8630,6 +9991,12 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         )
         if automation_id == "none":
             raise LCRLError("stale wait lookup requires the exact platform task identity")
+        stale_rollover_required = bool(
+            reviewer_chat_round_budget_exhausted(state)
+            or state["reviewer_chat"].get("status") in {
+                "rollover_pending", "rollover_blocked",
+            }
+        )
         result = add_user_status_exit({
             "ok": True,
             "action": "waiting_platform_lookup_required",
@@ -8644,6 +10011,10 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             "lease_id": "none",
             "revision": revision,
             "platform_wait_lookup_required": True,
+            "platform_wait_update_allowed": not stale_rollover_required,
+            "platform_wait_create_allowed": not stale_rollover_required,
+            "old_chat_access_allowed": False,
+            "ordinary_wait_rearm_allowed": not stale_rollover_required,
             "platform_wait_lookup": {
                 "id": automation_id,
                 "mode": "view",
@@ -8653,8 +10024,11 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             "mandatory_next_action_sequence": [
                 "view_exact_platform_wait",
                 "run_recover_stale_wait_with_found_or_not_found",
-                "update_or_create_exactly_one_platform_wait",
-            ],
+            ] + (
+                ["follow_recover_result_into_rollover_continuation"]
+                if stale_rollover_required
+                else ["update_or_create_exactly_one_platform_wait"]
+            ),
             "continuation_required": True,
             "turn_completion_allowed": False,
         })
@@ -9154,6 +10528,8 @@ def confirm_review_submission_command(args: argparse.Namespace) -> dict[str, Any
     """Record the one visible App Chat submission before the loop may wait."""
     path = Path(args.state).resolve()
     state = load_state(path)
+    if not project_context_ready(state):
+        raise LCRLError("formal review requires a verified complete project context receipt")
     review = state["review"]
     if review["status"] not in {"review_submit_pending", "review_receipt_pending"}:
         if review.get("request_message_id") == args.request_message_id:
@@ -10340,6 +11716,12 @@ def doctor(state_path: str | Path, automation_toml: str | None = None, registry_
         findings.append({"severity": "error", "code": "review_result_quarantined"})
     if state["review"]["status"] == "external_blocked" and state["recovery"].get("user_notified_stall") is True:
         findings.append({"severity": "info", "code": "external_blocker_already_notified"})
+    future_action_valid, _future_action = rollover_future_action(state)
+    if not future_action_valid:
+        findings.append({
+            "severity": "error",
+            "code": "incomplete_idle_without_future_action",
+        })
     if state["automation"].get("heartbeat_mode") == "legacy_fixed":
         findings.append({"severity": "warning", "code": "recurring_monitor_must_be_retired"})
     model_policy = state["model_policy"]
@@ -10570,6 +11952,13 @@ def selftest() -> dict[str, Any]:
             raise LCRLError("selftest next_operation operation package normalization failed")
         gated = new_state("gate", "impl", root, "chat")
         gated["review"]["status"] = "review_submit_pending"
+        if choose_action(gated) != "context_refresh_required":
+            raise LCRLError("selftest project context gate failed")
+        gated["project_context"].update({
+            "status": "attachment_confirmed", "identity": "selftest",
+            "package_names": ["selftest.zip"], "reviewer_thread_id": "chat",
+        })
+        gated["attachment"]["observed_names"] = ["selftest.zip"]
         if choose_action(gated) != "review_mode_blocked":
             raise LCRLError("selftest extreme review gate failed")
         if "review_waiting" in ALLOWED_TRANSITIONS["local_work"]:
@@ -10587,6 +11976,10 @@ def selftest() -> dict[str, Any]:
         attachment["review"]["cycle_id"] = "cycle-attachment"
         attachment["review"]["submission_fingerprint"] = "attachment-fingerprint"
         attachment["review"]["payload_mode"] = "app_attachment"
+        attachment["project_context"].update({
+            "status": "attachment_confirmed", "identity": "selftest-context",
+            "package_names": ["context.zip"], "reviewer_thread_id": "chat-attachment",
+        })
         attachment["attachment"] = {
             "required": True,
             "verification": "unverified",
@@ -11078,6 +12471,49 @@ def build_parser() -> argparse.ArgumentParser:
     project_context.add_argument("--project-path", required=True)
     project_context.add_argument("--file", dest="files", action="append", required=True)
 
+    prepare_context = sub.add_parser(
+        "prepare-project-context",
+        help="生成确定性脱敏源码材料包；全部分卷确认前禁止正式审阅",
+    )
+    prepare_context.add_argument("--state", required=True)
+    prepare_context.add_argument("--project-path", required=True)
+    prepare_context.add_argument("--output-dir", required=True)
+    prepare_context.add_argument("--scope", choices=("full_source", "partial"), default="full_source")
+    prepare_context.add_argument("--file", action="append")
+    prepare_context.add_argument("--authoritative-untracked", action="append")
+    prepare_context.add_argument("--max-volume-bytes", type=int, default=20 * 1024 * 1024)
+
+    prepare_repository = sub.add_parser("prepare-repository-commit-review")
+    prepare_repository.add_argument("--state", required=True)
+    prepare_repository.add_argument("--project-path", required=True)
+    prepare_repository.add_argument("--remote-url", required=True)
+    prepare_repository.add_argument("--branch", default="none")
+    prepare_repository.add_argument("--remote-commit-reachable", action="store_true")
+    prepare_repository.add_argument("--private-access-verified", action="store_true")
+    prepare_repository.add_argument("--fallback-output-dir", required=True)
+    prepare_repository.add_argument("--max-volume-bytes", type=int, default=20 * 1024 * 1024)
+
+    confirm_repository = sub.add_parser("confirm-repository-access-receipt")
+    confirm_repository.add_argument("--state", required=True)
+    confirm_repository.add_argument("--repository-identity", required=True)
+    confirm_repository.add_argument("--commit-sha", required=True)
+    confirm_repository.add_argument("--tree-manifest-hash", required=True)
+    confirm_repository.add_argument("--root-canary-path", required=True)
+    confirm_repository.add_argument("--root-canary-blob-sha", required=True)
+    confirm_repository.add_argument("--nested-canary-path", required=True)
+    confirm_repository.add_argument("--nested-canary-blob-sha", required=True)
+    confirm_repository.add_argument("--exact-commit-opened", action="store_true")
+    confirm_repository.add_argument("--full-tree-visible", action="store_true")
+    confirm_repository.add_argument("--visible-match-count", type=int, required=True)
+    confirm_repository.add_argument("--at")
+
+    prepare_repository_round = sub.add_parser("prepare-repository-review-round")
+    prepare_repository_round.add_argument("--state", required=True)
+    prepare_repository_round.add_argument("--base-commit", required=True)
+    prepare_repository_round.add_argument("--head-commit", required=True)
+    prepare_repository_round.add_argument("--remote-commit-reachable", action="store_true")
+    prepare_repository_round.add_argument("--runtime-evidence-index", default="none")
+
     acquire_account_browser_slot = sub.add_parser(
         "acquire-account-browser-slot",
         help="在任何网页 Chat 访问前取得机器级共享名额（最多两个）",
@@ -11149,6 +12585,22 @@ def build_parser() -> argparse.ArgumentParser:
     complete_rollover.add_argument("--url", required=True)
     complete_rollover.add_argument("--observed-title", default="none")
     complete_rollover.add_argument("--at")
+
+    finalize_rollover = sub.add_parser(
+        "finalize-reviewer-chat-rollover",
+        help="替代 Chat 已绑定且旧等待已删除后，原子进入唯一续接提交",
+    )
+    finalize_rollover.add_argument("--state", required=True)
+    finalize_rollover.add_argument("--deleted-automation-id", required=True)
+
+    record_rollover_failure = sub.add_parser(
+        "record-reviewer-chat-rollover-failure",
+        help="记录唯一一次替代 Chat 创建恢复；保持旧 Chat 禁止访问",
+    )
+    record_rollover_failure.add_argument("--state", required=True)
+    record_rollover_failure.add_argument("--authorization-id", required=True)
+    record_rollover_failure.add_argument("--failure-code", required=True)
+    record_rollover_failure.add_argument("--at")
 
     retire_missing_wait = sub.add_parser("retire-missing-wait")
     retire_missing_wait.add_argument("--state", required=True)
@@ -11265,7 +12717,48 @@ def build_parser() -> argparse.ArgumentParser:
     confirm_attachment.add_argument("--expected-name", action="append", required=True)
     confirm_attachment.add_argument("--observed-name", action="append", required=True)
     confirm_attachment.add_argument("--mode", required=True, choices=("verified", "manual_confirmed"))
+    confirm_attachment.add_argument("--context-identity")
+    confirm_attachment.add_argument("--observed-sha256", action="append")
     confirm_attachment.add_argument("--at")
+
+    declare_attachment_upload = sub.add_parser("declare-attachment-upload-capability")
+    declare_attachment_upload.add_argument("--state", required=True)
+    declare_attachment_upload.add_argument("--status", required=True, choices=("supported", "missing"))
+    declare_attachment_upload.add_argument("--transport", required=True, choices=("direct_file_upload", "none"))
+    declare_attachment_upload.add_argument("--platform-declared", action="store_true")
+    declare_attachment_upload.add_argument("--at")
+
+    authorize_attachment_upload = sub.add_parser("authorize-attachment-upload")
+    authorize_attachment_upload.add_argument("--state", required=True)
+    authorize_attachment_upload.add_argument("--recovery-id")
+    authorize_attachment_upload.add_argument("--at")
+
+    record_attachment_upload_failure = sub.add_parser("record-attachment-upload-failure")
+    record_attachment_upload_failure.add_argument("--state", required=True)
+    record_attachment_upload_failure.add_argument("--attempt-id", required=True)
+    record_attachment_upload_failure.add_argument("--reason", required=True, choices=(
+        "browser_filechooser_unavailable", "direct_upload_failed", "attachment_receipt_missing",
+    ))
+    record_attachment_upload_failure.add_argument("--at")
+
+    confirm_attachment_upload_receipt = sub.add_parser("confirm-attachment-upload-receipt")
+    confirm_attachment_upload_receipt.add_argument("--state", required=True)
+    confirm_attachment_upload_receipt.add_argument("--attempt-id", required=True)
+    confirm_attachment_upload_receipt.add_argument("--context-identity", required=True)
+    confirm_attachment_upload_receipt.add_argument("--composer-identity", required=True)
+    confirm_attachment_upload_receipt.add_argument("--platform-receipt-id", required=True)
+    confirm_attachment_upload_receipt.add_argument("--observed-name", action="append", required=True)
+    confirm_attachment_upload_receipt.add_argument("--observed-sha256", action="append", required=True)
+    confirm_attachment_upload_receipt.add_argument("--observed-size", action="append", type=int, required=True)
+    confirm_attachment_upload_receipt.add_argument("--at")
+
+    confirm_github_context = sub.add_parser("confirm-github-project-context")
+    confirm_github_context.add_argument("--state", required=True)
+    confirm_github_context.add_argument("--repository-url", required=True)
+    confirm_github_context.add_argument("--commit-sha", required=True)
+    confirm_github_context.add_argument("--access-verified", action="store_true")
+    confirm_github_context.add_argument("--visible-match-count", type=int, required=True)
+    confirm_github_context.add_argument("--at")
 
     reset_attachment = sub.add_parser("reset-attachment")
     reset_attachment.add_argument("--state", required=True)
@@ -11475,6 +12968,8 @@ def main(argv: list[str] | None = None) -> int:
             result = waiting_check_command(args)
         elif args.command == "schedule-submission-retry":
             result = schedule_submission_retry_command(args)
+        elif args.command == "record-reviewer-chat-rollover-failure":
+            result = record_reviewer_chat_rollover_failure_command(args)
         elif args.command == "confirm-waiting-recovery-arm":
             result = confirm_waiting_recovery_arm_command(args)
         elif args.command == "authorize-waiting-chat-read":
@@ -11529,6 +13024,14 @@ def main(argv: list[str] | None = None) -> int:
             result = workspace_preflight_command(args)
         elif args.command == "render-project-context":
             result = render_project_context_command(args)
+        elif args.command == "prepare-project-context":
+            result = prepare_project_context_command(args)
+        elif args.command == "prepare-repository-commit-review":
+            result = prepare_repository_commit_review_command(args)
+        elif args.command == "confirm-repository-access-receipt":
+            result = confirm_repository_access_receipt_command(args)
+        elif args.command == "prepare-repository-review-round":
+            result = prepare_repository_review_round_command(args)
         elif args.command == "browser-startup-plan":
             result = browser_startup_plan_command(args)
         elif args.command == "acquire-account-browser-slot":
@@ -11541,6 +13044,8 @@ def main(argv: list[str] | None = None) -> int:
             result = require_reviewer_chat_rollover_command(args)
         elif args.command == "complete-reviewer-chat-rollover":
             result = complete_reviewer_chat_rollover_command(args)
+        elif args.command == "finalize-reviewer-chat-rollover":
+            result = finalize_reviewer_chat_rollover_command(args)
         elif args.command == "retire-missing-wait":
             result = retire_missing_wait_command(args)
         elif args.command == "recover-stale-wait":
@@ -11571,6 +13076,16 @@ def main(argv: list[str] | None = None) -> int:
             result = doctor_registry_command(args)
         elif args.command == "confirm-attachment":
             result = confirm_attachment_command(args)
+        elif args.command == "declare-attachment-upload-capability":
+            result = declare_attachment_upload_capability_command(args)
+        elif args.command == "authorize-attachment-upload":
+            result = authorize_attachment_upload_command(args)
+        elif args.command == "record-attachment-upload-failure":
+            result = record_attachment_upload_failure_command(args)
+        elif args.command == "confirm-attachment-upload-receipt":
+            result = confirm_attachment_upload_receipt_command(args)
+        elif args.command == "confirm-github-project-context":
+            result = confirm_github_project_context_command(args)
         elif args.command == "reset-attachment":
             result = reset_attachment_command(args)
         elif args.command == "record-progress":

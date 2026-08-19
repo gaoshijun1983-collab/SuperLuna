@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.2.0-alpha.80 - 2026-08-19
+
+- Packages Controller 136 / Skill revision `2026-08-19.93`.
+- Prevents stale `found`/`not_found` platform-wait recovery from rotating a
+  normal reply token or RDATE after the reviewer round budget is exhausted.
+- Preserves the exact wait identity and routes directly to the one replacement-
+  Chat startup, with found-task deletion deferred until replacement binding.
+
+## 0.2.0-alpha.79 - 2026-08-19
+
+- Packages Controller 135 / Skill revision `2026-08-19.92`.
+- Converts a round-budget waiting occurrence into a distinct bounded rollover
+  continuation and rejects ordinary reply-wait rearm before replacement binding.
+- Makes both the account gate and post-slot read authorization return the exact
+  replacement-Chat startup handoff while keeping the old wait as recovery proof.
+
+## 0.2.0-alpha.78 - 2026-08-19
+
+- Packages Controller 134 / Skill revision `2026-08-19.91`.
+- Keeps the existing one-shot wait as the recovery anchor when a due waiting
+  occurrence hits the reviewer round budget; the wait cannot be deleted until
+  the unique replacement Chat has been provisioned and durably bound.
+- Adds an explicit post-delete rollover finalizer that atomically retires the
+  old review cycle and continues one unsent submission on the replacement Chat.
+- Makes rollover failures technical, single-recovery continuations and exposes
+  an invalid incomplete idle state through status/doctor checks.
+
+## 0.2.0-alpha.77 - 2026-08-18
+
+- Packages Controller 133 / Skill revision `2026-08-18.90`.
+- Moves the two-round reviewer budget check into the pre-browser account gate,
+  atomically blocks every old-Chat access path, and exposes distinct reply-wait,
+  rollover-in-progress, and rollover-blocked workflow states.
+- Keeps one replacement-Chat provisioning chain with one idempotent recovery
+  identity; a creation failure never becomes `review_waiting`.
+
 ## 0.2.0-alpha.76 - 2026-08-18
 
 - Packages Controller 132 / Skill revision `2026-08-18.89`.
@@ -1335,3 +1371,25 @@
 - Added App Chat quota and writer-role invariants plus a reviewer policy firewall.
 - Added network-disconnection replay, deduplicated runtime event accounting, and bounded recovery.
 - Added generic and Godot profiles, result contracts, capability negotiation, CI, and open-source project documentation.
+## 0.2.0-alpha.81 - 2026-08-19
+
+- Packages Controller 137 / Skill revision `2026-08-19.94`.
+- Adds deterministic sanitized Git-tracked source packages with per-file SHA-256 manifests and unlimited-count split volumes.
+- Blocks formal review until every volume is confirmed for the current reviewer generation; legacy states and replacement Chats fail closed into `context_refresh_required`.
+- Separates partial-material, complete-source, Git-commit, and runtime-evidence coverage claims.
+## 0.2.0-alpha.82 - 2026-08-19
+
+- Packages Controller 138 / Skill revision `2026-08-19.95`.
+- Makes exact repository-commit review the preferred mode for clean Git-backed projects.
+- Requires canonical remote identity, exact commit/tree manifest, root and nested blob canaries, and a current-Chat repository access receipt.
+- Separately records each round's continuous base-to-head diff, changed-path manifest, workspace state, and runtime-evidence index without rescanning full history.
+- Falls back to the deterministic full-source attachment package for dirty, missing, unreachable, private-unverified, or authentication-unverified repositories.
+
+## 0.2.0-alpha.83 - 2026-08-19
+
+- Packages Controller 139 / Skill revision `2026-08-19.96`.
+- Gates attachment capability before account-slot acquisition, browser startup, or replacement-Chat creation.
+- Allows only an explicitly host-declared direct upload transport; background DOM and system-filechooser simulation remain forbidden.
+- Requires an exact current-composer receipt over package identity, filename, size, and SHA-256 before any formal text send.
+- Preserves the same package across one controlled recovery and turns a second failure into terminal `attachment_upload_capability_missing` without refresh, Chat read, or repeated browser actions.
+- Leaves exact repository-commit review independent of attachment transport.

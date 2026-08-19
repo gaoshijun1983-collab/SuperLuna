@@ -6,6 +6,7 @@ import io
 import json
 import multiprocessing as mp
 import os
+import subprocess
 import tempfile
 import time
 import unittest
@@ -107,6 +108,422 @@ class ProjectContextPacketTests(unittest.TestCase):
                 lcrl.render_project_context_command(Namespace(
                     project_path=str(root), files=selected,
                 ))
+
+
+class TruthfulProjectContextTests(unittest.TestCase):
+    def make_repo_state(self, root: Path):
+        import subprocess
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(root), "config", "user.name", "Test"], check=True)
+        for name, value in (("a.py", "print('a')\n"), ("b.py", "print('b')\n"), ("README.md", "truth\n")):
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(value, encoding="utf-8")
+        (root / "src").mkdir(exist_ok=True)
+        (root / "src" / "nested.py").write_text("nested = True\n", encoding="utf-8")
+        subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
+        subprocess.run(["git", "-C", str(root), "remote", "add", "origin", "https://github.com/example/project.git"], check=True)
+        state_path = root / ".superluna-state.json"
+        state = lcrl.new_state("a", "impl", root, "review-chat", continuation_mode="automatic")
+        lcrl.save_state(state_path, state)
+        return state_path
+
+    def prepare(self, root: Path, state_path: Path, **overrides):
+        values = dict(state=str(state_path), project_path=str(root), output_dir=str(root / "context-out"),
+                      scope="full_source", file=None, authoritative_untracked=None, max_volume_bytes=20 * 1024 * 1024)
+        values.update(overrides)
+        return lcrl.prepare_project_context_command(Namespace(**values))
+
+    def confirm_package(self, state_path: Path, result: dict):
+        lcrl.declare_attachment_upload_capability_command(Namespace(
+            state=str(state_path), status="supported", transport="direct_file_upload",
+            platform_declared=True, at=None,
+        ))
+        authorized = lcrl.authorize_attachment_upload_command(Namespace(
+            state=str(state_path), recovery_id=None, at=None,
+        ))
+        return lcrl.confirm_attachment_upload_receipt_command(Namespace(
+            state=str(state_path), attempt_id=authorized["attempt_id"],
+            context_identity=result["context_identity"], composer_identity="composer-current",
+            platform_receipt_id="attachment-receipt-current",
+            observed_name=[Path(item["path"]).name for item in result["packages"]],
+            observed_sha256=[item["sha256"] for item in result["packages"]],
+            observed_size=[Path(item["path"]).stat().st_size for item in result["packages"]], at=None,
+        ))
+
+    def test_local_path_or_inline_packet_never_counts_as_complete_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            lcrl.render_project_context_command(Namespace(project_path=str(root), files=["a.py"]))
+            state = lcrl.load_state(state_path)
+            self.assertEqual(state["project_context"]["status"], "context_refresh_required")
+            self.assertFalse(lcrl.project_context_ready(state))
+
+    def test_two_files_are_reported_as_partial_not_full_project(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            result = self.prepare(root, state_path, scope="partial", file=["a.py", "b.py"])
+            self.assertEqual(result["action"], "partial_materials")
+            self.assertEqual(result["file_count"], 2)
+            self.assertIn("README.md", result["uncovered_files"])
+            self.assertFalse(result["formal_review_allowed"])
+
+    def test_unconfirmed_or_incomplete_volumes_block_formal_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            result = self.prepare(root, state_path, max_volume_bytes=1)
+            state = lcrl.load_state(state_path)
+            self.assertGreater(len(result["packages"]), 1)
+            self.assertEqual(lcrl.choose_action({**state, "review": {**state["review"], "status": "review_submit_pending"}}), "context_refresh_required")
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.confirm_attachment_command(Namespace(
+                    state=str(state_path), expected_name=[Path(result["packages"][0]["path"]).name],
+                    observed_name=[Path(result["packages"][0]["path"]).name], mode="verified", at=None,
+                    context_identity=result["context_identity"], observed_sha256=[result["packages"][0]["sha256"]],
+                ))
+
+    def test_all_volume_hashes_confirm_current_chat_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            result = self.prepare(root, state_path, max_volume_bytes=1)
+            confirmed = self.confirm_package(state_path, result)
+            self.assertTrue(confirmed["formal_review_allowed"])
+
+
+class RepositoryCommitReviewTests(TruthfulProjectContextTests):
+    def repository_args(self, root: Path, state_path: Path, **overrides):
+        values = dict(
+            state=str(state_path), project_path=str(root),
+            remote_url="https://github.com/example/project.git",
+            branch="main", remote_commit_reachable=True,
+            private_access_verified=True,
+            fallback_output_dir=str(root / "context-fallback"),
+            max_volume_bytes=20 * 1024 * 1024,
+        )
+        values.update(overrides)
+        return Namespace(**values)
+
+    def test_floating_branch_url_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.prepare_repository_commit_review_command(self.repository_args(
+                    root, state_path,
+                    remote_url="https://github.com/example/project/tree/main",
+                ))
+
+    def test_url_string_does_not_create_repository_access_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            prepared = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path)
+            )
+            self.assertEqual(prepared["action"], "repository_access_receipt_required")
+            self.assertFalse(lcrl.project_context_ready(lcrl.load_state(state_path)))
+
+    def test_unreachable_commit_falls_back_to_full_source_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            result = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path, remote_commit_reachable=False)
+            )
+            self.assertEqual(result["action"], "full_source_attachment_required")
+            self.assertEqual(lcrl.load_state(state_path)["project_context"]["scope"], "full_source")
+
+    def test_dirty_worktree_never_claims_remote_commit_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            (root / "a.py").write_text("dirty\n", encoding="utf-8")
+            result = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path)
+            )
+            self.assertEqual(result["action"], "full_source_attachment_required")
+            self.assertFalse(result["repository_commit_review_allowed"])
+
+    def test_private_repository_without_verified_access_is_blocked_to_full_package(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            result = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path, private_access_verified=False)
+            )
+            self.assertEqual(result["action"], "full_source_attachment_required")
+
+    def test_replacement_chat_requires_fresh_repository_access_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            prepared = lcrl.prepare_repository_commit_review_command(self.repository_args(root, state_path))
+            lcrl.confirm_repository_access_receipt_command(Namespace(
+                state=str(state_path), repository_identity=prepared["repository_identity"],
+                commit_sha=prepared["head_commit"], tree_manifest_hash=prepared["tree_manifest_hash"],
+                root_canary_path="README.md", root_canary_blob_sha=prepared["canaries"][0]["blob_sha"],
+                nested_canary_path="src/nested.py", nested_canary_blob_sha=prepared["canaries"][1]["blob_sha"],
+                exact_commit_opened=True, full_tree_visible=True, visible_match_count=1, at=None,
+            ))
+            state = lcrl.load_state(state_path); state["reviewer_chat"]["generation"] += 1
+            lcrl.require_project_context_refresh_for_reviewer(state)
+            self.assertFalse(lcrl.project_context_ready(state))
+            self.assertEqual(state["project_context"]["status"], "repository_access_receipt_required")
+
+    def test_broken_base_head_chain_blocks_incremental_round(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            prepared = lcrl.prepare_repository_commit_review_command(self.repository_args(root, state_path))
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.prepare_repository_review_round_command(Namespace(
+                    state=str(state_path), base_commit="f" * 40,
+                    head_commit=prepared["head_commit"], runtime_evidence_index="none",
+                ))
+
+    def test_incremental_round_reuses_tree_receipt_without_full_history_scan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            prepared = lcrl.prepare_repository_commit_review_command(self.repository_args(root, state_path))
+            lcrl.confirm_repository_access_receipt_command(Namespace(
+                state=str(state_path), repository_identity=prepared["repository_identity"],
+                commit_sha=prepared["head_commit"], tree_manifest_hash=prepared["tree_manifest_hash"],
+                root_canary_path="README.md", root_canary_blob_sha=prepared["canaries"][0]["blob_sha"],
+                nested_canary_path="src/nested.py", nested_canary_blob_sha=prepared["canaries"][1]["blob_sha"],
+                exact_commit_opened=True, full_tree_visible=True, visible_match_count=1, at=None,
+            ))
+            (root / "a.py").write_text("incremental\n", encoding="utf-8")
+            subprocess.run(["git", "add", "a.py"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-m", "incremental"], cwd=root, check=True,
+                           stdout=subprocess.DEVNULL)
+            head_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=root, text=True
+            ).strip()
+            round_contract = lcrl.prepare_repository_review_round_command(Namespace(
+                state=str(state_path), base_commit=prepared["head_commit"],
+                head_commit=head_commit, remote_commit_reachable=True,
+                runtime_evidence_index="local-tests.json",
+            ))
+            self.assertTrue(round_contract["complete_repository_access_verified"])
+            self.assertTrue(round_contract["round_diff_covered"])
+            self.assertFalse(round_contract["full_history_scan_required"])
+
+    def test_legacy_state_requires_context_refresh_without_fabricated_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            raw = json.loads(state_path.read_text(encoding="utf-8")); raw.pop("project_context")
+            state_path.write_text(json.dumps(raw), encoding="utf-8")
+            migrated = lcrl.load_state(state_path)
+            self.assertEqual(migrated["project_context"]["status"], "context_refresh_required")
+            self.assertFalse(lcrl.project_context_ready(migrated))
+
+    def test_replacement_chat_does_not_inherit_old_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            result = self.prepare(root, state_path)
+            self.confirm_package(state_path, result)
+            state = lcrl.load_state(state_path); state["reviewer_chat"]["generation"] += 1
+            lcrl.require_project_context_refresh_for_reviewer(state)
+            self.assertEqual(state["project_context"]["status"], "package_prepared")
+            self.assertFalse(lcrl.project_context_ready(state))
+
+    def test_unverified_github_commit_cannot_be_formal_review_context(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.confirm_github_project_context_command(Namespace(
+                    state=str(state_path), repository_url="https://example.invalid/repo",
+                    commit_sha="a" * 40, access_verified=False, visible_match_count=0, at=None,
+                ))
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.confirm_github_project_context_command(Namespace(
+                    state=str(state_path), repository_url="https://example.invalid/repo",
+                    commit_sha="a" * 40, access_verified=True, visible_match_count=1, at=None,
+                ))
+
+
+class AttachmentUploadCapabilityTests(TruthfulProjectContextTests):
+    def prepare_package(self, root: Path, state_path: Path):
+        return self.prepare(root, state_path)
+
+    def test_missing_capability_blocks_before_any_browser_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            package = self.prepare_package(root, state_path)
+            result = lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="missing", transport="none",
+                platform_declared=True, at=None,
+            ))
+            self.assertEqual(result["action"], "attachment_upload_capability_missing")
+            self.assertFalse(result["browser_runtime_initialization_allowed"])
+            self.assertEqual(result["browser_actions_allowed"], 0)
+            self.assertEqual(result["package_identity"], package["context_identity"])
+            registry = root / "account-gate.json"
+            gated = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="impl", reviewer_thread_id="review-chat",
+                operation="startup", state=str(state_path), registry=str(registry), at=None,
+            ))
+            self.assertEqual(gated["action"], "attachment_upload_capability_missing")
+            self.assertFalse(gated["slot_acquired"])
+            self.assertFalse(registry.exists())
+
+    def test_filechooser_not_triggered_is_one_failure_not_a_second_browser_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            self.prepare_package(root, state_path)
+            lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="supported", transport="direct_file_upload",
+                platform_declared=True, at=None,
+            ))
+            authorized = lcrl.authorize_attachment_upload_command(Namespace(
+                state=str(state_path), recovery_id=None, at=None,
+            ))
+            first = lcrl.record_attachment_upload_failure_command(Namespace(
+                state=str(state_path), attempt_id=authorized["attempt_id"],
+                reason="browser_filechooser_unavailable", at=None,
+            ))
+            duplicate = lcrl.record_attachment_upload_failure_command(Namespace(
+                state=str(state_path), attempt_id=authorized["attempt_id"],
+                reason="browser_filechooser_unavailable", at=None,
+            ))
+            self.assertEqual(first["action"], "attachment_upload_blocked")
+            self.assertTrue(first["single_recovery_available"])
+            self.assertTrue(duplicate["duplicate"])
+            self.assertFalse(duplicate["browser_action_allowed"])
+
+    def test_missing_composer_receipt_never_allows_send(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            package = self.prepare_package(root, state_path)
+            lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="supported", transport="direct_file_upload",
+                platform_declared=True, at=None,
+            ))
+            authorized = lcrl.authorize_attachment_upload_command(Namespace(
+                state=str(state_path), recovery_id=None, at=None,
+            ))
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.confirm_attachment_upload_receipt_command(Namespace(
+                    state=str(state_path), attempt_id=authorized["attempt_id"],
+                    context_identity=package["context_identity"], composer_identity="none",
+                    platform_receipt_id="none", observed_name=[Path(item["path"]).name for item in package["packages"]],
+                    observed_sha256=[item["sha256"] for item in package["packages"]],
+                    observed_size=[Path(item["path"]).stat().st_size for item in package["packages"]], at=None,
+                ))
+            self.assertFalse(lcrl.project_context_ready(lcrl.load_state(state_path)))
+
+    def test_recovery_reuses_same_package_and_is_allowed_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            package = self.prepare_package(root, state_path)
+            lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="supported", transport="direct_file_upload",
+                platform_declared=True, at=None,
+            ))
+            authorized = lcrl.authorize_attachment_upload_command(Namespace(state=str(state_path), recovery_id=None, at=None))
+            failed = lcrl.record_attachment_upload_failure_command(Namespace(
+                state=str(state_path), attempt_id=authorized["attempt_id"], reason="browser_filechooser_unavailable", at=None,
+            ))
+            retry = lcrl.authorize_attachment_upload_command(Namespace(
+                state=str(state_path), recovery_id=failed["recovery_id"], at=None,
+            ))
+            self.assertEqual(retry["package_identity"], package["context_identity"])
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.authorize_attachment_upload_command(Namespace(
+                    state=str(state_path), recovery_id=failed["recovery_id"], at=None,
+                ))
+
+    def test_second_failure_becomes_terminal_capability_missing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            self.prepare_package(root, state_path)
+            lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="supported", transport="direct_file_upload", platform_declared=True, at=None,
+            ))
+            first = lcrl.authorize_attachment_upload_command(Namespace(state=str(state_path), recovery_id=None, at=None))
+            blocked = lcrl.record_attachment_upload_failure_command(Namespace(
+                state=str(state_path), attempt_id=first["attempt_id"], reason="browser_filechooser_unavailable", at=None,
+            ))
+            retry = lcrl.authorize_attachment_upload_command(Namespace(
+                state=str(state_path), recovery_id=blocked["recovery_id"], at=None,
+            ))
+            terminal = lcrl.record_attachment_upload_failure_command(Namespace(
+                state=str(state_path), attempt_id=retry["attempt_id"], reason="browser_filechooser_unavailable", at=None,
+            ))
+            self.assertEqual(terminal["action"], "attachment_upload_capability_missing")
+            self.assertFalse(terminal["single_recovery_available"])
+            self.assertFalse(terminal["formal_review_allowed"])
+
+    def test_repository_commit_mode_does_not_require_attachment_capability(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            prepared = lcrl.prepare_repository_commit_review_command(Namespace(
+                state=str(state_path), project_path=str(root), remote_url="https://github.com/example/project.git",
+                branch="main", remote_commit_reachable=True, private_access_verified=True,
+                fallback_output_dir=str(root / "fallback"), max_volume_bytes=20 * 1024 * 1024,
+            ))
+            result = lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="missing", transport="none", platform_declared=True, at=None,
+            ))
+            self.assertEqual(result["action"], "repository_commit_review_unaffected")
+            self.assertEqual(prepared["action"], "repository_access_receipt_required")
+
+    def test_replacement_chat_uses_same_pre_chat_capability_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            self.prepare_package(root, state_path)
+            state = lcrl.load_state(state_path)
+            state["reviewer_chat"]["generation"] += 1
+            lcrl.require_project_context_refresh_for_reviewer(state)
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            result = lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="missing", transport="none", platform_declared=True, at=None,
+            ))
+            self.assertEqual(result["action"], "attachment_upload_capability_missing")
+            self.assertFalse(result["chat_creation_allowed"])
+
+    def test_alpha82_rollover_recovery_id_is_preserved_for_same_package_retry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            package = self.prepare_package(root, state_path)
+            state = lcrl.load_state(state_path)
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_reason": "round_budget",
+                "rollover_authorization_id": "rollover-80752eb8baec2b18",
+                "rollover_failure_code": "browser_filechooser_unavailable",
+                "rollover_failure_count": 1,
+                "rollover_recovery_id": "rollover-recovery-80752eb8baec2b18",
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            declared = lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="supported", transport="direct_file_upload",
+                platform_declared=True, at=None,
+            ))
+            retry = lcrl.authorize_attachment_upload_command(Namespace(
+                state=str(state_path), recovery_id="rollover-recovery-80752eb8baec2b18", at=None,
+            ))
+            self.assertEqual(declared["action"], "attachment_upload_capability_supported")
+            self.assertEqual(retry["attempt_number"], 2)
+            self.assertEqual(retry["package_identity"], package["context_identity"])
+
+    def test_alpha82_rollover_becomes_terminal_when_host_has_no_direct_upload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            self.prepare_package(root, state_path)
+            state = lcrl.load_state(state_path)
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked", "rollover_reason": "round_budget",
+                "rollover_authorization_id": "rollover-80752eb8baec2b18",
+                "rollover_failure_code": "browser_filechooser_unavailable",
+                "rollover_failure_count": 1,
+                "rollover_recovery_id": "rollover-recovery-80752eb8baec2b18",
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            result = lcrl.declare_attachment_upload_capability_command(Namespace(
+                state=str(state_path), status="missing", transport="none", platform_declared=True, at=None,
+            ))
+            updated = lcrl.load_state(state_path)
+            self.assertEqual(result["action"], "attachment_upload_capability_missing")
+            self.assertEqual(updated["reviewer_chat"]["rollover_failure_code"], "attachment_upload_capability_missing")
+            self.assertEqual(lcrl.rollover_future_action(updated), (
+                True, "wait_for_supported_attachment_upload_capability",
+            ))
 
 
 class AtomicReplaceTests(unittest.TestCase):
@@ -369,12 +786,40 @@ def _acquire_account_browser_slot_worker(
 
 
 class ControllerTests(unittest.TestCase):
+    def seed_test_context_receipt(self, state_path: Path):
+        state = lcrl.load_state(state_path)
+        state["project_context"].update({
+            "status": "attachment_confirmed", "scope": "full_source",
+            "identity": "test-context", "package_names": ["fixture-context.zip"],
+            "package_paths": [str(state_path.parent / "fixture-context.zip")],
+            "package_sha256": ["0" * 64],
+            "generation": state["reviewer_chat"]["generation"],
+            "reviewer_thread_id": state["confirmation"]["reviewer_thread_id"],
+            "receipt_confirmed_at": lcrl.utc_now(),
+        })
+        lcrl.save_state(state_path, state, expected_revision=state["revision"])
+
     def make_state(self, root: Path):
         state_path = root / "state.json"
         state = lcrl.new_state(
             "a1", "implementation", root, "review-chat", continuation_mode="automatic"
         )
         state["runtime"]["session_log"] = str(root / "session.jsonl")
+        # Existing controller tests exercise downstream state-machine behavior;
+        # give those synthetic workflows an explicit (never production-created)
+        # current-Chat context receipt so the new fail-closed gate is not bypassed.
+        state["project_context"].update({
+            "status": "attachment_confirmed", "scope": "full_source",
+            "identity": "test-context", "package_names": ["fixture-context.zip"],
+            "package_paths": [str(root / "fixture-context.zip")],
+            "package_sha256": ["0" * 64], "reviewer_thread_id": "review-chat",
+            "receipt_confirmed_at": lcrl.utc_now(),
+        })
+        state["attachment"].update({
+            "required": True, "verification": "verified",
+            "expected_names": ["fixture-context.zip"],
+            "observed_names": ["fixture-context.zip"], "verified_at": lcrl.utc_now(),
+        })
         lcrl.save_state(state_path, state)
         return state_path
 
@@ -722,7 +1167,7 @@ class ControllerTests(unittest.TestCase):
                 state=str(state_path), at="2026-08-17T08:00:01Z",
             ))
 
-            self.assertEqual(denied["action"], "account_browser_operation_conflict")
+            self.assertEqual(denied["action"], "reviewer_chat_rollover_pending")
             self.assertFalse(denied["slot_acquired"])
             gate = lcrl.load_account_browser_gate(registry)
             self.assertEqual(gate["slots"][0]["lease_id"], startup["lease_id"])
@@ -1271,9 +1716,363 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(result["action"], "reviewer_chat_rollover_required")
             self.assertEqual(result["completed_formal_rounds"], 2)
             self.assertEqual(blocked["review"]["status"], "local_work")
-            self.assertEqual(blocked["reviewer_chat"]["status"], "rollover_required")
+            self.assertEqual(blocked["reviewer_chat"]["status"], "rollover_pending")
             self.assertFalse(result["browser_runtime_initialization_allowed"])
             self.assertFalse(lcrl.reviewer_chat_browser_access_allowed(blocked))
+
+    def test_account_browser_gate_atomically_rolls_over_before_any_old_chat_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            binding = dict(state["review"]["run_binding"])
+            for number in range(1, 3):
+                state["review_history"].append({
+                    "run_binding": dict(binding),
+                    "request_message_id": f"request-{number}",
+                    "response_message_id": f"response-{number}",
+                })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+
+            result = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="review-chat", operation="startup",
+                state=str(state_path), registry=str(root / "account-gate.json"),
+                at="2026-08-18T09:00:00Z",
+            ))
+            updated = lcrl.load_state(state_path)
+
+            self.assertEqual(result["action"], "reviewer_chat_rollover_pending")
+            self.assertFalse(result["slot_acquired"])
+            self.assertFalse(result["browser_skill_read_allowed"])
+            self.assertFalse(result["browser_runtime_initialization_allowed"])
+            self.assertFalse(result["old_chat_access_allowed"])
+            self.assertTrue(result["continuation_required"])
+            self.assertEqual(result["workflow_status"], "换卷中")
+            self.assertEqual(updated["reviewer_chat"]["status"], "rollover_pending")
+
+    def test_rollover_creation_failure_has_one_recovery_and_never_fakes_review_waiting(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            revision = state["revision"]
+            authorization_id = lcrl.mark_reviewer_chat_rollover_required(
+                state, "round_budget",
+            )
+            lcrl.save_state(state_path, state, expected_revision=revision)
+
+            first = lcrl.record_reviewer_chat_rollover_failure_command(Namespace(
+                state=str(state_path), authorization_id=authorization_id,
+                failure_code="provisioning_failed", at="2026-08-18T09:00:00Z",
+            ))
+            duplicate = lcrl.record_reviewer_chat_rollover_failure_command(Namespace(
+                state=str(state_path), authorization_id=authorization_id,
+                failure_code="provisioning_failed", at="2026-08-18T09:00:01Z",
+            ))
+            updated = lcrl.load_state(state_path)
+
+            self.assertEqual(first["action"], "reviewer_chat_rollover_blocked")
+            self.assertEqual(first["workflow_status"], "换卷受阻")
+            self.assertTrue(first["single_recovery_available"])
+            self.assertTrue(first["continuation_required"])
+            self.assertFalse(first["turn_completion_allowed"])
+            self.assertFalse(first["user_choice_required"])
+            self.assertTrue(first["future_action_valid"])
+            self.assertEqual(first["next_action"], "run_single_rollover_recovery")
+            self.assertEqual(duplicate["recovery_id"], first["recovery_id"])
+            self.assertTrue(duplicate["duplicate"])
+            self.assertEqual(updated["review"]["status"], "local_work")
+            self.assertNotEqual(updated["review"]["status"], "review_waiting")
+
+    def test_waiting_round_budget_keeps_old_wait_until_replacement_is_bound(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "a1", "implementation", root, "review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "review-chat")
+            state = lcrl.load_state(state_path)
+            binding = dict(state["review"]["run_binding"])
+            state["review_history"].append({
+                "run_binding": binding,
+                "request_message_id": "request-prior",
+                "response_message_id": "response-prior",
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+
+            self.transition(
+                state_path, "review_submit_pending", stage="WAIT-ROLLOVER",
+                fingerprint="waiting-rollover-packet",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="review-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", stage="WAIT-ROLLOVER",
+                waiting_since=now, request_turn_id="turn-current",
+                request_message_id="request-current", request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            automation_id = "wait-round-budget"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            claimed = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+
+            rollover = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="review-chat", operation="waiting_read",
+                state=str(state_path), registry=str(root / "account-gate.json"),
+                at="2026-08-19T09:00:00Z",
+            ))
+            pending = lcrl.load_state(state_path)
+
+            self.assertEqual(
+                rollover["action"], "reviewer_chat_rollover_continuation",
+            )
+            self.assertTrue(rollover["continuation_required"])
+            self.assertFalse(rollover["turn_completion_allowed"])
+            self.assertFalse(rollover["user_choice_required"])
+            self.assertEqual(
+                rollover["next_action"], "provision_one_replacement_reviewer_chat",
+            )
+            self.assertEqual(pending["reviewer_chat"]["status"], "rollover_pending")
+            self.assertEqual(pending["review"]["status"], "review_waiting")
+            self.assertTrue(pending["automation"]["waiting_check_active"])
+            self.assertEqual(
+                pending["automation"]["waiting_check_automation_id"], automation_id,
+            )
+            pending_status = lcrl.progress_query_command(Namespace(
+                state=str(state_path),
+            ))
+            self.assertTrue(pending_status["future_action_valid"])
+            self.assertEqual(
+                pending_status["future_action"],
+                "provision_one_replacement_reviewer_chat",
+            )
+
+            completed = lcrl.complete_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path),
+                authorization_id=rollover["rollover_authorization_id"],
+                new_reviewer_thread_id="123e4567-e89b-42d3-a456-426614174099",
+                url="https://chatgpt.com/c/123e4567-e89b-42d3-a456-426614174099",
+                browser_id="browser-replacement",
+                provider_tab_id="provider-replacement",
+                observed_title="Replacement reviewer", at=None,
+            ))
+            bound = lcrl.load_state(state_path)
+
+            self.assertEqual(completed["action"], "reviewer_chat_rollover_bound")
+            self.assertEqual(completed["next_action"], "delete_old_wait_then_finalize_rollover")
+            self.assertEqual(completed["waiting_check_automation_id"], automation_id)
+            self.assertTrue(bound["automation"]["waiting_check_active"])
+            self.assertEqual(bound["review"]["status"], "review_waiting")
+            self.assertEqual(
+                bound["reviewer_chat"]["pending_replacement"]["conversation_id"],
+                "123e4567-e89b-42d3-a456-426614174099",
+            )
+            bound_status = lcrl.progress_query_command(Namespace(
+                state=str(state_path),
+            ))
+            self.assertTrue(bound_status["future_action_valid"])
+            self.assertEqual(
+                bound_status["future_action"],
+                "delete_old_wait_then_finalize_rollover",
+            )
+
+            before_wrong_finalize = state_path.read_bytes()
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "deleted waiting task does not match",
+            ):
+                lcrl.finalize_reviewer_chat_rollover_command(Namespace(
+                    state=str(state_path), deleted_automation_id="wrong-wait",
+                ))
+            self.assertEqual(state_path.read_bytes(), before_wrong_finalize)
+
+            finalized = lcrl.finalize_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), deleted_automation_id=automation_id,
+            ))
+            final_state = lcrl.load_state(state_path)
+            self.assertEqual(finalized["action"], "reviewer_chat_rollover_completed")
+            self.assertFalse(final_state["automation"]["waiting_check_active"])
+            self.assertEqual(final_state["review"]["status"], "review_submit_pending")
+            self.assertEqual(finalized["next_action"], "attach_complete_project_context_and_rollover_handoff")
+            self.assertEqual(final_state["project_context"]["status"], "package_prepared")
+
+    def test_waiting_read_authorization_converts_round_budget_to_bounded_rollover(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry = root / "account-gate.json"
+            state = lcrl.new_state(
+                "a1", "implementation", root, "review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "review-chat")
+            state = lcrl.load_state(state_path)
+            state["review_history"].append({
+                "run_binding": dict(state["review"]["run_binding"]),
+                "request_message_id": "request-prior",
+                "response_message_id": "response-prior",
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            self.transition(
+                state_path, "review_submit_pending", stage="WAIT-ROLLOVER-AUTH",
+                fingerprint="waiting-rollover-auth-packet",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="review-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", stage="WAIT-ROLLOVER-AUTH",
+                waiting_since=now, request_turn_id="turn-current",
+                request_message_id="request-current", request_persisted_at=now,
+            )
+            token = lcrl.load_state(state_path)["automation"]["waiting_check_token"]
+            automation_id = "wait-round-budget-auth"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            claimed = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            lcrl.confirm_waiting_recovery_arm_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=claimed["lease_id"],
+                scheduled_rdate=claimed["waiting_check_expected_rdate"],
+            ))
+            slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation",
+                reviewer_thread_id="review-chat", operation="waiting_read",
+                state=None, registry=str(registry), at="2026-08-19T09:00:00Z",
+                profile=None, project_path=None, new_chat_authorization_id=None,
+                new_chat_local_work_status=None,
+            ))
+
+            rollover = lcrl.authorize_waiting_chat_read_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+                lease_id=claimed["lease_id"],
+                account_slot_lease_id=slot["lease_id"],
+                account_browser_registry=str(registry), at="2026-08-19T09:00:01Z",
+            ))
+            pending = lcrl.load_state(state_path)
+
+            self.assertEqual(rollover["action"], "reviewer_chat_rollover_continuation")
+            self.assertEqual(pending["reviewer_chat"]["status"], "rollover_pending")
+            self.assertEqual(
+                pending["automation"]["waiting_check_kind"], "rollover_continuation",
+            )
+            self.assertFalse(rollover["old_chat_access_allowed"])
+            self.assertFalse(rollover["chat_read_allowed"])
+            self.assertFalse(rollover["ordinary_wait_rearm_allowed"])
+            self.assertEqual(rollover["waiting_check_action"], "hold_for_rollover")
+            self.assertTrue(rollover["account_browser_slot_release_required"])
+            self.assertEqual(
+                rollover["rollover_account_browser_slot_request"]["operation"],
+                "startup",
+            )
+            self.assertNotIn("platform_wait_update", rollover)
+            self.assertFalse(rollover["user_choice_required"])
+            self.assertFalse(rollover["turn_completion_allowed"])
+            rendered = lcrl.render_waiting_check(state_path)
+            self.assertIn("正在更换评审 Chat", rendered)
+            self.assertNotIn("正在等待评审回复", rendered)
+            status = lcrl.progress_query_command(Namespace(state=str(state_path)))
+            self.assertEqual(status["workflow_status"], "换卷中")
+            self.assertEqual(status["user_status"], "正在开发")
+            self.assertIn("更换", status["user_message"])
+            with self.assertRaisesRegex(
+                lcrl.LCRLError, "rollover continuation cannot be rearmed",
+            ):
+                lcrl.rearm_waiting_check_command(Namespace(
+                    state=str(state_path), token=token,
+                    automation_id=automation_id, lease_id=claimed["lease_id"],
+                    reason="unspecified",
+                ))
+
+            repeated = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            self.assertEqual(
+                repeated["action"], "reviewer_chat_rollover_continuation",
+            )
+            self.assertFalse(repeated["ordinary_wait_rearm_allowed"])
+            self.assertNotIn("platform_wait_update", repeated)
+
+    def test_legacy_pending_round_budget_wait_migrates_before_poll_or_rearm(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "a1", "implementation", root, "review-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, "review-chat")
+            state = lcrl.load_state(state_path)
+            state["review_history"].append({
+                "run_binding": dict(state["review"]["run_binding"]),
+                "request_message_id": "request-prior",
+                "response_message_id": "response-prior",
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            self.transition(
+                state_path, "review_submit_pending", stage="LEGACY-PENDING",
+                fingerprint="legacy-pending-packet",
+            )
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id="review-chat", observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            now = lcrl.utc_now()
+            self.transition(
+                state_path, "review_waiting", stage="LEGACY-PENDING",
+                waiting_since=now, request_turn_id="turn-current",
+                request_message_id="request-current", request_persisted_at=now,
+            )
+            current = lcrl.load_state(state_path)
+            token = current["automation"]["waiting_check_token"]
+            automation_id = "legacy-pending-wait"
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            lcrl.require_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), reason="round_budget", registry=None,
+            ))
+            legacy = lcrl.load_state(state_path)
+            self.assertEqual(legacy["reviewer_chat"]["status"], "rollover_pending")
+            self.assertEqual(legacy["automation"]["waiting_check_kind"], "review_reply")
+
+            migrated = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=token, automation_id=automation_id,
+            ))
+            updated = lcrl.load_state(state_path)
+            self.assertEqual(
+                migrated["action"], "reviewer_chat_rollover_continuation",
+            )
+            self.assertEqual(
+                updated["automation"]["waiting_check_kind"],
+                "rollover_continuation",
+            )
+            self.assertFalse(migrated["ordinary_wait_rearm_allowed"])
+            self.assertNotIn("platform_wait_update", migrated)
 
     def test_chat_round_budget_survives_new_review_run_binding(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1373,7 +2172,7 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(result["old_chat_access_allowed"])
             self.assertEqual(updated["review"]["status"], "local_work")
             self.assertEqual(updated["review"]["goal_mode"], "continuous")
-            self.assertEqual(updated["reviewer_chat"]["status"], "rollover_required")
+            self.assertEqual(updated["reviewer_chat"]["status"], "rollover_pending")
 
     def test_completed_rollover_binds_one_new_chat_and_resets_round_count(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1482,7 +2281,7 @@ class ControllerTests(unittest.TestCase):
             )
             self.assertFalse(scheduled["browser_runtime_initialization_allowed"])
             queued = lcrl.load_state(state_path)
-            self.assertEqual(queued["reviewer_chat"]["status"], "rollover_required")
+            self.assertEqual(queued["reviewer_chat"]["status"], "rollover_pending")
             self.assertEqual(queued["reviewer_chat"]["rollover_reason"], "rate_limited")
             self.assertEqual(queued["automation"]["waiting_check_kind"], "submission_retry")
             token = queued["automation"]["waiting_check_token"]
@@ -1751,7 +2550,7 @@ class ControllerTests(unittest.TestCase):
         return lcrl.transition(Namespace(**values))
 
     def bind_browser_tab(self, state_path: Path, reviewer_thread_id: str):
-        return lcrl.bind_browser_tab_command(Namespace(
+        result = lcrl.bind_browser_tab_command(Namespace(
             state=str(state_path),
             browser_id="iab-session-1",
             provider_tab_id="provider-tab-1",
@@ -1760,6 +2559,19 @@ class ControllerTests(unittest.TestCase):
             provisioned_chat=False,
             at=None,
         ))
+        state = lcrl.load_state(state_path)
+        if state["project_context"]["status"] == "context_refresh_required":
+            state["project_context"].update({
+                "status": "attachment_confirmed", "scope": "full_source",
+                "identity": "test-context", "package_names": ["fixture-context.zip"],
+                "package_paths": [str(state_path.parent / "fixture-context.zip")],
+                "package_sha256": ["0" * 64],
+                "generation": state["reviewer_chat"]["generation"],
+                "reviewer_thread_id": reviewer_thread_id,
+                "receipt_confirmed_at": lcrl.utc_now(),
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+        return result
 
     def test_browser_init_rejects_temporary_web_conversation_identity(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -2416,6 +3228,125 @@ class ControllerTests(unittest.TestCase):
                     )
                     self.assertEqual(recovered["mandatory_next_tool_mode"], "create")
                     self.assertTrue(recovered["platform_wait_creation_required"])
+
+    def test_stale_wait_recovery_yields_to_round_budget_rollover(self):
+        for lookup_result in ("found", "not_found"):
+            with self.subTest(lookup_result=lookup_result), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                state_path = self.make_state(root)
+                state = lcrl.load_state(state_path)
+                state["review_history"].append({
+                    "run_binding": dict(state["review"]["run_binding"]),
+                    "request_message_id": "request-prior",
+                    "response_message_id": "response-prior",
+                })
+                lcrl.save_state(
+                    state_path, state, expected_revision=state["revision"],
+                )
+                self.transition(
+                    state_path, "review_submit_pending", stage="STALE-ROLLOVER",
+                    fingerprint=f"stale-rollover-{lookup_result}",
+                )
+                lcrl.confirm_review_mode(Namespace(
+                    state=str(state_path), mode="extreme", at=None,
+                ))
+                now = lcrl.utc_now()
+                self.transition(
+                    state_path, "review_waiting", waiting_since=now,
+                    request_turn_id=f"turn-stale-rollover-{lookup_result}",
+                    request_message_id=f"message-stale-rollover-{lookup_result}",
+                    request_persisted_at=now,
+                )
+                waiting = lcrl.load_state(state_path)
+                token = waiting["automation"]["waiting_check_token"]
+                rdate = waiting["automation"]["waiting_check_expected_rdate"]
+                automation_id = f"platform-stale-rollover-{lookup_result}"
+                lcrl.bind_waiting_check_command(Namespace(
+                    state=str(state_path), token=token,
+                    automation_id=automation_id,
+                ))
+                lcrl.waiting_check_command(Namespace(
+                    state=str(state_path), token=token,
+                    automation_id=automation_id,
+                ))
+                stale = lcrl.load_state(state_path)
+                stale["runtime"]["action_lease_expires_at"] = "2000-01-01T00:00:00Z"
+                lcrl.save_state(
+                    state_path, stale, expected_revision=stale["revision"],
+                )
+                rdate = lcrl.load_state(state_path)["automation"][
+                    "waiting_check_expected_rdate"
+                ]
+                lcrl.require_reviewer_chat_rollover_command(Namespace(
+                    state=str(state_path), reason="round_budget", registry=None,
+                ))
+
+                lookup = lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20,
+                    reason="external_message_turn_entry", replace=False,
+                    implementation_thread_id="implementation",
+                ))
+                self.assertEqual(lookup["action"], "waiting_platform_lookup_required")
+                self.assertFalse(lookup["platform_wait_update_allowed"])
+                self.assertFalse(lookup["platform_wait_create_allowed"])
+                self.assertNotIn(
+                    "update_or_create_exactly_one_platform_wait",
+                    lookup["mandatory_next_action_sequence"],
+                )
+
+                recovered = lcrl.recover_stale_wait_command(Namespace(
+                    state=str(state_path), automation_id=automation_id,
+                    platform_lookup_result=lookup_result,
+                    implementation_thread_id="implementation",
+                ))
+                updated = lcrl.load_state(state_path)
+
+                self.assertEqual(
+                    recovered["action"], "reviewer_chat_rollover_continuation",
+                )
+                self.assertEqual(
+                    updated["reviewer_chat"]["status"], "rollover_pending",
+                )
+                self.assertEqual(
+                    updated["automation"]["waiting_check_kind"],
+                    "rollover_continuation",
+                )
+                self.assertEqual(updated["automation"]["waiting_check_token"], token)
+                self.assertEqual(
+                    updated["automation"]["waiting_check_expected_rdate"], rdate,
+                )
+                self.assertEqual(
+                    updated["automation"]["waiting_check_automation_id"],
+                    automation_id,
+                )
+                self.assertEqual(
+                    updated["automation"]["waiting_check_claimed_id"], "none",
+                )
+                self.assertEqual(updated["runtime"]["action_lease_id"], "none")
+                self.assertFalse(recovered["old_chat_access_allowed"])
+                self.assertFalse(recovered["ordinary_wait_rearm_allowed"])
+                self.assertFalse(recovered["platform_wait_update_allowed"])
+                self.assertFalse(recovered["platform_wait_create_allowed"])
+                self.assertNotIn("platform_wait_update", recovered)
+                self.assertNotIn("platform_wait_create", recovered)
+                self.assertEqual(
+                    recovered["rollover_account_browser_slot_request"]["operation"],
+                    "startup",
+                )
+                if lookup_result == "found":
+                    self.assertEqual(
+                        recovered["platform_wait_retirement_mode"],
+                        "delete_after_replacement_binding",
+                    )
+                    self.assertIn(
+                        "delete_current_one_shot_wait_after_replacement_binding",
+                        recovered["mandatory_next_action_sequence"],
+                    )
+                else:
+                    self.assertEqual(
+                        recovered["platform_wait_retirement_mode"],
+                        "already_absent_lookup_proof",
+                    )
 
     def test_stale_wait_recovery_rejects_wrong_identity_without_mutation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -8082,6 +9013,7 @@ class ControllerTests(unittest.TestCase):
                 url="https://chatgpt.com/c/provisioned-resubmit",
                 observed_title="Provisioned reviewer", provisioned_chat=True, at=None,
             ))
+            self.seed_test_context_receipt(state_path)
             lcrl.confirm_review_mode(Namespace(
                 state=str(state_path), mode="extreme", source="in_app_browser",
                 reviewer_thread_id="provisioned-resubmit", observed_label="极高",
@@ -8401,6 +9333,7 @@ class ControllerTests(unittest.TestCase):
                 observed_title="Existing reviewer", provisioned_chat=False,
                 canonical_url_only=True, at=None,
             ))
+            self.seed_test_context_receipt(state_path)
             self.assertEqual(bound["action"], "browser_tab_bound")
             self.assertFalse(bound["browser_binding"]["provisioned_chat"])
             self.assertEqual(
@@ -8501,6 +9434,7 @@ class ControllerTests(unittest.TestCase):
                 url="https://chatgpt.com/c/restarted-browser-chat",
                 observed_title="Provisioned reviewer", provisioned_chat=True, at=None,
             ))
+            self.seed_test_context_receipt(state_path)
             lcrl.confirm_review_mode(Namespace(
                 state=str(state_path), mode="extreme", source="in_app_browser",
                 reviewer_thread_id="restarted-browser-chat", observed_label="极高",
@@ -8961,37 +9895,18 @@ class ControllerTests(unittest.TestCase):
                 state=str(state_path), token=token, automation_id=wait_id,
                 outcome="rate_limited", error="请求过于频繁", at=now,
             ))
-            self.assertEqual(first["action"], "schedule_browser_rate_limit_probe")
-            self.assertEqual(first["retry_after_seconds"], 900)
+            self.assertEqual(first["action"], "browser_rate_limit_cooldown_no_probe")
+            self.assertEqual(first["retry_after_seconds"], 1800)
             self.assertFalse(first["reload_same_tab_once"])
+            self.assertFalse(first["proactive_probe_allowed"])
+            self.assertFalse(first["old_chat_access_allowed"])
             self.assertEqual(first["browser_consecutive_rate_limits"], 1)
             limited = lcrl.load_state(state_path)
             self.assertEqual(limited["recovery"]["network_state"], "rate_limited")
             self.assertFalse(limited["recovery"]["browser_reload_same_tab_required"])
             self.assertEqual(limited["confirmation"]["reviewer_thread_id"], "web-chat-rate-limited")
 
-            rearmed = lcrl.rearm_waiting_check_command(Namespace(
-                state=str(state_path), token=token, automation_id=wait_id,
-            ))
-            second_token = rearmed["waiting_check_token"]
-            second_claim = lcrl.waiting_check_command(Namespace(
-                state=str(state_path), token=second_token, automation_id=wait_id,
-            ))
-            second_auth = self.authorize_waiting_read(
-                state_path, second_token, wait_id, second_claim["lease_id"],
-            )
-            self.assertEqual(second_auth["action"], "browser_read_authorized")
-            self.assertFalse(second_auth["reload_same_tab_once"])
-            lcrl.release_action(Namespace(
-                state=str(state_path), lease_id=second_claim["lease_id"], force=False,
-            ))
-            second = lcrl.browser_network_observation_command(Namespace(
-                state=str(state_path), token=second_token, automation_id=wait_id,
-                outcome="rate_limited", error="请求过于频繁", at=lcrl.utc_now(),
-            ))
-            self.assertEqual(second["retry_after_seconds"], 1800)
-            self.assertEqual(second["browser_consecutive_rate_limits"], 2)
-            self.assertFalse(second["reload_same_tab_once"])
+            self.assertEqual(limited["review"]["status"], "review_waiting")
 
     def test_legacy_browser_confirmation_is_invalidated_on_load(self):
         with tempfile.TemporaryDirectory() as directory:

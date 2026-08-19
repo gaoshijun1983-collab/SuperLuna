@@ -2,8 +2,8 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.76",
-      "title": "Keep legacy missing-wait recovery on the automatic path",
+      "version": "0.2.0-alpha.83",
+      "title": "Fail closed on unsupported reviewer attachment upload",
       "upgrade_prerequisites": [
         "Run the repository test suite, controller selftest, and release archive verifier.",
         "Confirm every expected technical blocker exposes a stable reason code and concrete recovery action without requesting a product choice.",
@@ -11,6 +11,9 @@
         "Confirm the current candidate remains Alpha and Public Beta is blocked.",
         "Confirm SuperLuna repository self-retests use superluna_repo_retest_v1 with the exact task-hash project and state paths.",
         "Confirm generic-profile compatibility remains available for user-selected, host-authorized external projects.",
+        "Confirm complete-source attachment capability is declared before account-slot acquisition, browser startup, or first/replacement Chat creation.",
+        "Confirm one failed upload preserves the same package and permits only one controlled recovery; a second failure is terminal for that host.",
+        "Confirm a current-composer receipt matches every package name, size, and SHA-256 before text send, while repository-commit review remains independent.",
         "Confirm browser read stays denied until the same waiting task is moved to and confirmed at the claim-expiry recovery RDATE.",
         "Confirm submission recovery receives both current exact-URL counts and never navigates when one exact fixed Chat is already visible.",
         "Confirm zero exact current-packet matches continues to the existing first-send authorization while one trusted match reconciles without resending.",
@@ -54,6 +57,8 @@
         "Completing one rollover binds exactly one new canonical reviewer identity and resets the state-local formal round count.",
         "A restarted browser with one visible exact fixed Chat reuses it without navigation, rejects ambiguity, and commits the new browser identity only after submission confirmation.",
         "A provisioned replacement reviewer Chat reaches its first submission without a second browser initialization, navigation, refresh, or full-history scan."
+        ,"A round-budget waiting occurrence changes to rollover_continuation, rejects ordinary reply rearm, and returns the one replacement-Chat startup sequence without reading the old Chat."
+        ,"A stale found or missing platform wait cannot rotate a reply token or RDATE after round-budget rollover is required; it preserves the exact wait identity and returns only the replacement-Chat startup continuation."
       ],
       "evidence_scope": "local_only",
       "real_device_evidence": false,

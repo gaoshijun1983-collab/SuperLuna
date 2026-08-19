@@ -3,23 +3,64 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.76`（Python 元数据：`0.2.0a76`）
-- 当前源码控制器：132
+- 版本：`0.2.0-alpha.83`（Python 元数据：`0.2.0a83`）
+- 当前源码控制器：139
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-18.89`
-- 候选日期：2026-08-18
+- 当前源码 Skill 修订：`2026-08-19.96`
+- 候选日期：2026-08-19
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：381/381 通过；控制器 selftest：15/15 通过。
+- 仓库测试：419/419 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 两次独立构建得到完全一致的 98 文件源码包，最终归档已通过源码一致性校验。
-- 上述结果只证明本地 Alpha 76 候选可重复构建，不代表真实 App 闭环或公开 Beta
+- 确定性源码包与 SHA-256 将由本轮最终 build/verify 写入
+  `dist/SuperLuna-0.2.0-alpha.83.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 83 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
+
+### 0. waiting occurrence 换卷保持唯一未来动作
+
+- Controller 139 / Skill revision `2026-08-19.96` 在账户名额、浏览器和首次/replacement Chat
+  创建前检查宿主附件上传能力。只有显式 `direct_file_upload` 才能上传；filechooser 或上传失败
+  一次关闭并保留同包，仅允许一次恢复，第二次进入 `attachment_upload_capability_missing`。
+  当前 composer 回执必须核对 package identity、文件名、大小与 SHA-256，未确认不得发送文字。
+  当前 bundled Browser 静态接口只记录 filechooser 流程，没有独立 direct-upload API；因此本次
+  macOS 实测阻塞在该宿主应收束为 `attachment_upload_capability_missing`，不能再次自动点 chooser。
+- Controller 138 / Skill revision `2026-08-19.95` 对 clean Git 项目优先使用 exact
+  repository commit 审阅，要求完整 tree access receipt 与每轮 base→head diff 独立证据；
+  dirty、remote/commit 不可达或私库访问未核验时自动回退完整源码附件包。
+- Controller 137 / Skill revision `2026-08-19.94` 新增完整源码材料包身份与当前 Chat
+  回执门；路径字符串、部分文件、未齐分卷及未核验 Git commit 均不能进入正式审阅。
+- Controller 136 / Skill revision `2026-08-19.93` 修复 stale platform wait lookup
+  抢在换卷迁移前旋转普通等待的问题。`recover-stale-wait(found/not_found)` 现在先检查轮数预算和
+  `rollover_pending`，保持原 token、RDATE 与 automation identity，清理过期 claim 后直接返回
+  `rollover_continuation`。`found` 只允许替代 Chat 绑定后删除旧任务；`not_found` 保留精确查询
+  结果作为退休证明。两者都禁止平台 update/create、普通 rearm 与旧 Chat 访问。
+
+- Controller 135 / Skill revision `2026-08-19.92` 修复真实 heartbeat 在
+  `round_budget` 后仍复用 `waiting_read` 并每约 5 分钟重排的问题。等待读取授权现在会原子持久化
+  `rollover_continuation`，拒绝旧 Chat 读取与普通 rearm，并返回“释放读取名额 → 唯一 startup →
+  创建/绑定替代 Chat → 删除旧等待 → finalize”的有界顺序；同一等待提示和 UI 明确显示换卷中，
+  不再伪装为等待回复。
+- Controller 134 / Skill revision `2026-08-19.91` 在 waiting occurrence 命中
+  `round_budget` 时保留原单次等待作为恢复锚点，不再回到普通 `review_waiting` 空转。
+- 唯一替代 Chat 成功创建并持久绑定前，旧等待不得删除；绑定后必须先取得平台真实删除证明，
+  再通过 `finalize-reviewer-chat-rollover` 原子退休旧卷并续接唯一待提交材料。
+- 创建失败保持一个幂等技术恢复，`user_choice_required=false`；status/doctor 会把没有有效
+  未来动作的未完成换卷判为错误。
+
+### 0. 正式轮数预算在浏览器启动前原子换卷
+
+- Controller 133 / Skill revision `2026-08-18.90` 把正式轮数预算检查移入账户浏览器门；
+  任何浏览器初始化、旧 Chat 页面加载或历史读取前都会先检查 state。满 2 轮时原子进入
+  `rollover_pending`，不发放浏览器名额，并由原实施任务自动建立唯一替代 Chat 链。
+- 替代 Chat 创建失败只记录一个 `rollover_recovery_id` 并进入 `rollover_blocked`；重复报告
+  返回同一恢复身份，不会制造第二个任务、第二个 Chat、第二次发送或 `review_waiting` 假状态。
+  UI/状态出口明确区分“等待回复”“换卷中”“换卷受阻”。
 
 ### 0. 旧版等待作废入口不再终止自动恢复
 
@@ -1162,8 +1203,8 @@
 - Windows 当前候选的功能闭环已真实完成，但无外部唤醒的自动调度闭环仍未验证；macOS 浏览器
   版本矩阵也未完成。旧 App E5 只保留为历史故障证据，不计入浏览器优先发布门。
 
-因此 Controller 132 / Alpha 76 仍只适合继续开发和技术测试。本轮仓库回归 381/381 通过，
+因此 Controller 135 / Alpha 79 仍只适合继续开发和技术测试。本轮仓库回归 386/386 通过；
 控制器 selftest 15/15、closure-check、Skill、插件、决策登记、里程碑与 Beta 证据格式校验均通过；
 包含现代 UUID v6-v8 reviewer Chat 身份绑定、跨运行累计两轮上限与所有绑定 Chat 只读末尾的反例；
-Alpha 76 最终归档已通过双构建一致性校验，但这些仍是本地证据，真实连续闭环和
+Alpha 78 最终归档已通过双构建一致性校验，但这些仍是本地证据，真实连续闭环和
 平台矩阵仍未完成，不应宣称 Public Beta 或正式版本就绪。

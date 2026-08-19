@@ -18,6 +18,7 @@
     "browser_binding",
     "binding",
     "attachment",
+    "project_context",
     "capability_probes",
     "next_operation",
     "model_policy",
@@ -89,7 +90,7 @@
           "description": "Identity of the single currently authorized future waiting-check occurrence; rotated before updating the stable platform heartbeat."
         },
         "waiting_check_active": {"type": "boolean"},
-        "waiting_check_kind": {"enum": ["none", "review_reply", "submission_retry"]},
+        "waiting_check_kind": {"enum": ["none", "review_reply", "submission_retry", "rollover_continuation"]},
         "waiting_check_account_registry": {"type": "string"},
         "waiting_check_automation_id": {
           "type": "string",
@@ -322,15 +323,45 @@
         "status",
         "rollover_reason",
         "rollover_authorization_id",
+        "rollover_recovery_id",
+        "rollover_failure_code",
+        "rollover_failure_count",
+        "pending_replacement",
         "retired"
       ],
       "properties": {
         "mode": {"const": "bounded_series_v1"},
         "generation": {"type": "integer", "minimum": 1},
         "max_formal_rounds": {"const": 2},
-        "status": {"enum": ["active", "rollover_required"]},
+        "status": {"enum": ["active", "rollover_pending", "rollover_blocked"]},
         "rollover_reason": {"enum": ["none", "round_budget", "rate_limited"]},
         "rollover_authorization_id": {"type": "string"},
+        "rollover_recovery_id": {"type": "string"},
+        "rollover_failure_code": {"type": "string"},
+        "rollover_failure_count": {"type": "integer", "minimum": 0, "maximum": 1},
+        "pending_replacement": {
+          "oneOf": [
+            {"const": "none"},
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "conversation_id", "conversation_url", "browser_id",
+                "provider_tab_id", "observed_title", "bound_at",
+                "waiting_check_automation_id"
+              ],
+              "properties": {
+                "conversation_id": {"type": "string"},
+                "conversation_url": {"type": "string"},
+                "browser_id": {"type": "string"},
+                "provider_tab_id": {"type": "string"},
+                "observed_title": {"type": "string"},
+                "bound_at": {"type": "string"},
+                "waiting_check_automation_id": {"type": "string"}
+              }
+            }
+          ]
+        },
         "retired": {
           "type": "array",
           "maxItems": 32,
@@ -434,10 +465,47 @@
         "observed_names": {"type": "array", "items": {"type": "string"}}
       }
     },
+    "project_context": {
+      "type": "object",
+      "required": ["schema_version", "generation", "status", "scope", "identity", "manifest_path", "package_paths", "package_names", "package_sha256", "file_count", "total_bytes", "included_files", "uncovered_files", "reviewer_thread_id", "receipt_confirmed_at", "repository_url", "repository_identity", "commit_sha", "branch", "tree_manifest_hash", "canaries", "repository_access_receipt", "round_review", "github_access_verified", "runtime_evidence"],
+      "properties": {
+        "schema_version": {"const": 1},
+        "generation": {"type": "integer", "minimum": 1},
+        "status": {"enum": ["context_refresh_required", "partial_materials", "package_prepared", "attachment_confirmed", "github_commit_confirmed", "repository_access_receipt_required", "repository_access_confirmed", "repository_round_ready"]},
+        "scope": {"enum": ["full_source", "partial", "github_commit", "repository_commit_review"]},
+        "package_paths": {"type": "array", "items": {"type": "string"}},
+        "package_names": {"type": "array", "items": {"type": "string"}},
+        "package_sha256": {"type": "array", "items": {"type": "string"}},
+        "included_files": {"type": "array", "items": {"type": "string"}},
+        "uncovered_files": {"type": "array", "items": {"type": "string"}},
+        "canaries": {"type": "array", "items": {"type": "object"}},
+        "github_access_verified": {"type": "boolean"}
+      }
+    },
     "capability_probes": {
       "type": "object",
-      "required": ["terra_next_turn"],
-      "properties": {"terra_next_turn": {"enum": ["unverified", "supported", "unsupported"]}}
+      "required": ["terra_next_turn", "attachment_upload"],
+      "properties": {
+        "terra_next_turn": {"enum": ["unverified", "supported", "unsupported"]},
+        "attachment_upload": {
+          "type": "object",
+          "required": ["status", "transport", "platform_declared", "package_identity", "attempt_id", "attempt_count", "recovery_id", "recovery_used", "failure_reason", "composer_identity", "platform_receipt_id", "confirmed_at"],
+          "properties": {
+            "status": {"enum": ["unverified", "supported", "authorized", "blocked", "missing", "confirmed"]},
+            "transport": {"enum": ["none", "direct_file_upload"]},
+            "platform_declared": {"type": "boolean"},
+            "package_identity": {"type": "string"},
+            "attempt_id": {"type": "string"},
+            "attempt_count": {"type": "integer", "minimum": 0, "maximum": 2},
+            "recovery_id": {"type": "string"},
+            "recovery_used": {"type": "boolean"},
+            "failure_reason": {"type": "string"},
+            "composer_identity": {"type": "string"},
+            "platform_receipt_id": {"type": "string"},
+            "confirmed_at": {"type": "string"}
+          }
+        }
+      }
     },
     "next_operation": {
       "type": "object",
@@ -851,6 +919,32 @@
                   "status": {
                     "enum": ["review_receipt_pending", "review_waiting"]
                   }
+                }
+              }
+            }
+          },
+          {
+            "required": ["automation", "review", "reviewer_chat"],
+            "properties": {
+              "automation": {
+                "required": ["heartbeat_mode", "waiting_check_kind"],
+                "properties": {
+                  "heartbeat_mode": {"const": "waiting_only"},
+                  "waiting_check_kind": {"const": "rollover_continuation"}
+                }
+              },
+              "review": {
+                "required": ["status"],
+                "properties": {
+                  "status": {
+                    "enum": ["review_receipt_pending", "review_waiting"]
+                  }
+                }
+              },
+              "reviewer_chat": {
+                "required": ["status"],
+                "properties": {
+                  "status": {"enum": ["rollover_pending", "rollover_blocked"]}
                 }
               }
             }

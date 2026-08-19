@@ -40,9 +40,31 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.76`, Controller 132, Skill `2026-08-18.89`.
+- Source candidate: `0.2.0-alpha.83`, Controller 139, Skill `2026-08-19.96`.
+- Complete-source attachment runs now require a host-declared direct upload
+  capability before Chat/browser startup and an exact current-composer receipt
+  over package identity, names, sizes, and SHA-256 values before text send. One
+  controlled retry reuses the same package; a second failure is a terminal host
+  capability blocker. Repository-commit mode is unaffected.
+- Clean Git-backed projects prefer `repository_commit_review`: canonical remote, repository identity, exact commit, tree manifest, root+nested blob canaries, current-Chat access receipt, and a separately verified base→head round manifest. Any unreachable/dirty/unverified case falls back to the complete source attachment package.
+- Formal review is context-receipt gated: complete source packages have deterministic manifests and split-volume hashes; legacy and replacement Chat states require a fresh current-generation receipt. Source coverage and runtime evidence remain separate.
+- Stale platform-wait lookup recovery now checks round budget and rollover state
+  before rotating any reply token or RDATE. Found and missing lookups both hand
+  control directly to the single replacement-Chat startup continuation.
+- A round-budget waiting occurrence now changes its bound one-shot from
+  `review_reply` to `rollover_continuation`; neither the account-gate branch nor
+  the final waiting-read authorization can return to a five-minute reply poll.
+- A due reply wait that reaches the reviewer round budget is now the atomic
+  rollover recovery anchor. It remains bound until the unique replacement Chat
+  is durably recorded; only a matching platform deletion proof can finalize the
+  rollover and continue the single pending submission. Failure retains one
+  technical recovery, and status/doctor reject a rollover with no future action.
+- The account-browser gate now checks the bound reviewer Chat budget before any
+  browser permission. Exhaustion atomically enters `rollover_pending`; one
+  provisioning failure becomes `rollover_blocked` with one recovery identity
+  and never masquerades as `review_waiting`.
 - Frozen candidate commit: `dc0ed1c6f3ee94e64ce51bdb4c4eaac0ace14082`.
-- Alpha 76 repository regression passed 381/381. Controller selftest passed
+- Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the
   same verified 98-file source archive. This is local Alpha evidence only.
