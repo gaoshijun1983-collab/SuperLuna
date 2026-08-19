@@ -24,9 +24,14 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.84`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 140 / Skill revision
-`2026-08-19.97` reroutes a clean, reachable exact-commit repository rollover
+The current source candidate is `0.2.0-alpha.85`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 141 / Skill revision
+`2026-08-19.98` makes ordinary turn entry expose the repository preparation
+continuation before an old attachment blocker can stop the state owner. The
+preparation command requires the exact task, a clean worktree, canonical HTTPS
+origin, a remote-tracked HEAD, anonymous exact-commit reachability, a full tree,
+and root+nested canaries. It never opens a browser or fabricates the replacement
+Chat access receipt. Controller 140 / Skill revision `2026-08-19.97` reroutes a clean, reachable exact-commit repository rollover
 before the attachment capability gate. It clears only the stale attachment
 blocker, preserves a hashed structured rollover handoff, and still requires a
 fresh replacement-Chat repository access receipt. Complete-source attachment

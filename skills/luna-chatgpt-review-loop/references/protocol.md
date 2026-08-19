@@ -116,6 +116,15 @@ the unique rollover authorization, binds a deterministic structured handoff,
 and returns to the one replacement-Chat startup. No repository access receipt
 is fabricated; the replacement Chat must prove exact commit, full tree, and both
 blob canaries before formal review.
+An ordinary turn entry for a legacy attachment-blocked rollover first projects
+`repository_rollover_preparation_required`, never an indefinite attachment
+capability wait, when local exact-repository facts are complete. The sole next
+controller command is `prepare-repository-rollover-recovery`. It is bound to the
+original implementation task and additionally proves anonymous exact-commit
+advertisement with credential helpers disabled. Missing identity, dirty state,
+unknown remote, absent remote tracking, unreachable commit, or missing canaries
+stays blocked with zero browser authority. Success restores `rollover_pending`
+but leaves the replacement Chat repository access receipt unconfirmed.
 It cannot inherit only a prose summary or the previous Chat receipt. Normal operations on a bound Chat are tail-only and
 return `full_history_scan_allowed=false`. The workflow never switches
 model/reasoning or sends through a second transport. The user explicitly

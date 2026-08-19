@@ -20,8 +20,13 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.84`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 140 / Skill revision `2026-08-19.97` 会在 replacement Chat 启动与附件
+当前源码候选版本是 `0.2.0-alpha.85`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 141 / Skill revision `2026-08-19.98` 会让普通 turn-entry 在旧附件阻断
+停止原 state-owner 之前，返回稳定的 `repository_rollover_preparation_required` 和唯一控制器入口
+`prepare-repository-rollover-recovery`。该入口只接受精确任务身份、clean worktree、canonical HTTPS
+origin、已被远端跟踪的 exact HEAD、无凭据可达的 exact commit、完整 tree 与根/嵌套 canary；失败时
+保持原阻断且浏览器权限为零，成功也仍不伪造 replacement Chat access receipt。
+Controller 140 / Skill revision `2026-08-19.97` 会在 replacement Chat 启动与附件
 能力门之前重新核对 clean、canonical、reachable 的 exact-commit 仓库。核对成功后只撤销旧附件
 阻断，恢复唯一 `rollover_pending`，保留 rollover authorization，并绑定包含已完成轮次、锁定决策、
 未解决问题、runtime/machine evidence 索引与 base→head 的结构化 handoff；replacement Chat 仍须重新

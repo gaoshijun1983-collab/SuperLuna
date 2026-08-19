@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 140
-SKILL_REVISION = "2026-08-19.97"
+CONTROLLER_VERSION = 141
+SKILL_REVISION = "2026-08-19.98"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -4247,7 +4247,7 @@ def rollover_future_action(state: dict[str, Any]) -> tuple[bool, str]:
         return valid, "delete_old_wait_then_finalize_rollover"
     if status == "rollover_blocked":
         if state.get("capability_probes", {}).get("attachment_upload", {}).get("status") == "missing":
-            return True, "wait_for_supported_attachment_upload_capability"
+            return True, "prepare_repository_rollover_or_fail_closed"
         valid = bool(
             reviewer_chat.get("rollover_recovery_id", "none") != "none"
             and state.get("recovery", {}).get("next_retry_not_before", "none") != "none"
@@ -8119,6 +8119,150 @@ def _repository_review_dirty(
     return False
 
 
+def _repository_transient_paths(state: dict[str, Any]) -> list[str]:
+    context = state.get("project_context", {})
+    return [
+        *context.get("package_paths", []),
+        context.get("manifest_path", "none"),
+    ]
+
+
+def repository_rollover_recovery_plan(
+    state_path: Path, state: dict[str, Any],
+) -> dict[str, Any]:
+    """Project a local-only exact repository recovery without claiming Chat access."""
+    project_root = Path(state.get("automation", {}).get("project_path", "none")).resolve()
+    if not project_root.is_dir():
+        return {"ready": False, "reason_code": "repository_project_missing",
+                "system_next_action": "restore the exact repository project path"}
+    try:
+        canonical_remote = _canonical_repository_url(
+            _git_output(project_root, "remote", "get-url", "origin")
+        )
+        head_commit = _git_output(project_root, "rev-parse", "HEAD").lower()
+    except LCRLError:
+        return {"ready": False, "reason_code": "repository_remote_unknown",
+                "system_next_action": "restore one canonical HTTPS origin remote"}
+    if not re.fullmatch(r"[0-9a-f]{40,64}", head_commit):
+        return {"ready": False, "reason_code": "repository_exact_commit_missing",
+                "system_next_action": "restore one exact repository commit"}
+    if _repository_review_dirty(
+        project_root, state_path, _repository_transient_paths(state),
+    ):
+        return {"ready": False, "reason_code": "repository_worktree_dirty",
+                "system_next_action": "finish and commit the authorized repository changes before rollover"}
+    remote_refs = _git_output(
+        project_root, "for-each-ref", "--format=%(refname)",
+        "--contains", head_commit, "refs/remotes/origin",
+    ).splitlines()
+    remote_refs = [item for item in remote_refs if item != "refs/remotes/origin/HEAD"]
+    if not remote_refs:
+        return {"ready": False, "reason_code": "repository_commit_not_remote_tracked",
+                "system_next_action": "fetch or publish the exact commit before rollover"}
+    tracked, _commit, _dirty = _git_project_inventory(project_root)
+    root_paths = [path for path in tracked if "/" not in path]
+    nested_paths = [path for path in tracked if "/" in path]
+    if not root_paths or not nested_paths:
+        return {"ready": False, "reason_code": "repository_tree_canaries_unavailable",
+                "system_next_action": "restore one root and one nested tracked canary"}
+    tree_lines = _git_output(project_root, "ls-tree", "-r", "--full-tree", head_commit).splitlines()
+    tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
+    root_canary = "README.md" if "README.md" in root_paths else root_paths[0]
+    nested_canary = "src/nested.py" if "src/nested.py" in nested_paths else nested_paths[0]
+    canaries = [
+        {"path": root_canary, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{root_canary}")},
+        {"path": nested_canary, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{nested_canary}")},
+    ]
+    return {
+        "ready": True,
+        "project_root": str(project_root),
+        "canonical_remote_url": canonical_remote,
+        "head_commit": head_commit,
+        "tree_manifest_hash": tree_manifest_hash,
+        "canaries": canaries,
+    }
+
+
+def _anonymous_remote_contains_commit(remote_url: str, commit_sha: str) -> bool:
+    """Prove the exact commit is anonymously advertised without using credentials."""
+    environment = os.environ.copy()
+    environment.update({
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_ASKPASS": "/usr/bin/false",
+        "SSH_ASKPASS": "/usr/bin/false",
+    })
+    try:
+        result = subprocess.run(
+            ["git", "-c", "credential.helper=", "ls-remote", remote_url],
+            check=True, capture_output=True, text=True, timeout=30, env=environment,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
+    return any(line.split(maxsplit=1)[0] == commit_sha for line in result.stdout.splitlines())
+
+
+def prepare_repository_rollover_recovery_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Migrate one legacy attachment blocker through a verified public exact commit."""
+    state_path = Path(args.state).expanduser().resolve()
+    state = load_state(state_path)
+    reviewer_chat = state.get("reviewer_chat", {})
+    if str(args.implementation_thread_id) != state["automation"].get("implementation_thread_id"):
+        raise LCRLError("repository rollover recovery belongs to a different implementation task")
+    if not (
+        reviewer_chat.get("status") == "rollover_blocked"
+        and reviewer_chat.get("rollover_failure_code") in {
+            "attachment_upload_capability_missing", "browser_filechooser_unavailable",
+        }
+    ):
+        raise LCRLError("repository rollover recovery requires one legacy attachment blocker")
+    plan = repository_rollover_recovery_plan(state_path, state)
+    if not plan["ready"]:
+        return {
+            "ok": True, "action": "repository_rollover_preparation_blocked",
+            "reason_code": plan["reason_code"], "browser_access_allowed": False,
+            "chat_read_allowed": False, "old_chat_access_allowed": False,
+            "reviewer_access_receipt_verified": False, "user_choice_required": False,
+            "turn_completion_allowed": True,
+            "system_next_action": plan["system_next_action"],
+            "revision": state["revision"],
+        }
+    if not _anonymous_remote_contains_commit(
+        plan["canonical_remote_url"], plan["head_commit"],
+    ):
+        return {
+            "ok": True, "action": "repository_rollover_preparation_blocked",
+            "reason_code": "repository_commit_anonymous_access_unverified",
+            "browser_access_allowed": False, "chat_read_allowed": False,
+            "old_chat_access_allowed": False, "reviewer_access_receipt_verified": False,
+            "user_choice_required": False, "turn_completion_allowed": True,
+            "system_next_action": "restore anonymous exact-commit access or use the full-source attachment path",
+            "revision": state["revision"],
+        }
+    prepared = prepare_repository_commit_review_command(argparse.Namespace(
+        state=str(state_path), project_path=plan["project_root"],
+        remote_url=plan["canonical_remote_url"], branch=str(args.branch or "none"),
+        remote_commit_reachable=True, private_access_verified=True,
+        rollover_handoff_file=None,
+        fallback_output_dir=str(state_path.parent / "repository-rollover-fallback"),
+        max_volume_bytes=20 * 1024 * 1024,
+    ))
+    if prepared.get("action") != "repository_access_receipt_required":
+        raise LCRLError("repository rollover preparation changed before migration")
+    prepared.update({
+        "action": "repository_rollover_prepared",
+        "reason_code": "repository_rollover_prepared",
+        "reviewer_access_receipt_verified": False,
+        "browser_access_allowed": False,
+        "chat_read_allowed": False,
+        "old_chat_access_allowed": False,
+        "continuation_required": True,
+        "turn_completion_allowed": False,
+        "user_choice_required": False,
+        "next_action": "provision_one_replacement_reviewer_chat",
+    })
+    return prepared
+
+
 def _prepare_full_source_fallback(args: argparse.Namespace, reason: str) -> dict[str, Any]:
     result = prepare_project_context_command(argparse.Namespace(
         state=args.state, project_path=args.project_path,
@@ -9971,6 +10115,69 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         and state["automation"].get("waiting_check_automation_id") == "none"
         and not active_action_lease(state)
     )
+    attachment_blocked_rollover = bool(
+        state.get("reviewer_chat", {}).get("status") == "rollover_blocked"
+        and state.get("reviewer_chat", {}).get("rollover_failure_code") in {
+            "attachment_upload_capability_missing", "browser_filechooser_unavailable",
+        }
+        and state.get("capability_probes", {}).get("attachment_upload", {}).get("status")
+        in {"missing", "blocked"}
+    )
+    if attachment_blocked_rollover:
+        if implementation_thread_id == "none":
+            raise LCRLError("guard requires the exact implementation task identity")
+        if implementation_thread_id != expected_implementation_thread_id:
+            raise LCRLError("repository rollover recovery belongs to a different implementation task")
+        plan = repository_rollover_recovery_plan(path, state)
+        if plan["ready"]:
+            return {
+                "ok": True,
+                "action": "repository_rollover_preparation_required",
+                "status": "rollover_blocked",
+                "reason_code": "repository_rollover_preparation_required",
+                "execution_allowed": False,
+                "project_read_allowed": True,
+                "project_write_allowed": False,
+                "controller_state_write_allowed": True,
+                "browser_access_allowed": False,
+                "chat_read_allowed": False,
+                "old_chat_access_allowed": False,
+                "mandatory_next_controller_command": "prepare-repository-rollover-recovery",
+                "mandatory_next_action_sequence": [
+                    "prepare_exact_repository_context",
+                    "restore_unique_rollover_pending",
+                    "provision_one_replacement_reviewer_chat",
+                    "confirm_fresh_repository_access_receipt",
+                ],
+                "canonical_remote_url": plan["canonical_remote_url"],
+                "head_commit": plan["head_commit"],
+                "tree_manifest_hash": plan["tree_manifest_hash"],
+                "canaries": plan["canaries"],
+                "reviewer_access_receipt_verified": False,
+                "continuation_required": True,
+                "turn_completion_allowed": False,
+                "user_choice_required": False,
+                "system_next_action": "prepare-repository-rollover-recovery",
+                "revision": state["revision"],
+            }
+        return {
+            "ok": True,
+            "action": "repository_rollover_preparation_blocked",
+            "status": "rollover_blocked",
+            "reason_code": plan["reason_code"],
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "chat_read_allowed": False,
+            "old_chat_access_allowed": False,
+            "reviewer_access_receipt_verified": False,
+            "continuation_required": False,
+            "turn_completion_allowed": True,
+            "user_choice_required": False,
+            "system_next_action": plan["system_next_action"],
+            "revision": state["revision"],
+        }
     if legacy_missing_wait_poisoned:
         if implementation_thread_id == "none":
             raise LCRLError("guard requires the exact implementation task identity")
@@ -12589,6 +12796,11 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_repository.add_argument("--fallback-output-dir", required=True)
     prepare_repository.add_argument("--max-volume-bytes", type=int, default=20 * 1024 * 1024)
 
+    prepare_rollover_repository = sub.add_parser("prepare-repository-rollover-recovery")
+    prepare_rollover_repository.add_argument("--state", required=True)
+    prepare_rollover_repository.add_argument("--implementation-thread-id", required=True)
+    prepare_rollover_repository.add_argument("--branch", default="none")
+
     confirm_repository = sub.add_parser("confirm-repository-access-receipt")
     confirm_repository.add_argument("--state", required=True)
     confirm_repository.add_argument("--repository-identity", required=True)
@@ -13124,6 +13336,8 @@ def main(argv: list[str] | None = None) -> int:
             result = prepare_project_context_command(args)
         elif args.command == "prepare-repository-commit-review":
             result = prepare_repository_commit_review_command(args)
+        elif args.command == "prepare-repository-rollover-recovery":
+            result = prepare_repository_rollover_recovery_command(args)
         elif args.command == "confirm-repository-access-receipt":
             result = confirm_repository_access_receipt_command(args)
         elif args.command == "prepare-repository-review-round":

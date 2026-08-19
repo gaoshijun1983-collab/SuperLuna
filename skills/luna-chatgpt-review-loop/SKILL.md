@@ -364,6 +364,14 @@ operation 复用仍禁止。返回
    Chat。可用 `--rollover-handoff-file` 提供结构化 JSON；未提供时 Controller 从 state 生成包含已完成轮次、
    锁定安全决策、未解决恢复点、runtime/machine evidence 索引与 base→head 的确定性 handoff。两种方式
    都只绑定 handoff hash，不继承旧 Chat receipt，也不把本地文件路径当作 reviewer 已看到的证据。
+   普通 turn-entry 若发现旧 state 仍是附件原因的 `rollover_blocked`，不得返回
+   `wait_for_supported_attachment_upload_capability`。Controller 必须先只读检查 exact project、canonical
+   HTTPS origin、clean worktree、HEAD 已由 `origin/*` 跟踪、完整 tree 与根/嵌套 canary；可准备时返回
+   `repository_rollover_preparation_required`，同一原实施任务立即运行
+   `prepare-repository-rollover-recovery --state <state> --implementation-thread-id <task> --branch <branch>`。
+   该命令再用禁用 credential helper 的 `git ls-remote` 证明 exact commit 可匿名访问，成功后原子恢复
+   `rollover_pending`。remote 未知、dirty、commit 未跟踪/不可匿名访问、task identity 不符或 canary
+   缺失时保持原 state 并失败关闭；全过程不得启动浏览器，也不得把 Git 可达性写成 Chat access receipt。
    没有可验证 Git 仓库时必须用 `prepare-project-context --scope full_source` 生成确定性脱敏完整源码包；
    在取得 `startup` 账户名额、初始化浏览器或创建首次/replacement Chat 前，必须先运行
    `declare-attachment-upload-capability`。只有宿主明确声明 `direct_file_upload` 可用时才能继续；

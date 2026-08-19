@@ -40,7 +40,11 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.84`, Controller 140, Skill `2026-08-19.97`.
+- Source candidate: `0.2.0-alpha.85`, Controller 141, Skill `2026-08-19.98`.
+- Ordinary turn entry now routes a legacy attachment-blocked rollover to one
+  exact repository preparation command when local repository facts are complete.
+  The command additionally proves anonymous exact-commit reachability, restores
+  only `rollover_pending`, and leaves the replacement Chat receipt unconfirmed.
 - Repository-backed rollover recovery now re-runs exact-commit preparation
   before the attachment capability gate. A successful current repository check
   clears only the stale attachment blocker, restores the unique pending
@@ -69,15 +73,17 @@ intervention.
   provisioning failure becomes `rollover_blocked` with one recovery identity
   and never masquerades as `review_waiting`.
 - Frozen Alpha 83 implementation candidate commit: `9729d92f48bfd89f778808a41d0478621fdffe61`.
-  Alpha 84 is currently an uncommitted local candidate based on
-  `921ede990187599bfaa940bec71f9e2f708cf21c`; it has no frozen candidate commit
-  and receives no real-device or Public Beta credit.
-  The following documentation-only binding commit does not add product code or
-  real-device evidence.
+- Alpha 84 source was committed and pushed as
+  `a98462dd6f78bb6d764a53b8cb99aa9068ea917b`; it has local evidence only and
+  receives no real-device or Public Beta credit.
 - Alpha 84 repository regression passed 421/421. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators passed. The 105-file deterministic archive was
   rebuilt and verified locally. This remains local-only evidence.
+- Alpha 85 repository regression passed 423/423. Controller selftest passed
+  15/15; release, closure, Skill, plugin, decision-register, milestone, and Beta
+  evidence validators passed locally. The deterministic archive contains 106
+  tracked source files. Real App rollover remains unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

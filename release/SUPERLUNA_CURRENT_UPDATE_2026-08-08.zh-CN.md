@@ -3,28 +3,34 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.84`（Python 元数据：`0.2.0a84`）
-- 当前源码控制器：140
+- 版本：`0.2.0-alpha.85`（Python 元数据：`0.2.0a85`）
+- 当前源码控制器：141
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.97`
+- 当前源码 Skill 修订：`2026-08-19.98`
 - 候选日期：2026-08-19
-- Alpha 84 当前为未提交本地候选；基线 HEAD：`921ede990187599bfaa940bec71f9e2f708cf21c`
+- Alpha 85 当前为本地验证候选；基线 HEAD：`a98462dd6f78bb6d764a53b8cb99aa9068ea917b`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：421/421 通过；控制器 selftest：15/15 通过。
+- 仓库测试：423/423 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 105 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.84.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 84 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 106 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.85.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 85 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 141 / Skill revision `2026-08-19.98` 修复普通 turn-entry 仍把旧附件阻断投影成
+  无限等待上传能力的问题。若 exact repository 的本地事实完整，guard 现在返回
+  `repository_rollover_preparation_required`，并指定唯一下一命令
+  `prepare-repository-rollover-recovery`。该命令绑定原任务身份，要求 clean worktree、canonical HTTPS
+  origin、remote-tracked exact HEAD、无凭据 exact-commit 可达性、完整 tree 与根/嵌套 canary；成功只
+  恢复 `rollover_pending`，不启动浏览器、不伪造 replacement Chat receipt。任一事实缺失继续失败关闭。
 - Controller 140 / Skill revision `2026-08-19.97` 修复已因附件能力受阻的 rollover
   无法重新选择 Git exact-commit 的问题。`prepare-repository-commit-review` 在 replacement startup
   前重新核对 clean worktree、canonical remote、exact commit reachability、访问身份与 tree canary；

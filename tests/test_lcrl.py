@@ -352,6 +352,86 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             self.assertTrue(slot["slot_acquired"])
             self.assertNotIn("attachment_upload", slot["action"])
 
+    def test_turn_entry_routes_old_attachment_blocker_to_repository_preparation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=root, check=True,
+            )
+            package = self.prepare(root, state_path)
+            state = lcrl.load_state(state_path)
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_reason": "round_budget",
+                "rollover_authorization_id": "rollover-0123456789abcdef",
+                "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+                "rollover_failure_code": "attachment_upload_capability_missing",
+                "rollover_failure_count": 1,
+            })
+            state["capability_probes"]["attachment_upload"].update({
+                "status": "missing", "package_identity": package["context_identity"],
+                "failure_reason": "attachment_upload_capability_missing",
+            })
+            lcrl.save_state(state_path, state)
+
+            with mock.patch.object(lcrl, "_anonymous_remote_contains_commit", return_value=True):
+                guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id="impl", minutes=10, replace=False,
+                ))
+            self.assertEqual(guard["action"], "repository_rollover_preparation_required")
+            self.assertEqual(guard["reason_code"], "repository_rollover_preparation_required")
+            self.assertEqual(guard["mandatory_next_controller_command"], "prepare-repository-rollover-recovery")
+            self.assertFalse(guard["browser_access_allowed"])
+            self.assertFalse(guard["reviewer_access_receipt_verified"])
+            self.assertFalse(guard["turn_completion_allowed"])
+
+            with mock.patch.object(lcrl, "_anonymous_remote_contains_commit", return_value=True):
+                prepared = lcrl.prepare_repository_rollover_recovery_command(Namespace(
+                    state=str(state_path), implementation_thread_id="impl", branch="main",
+                ))
+            recovered = lcrl.load_state(state_path)
+            self.assertEqual(prepared["action"], "repository_rollover_prepared")
+            self.assertEqual(recovered["reviewer_chat"]["status"], "rollover_pending")
+            self.assertEqual(recovered["project_context"]["commit_sha"], prepared["head_commit"])
+            self.assertEqual(recovered["project_context"]["repository_access_receipt"], "none")
+            self.assertFalse(prepared["reviewer_access_receipt_verified"])
+
+    def test_turn_entry_keeps_dirty_repository_attachment_blocker_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+                cwd=root, check=True,
+            )
+            package = self.prepare(root, state_path)
+            state = lcrl.load_state(state_path)
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked", "rollover_reason": "round_budget",
+                "rollover_authorization_id": "rollover-0123456789abcdef",
+                "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+                "rollover_failure_code": "attachment_upload_capability_missing",
+                "rollover_failure_count": 1,
+            })
+            state["capability_probes"]["attachment_upload"].update({
+                "status": "missing", "package_identity": package["context_identity"],
+                "failure_reason": "attachment_upload_capability_missing",
+            })
+            lcrl.save_state(state_path, state)
+            (root / "a.py").write_text("dirty\n", encoding="utf-8")
+
+            guard = lcrl.guard_action(Namespace(
+                state=str(state_path), reason="turn_entry",
+                implementation_thread_id="impl", minutes=10, replace=False,
+            ))
+            self.assertEqual(guard["action"], "repository_rollover_preparation_blocked")
+            self.assertEqual(guard["reason_code"], "repository_worktree_dirty")
+            self.assertFalse(guard["browser_access_allowed"])
+            self.assertFalse(guard["project_write_allowed"])
+            self.assertTrue(guard["turn_completion_allowed"])
+            self.assertEqual(lcrl.load_state(state_path)["reviewer_chat"]["status"], "rollover_blocked")
+
     def test_replacement_exact_commit_context_preserves_structured_rollover_handoff(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); state_path = self.make_repo_state(root)
@@ -591,7 +671,7 @@ class AttachmentUploadCapabilityTests(TruthfulProjectContextTests):
             self.assertEqual(result["action"], "attachment_upload_capability_missing")
             self.assertEqual(updated["reviewer_chat"]["rollover_failure_code"], "attachment_upload_capability_missing")
             self.assertEqual(lcrl.rollover_future_action(updated), (
-                True, "wait_for_supported_attachment_upload_capability",
+                True, "prepare_repository_rollover_or_fail_closed",
             ))
 
 
