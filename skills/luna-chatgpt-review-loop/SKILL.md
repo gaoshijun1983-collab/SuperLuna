@@ -22,6 +22,14 @@ SuperLuna 源码仓库自身的开发、回归和真实闭环复测必须使用�
 仍可操作用户明确选择且由宿主授权的外部项目；既有项目专用 profile 名称继续按 generic
 权限语义兼容，但任何以 `superluna_repo_retest` 开头的近似名称都失败关闭，不能绕过专用门。
 
+该隔离目录只是 implementation workspace，不是 reviewer repository source。仓库自测的
+exact-commit 审核根必须从同一精确 retest scope 的 trusted `source_checkout` 推导；写入/执行权限
+不得随之扩大到源码根。generic Git 项目从用户所选项目向上解析唯一 Git toplevel；非 Git 项目
+保持完整源码附件模式。state 以独立字段持久化本地 reviewer root、canonical remote、exact commit、
+tree manifest 与 repository identity，但本地 root 不得进入 Chat 材料或充当访问回执。旧 state 的这些
+字段默认为 unresolved，并在同一 repository preparation 中自动建立；路径注入、symlink、跨 checkout
+或持久 identity 漂移必须在浏览器前失败关闭。
+
 新流程只有一个正式审阅通道：用户在 Codex 内置浏览器中选择的一个 ChatGPT 网页
 Chat。`app_chat_review` 只用于读取旧状态，不是新任务的启动通道。
 

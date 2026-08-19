@@ -252,6 +252,87 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             self.assertEqual(result["action"], "full_source_attachment_required")
             self.assertEqual(result["fallback_reason"], "tree_canaries_unavailable")
 
+    def test_repo_retest_rollover_separates_fixture_from_reviewer_checkout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            (checkout / ".codex-plugin").mkdir()
+            (checkout / ".codex-plugin" / "plugin.json").write_text(
+                json.dumps({"name": "luna-review-loop"}), encoding="utf-8",
+            )
+            (checkout / ".gitignore").write_text(".superluna/\n", encoding="utf-8")
+            (checkout / "SUPERLUNA_REVIEW_CANARY.txt").write_text(
+                "SuperLuna repository review root canary v1\n", encoding="utf-8",
+            )
+            (checkout / "review-canary").mkdir()
+            (checkout / "review-canary" / "NESTED_CANARY.txt").write_text(
+                "SuperLuna repository review nested canary v1\n", encoding="utf-8",
+            )
+            subprocess.run(["git", "init", "-q"], cwd=checkout, check=True)
+            subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=checkout, check=True)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=checkout, check=True)
+            subprocess.run(["git", "add", "."], cwd=checkout, check=True)
+            subprocess.run(["git", "commit", "-qm", "source"], cwd=checkout, check=True)
+            subprocess.run(["git", "remote", "add", "origin", "https://github.com/example/SuperLuna.git"], cwd=checkout, check=True)
+            subprocess.run(["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=checkout, check=True)
+            thread_id = "repo-retest-reviewer-source"
+            _run_root, fixture, state_path = _repo_retest_paths(checkout, thread_id)
+            fixture.mkdir(parents=True)
+            (fixture / "fixture-only.txt").write_text("implementation fixture\n", encoding="utf-8")
+            with mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()):
+                state = lcrl.new_state(
+                    "none", thread_id, str(fixture), "reviewer-old",
+                    profile="superluna_repo_retest_v1", state_path=str(state_path),
+                    continuation_mode="automatic", review_transport="in_app_browser",
+                )
+                state["reviewer_chat"].update({
+                    "status": "rollover_blocked",
+                    "rollover_reason": "round_budget",
+                    "rollover_authorization_id": "rollover-0123456789abcdef",
+                    "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+                    "rollover_failure_code": "attachment_upload_capability_missing",
+                    "rollover_failure_count": 1,
+                })
+                state["capability_probes"]["attachment_upload"]["status"] = "missing"
+                lcrl.save_state(state_path, state)
+                guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id=thread_id, minutes=10, replace=False,
+                ))
+                self.assertEqual(guard["action"], "repository_rollover_preparation_required")
+                self.assertEqual(guard["canaries"][0]["path"], "SUPERLUNA_REVIEW_CANARY.txt")
+                with mock.patch.object(lcrl, "_anonymous_remote_contains_commit", return_value=True):
+                    prepared = lcrl.prepare_repository_rollover_recovery_command(Namespace(
+                        state=str(state_path), implementation_thread_id=thread_id, branch="main",
+                    ))
+            with mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()):
+                recovered = lcrl.load_state(state_path)
+            self.assertEqual(recovered["automation"]["project_path"], str(fixture.resolve()))
+            self.assertEqual(recovered["automation"]["reviewer_repository_root"], str(checkout.resolve()))
+            self.assertEqual(recovered["automation"]["reviewer_repository_commit_sha"], prepared["head_commit"])
+            self.assertEqual(recovered["reviewer_chat"]["status"], "rollover_pending")
+            self.assertNotIn(str(checkout.resolve()), json.dumps(recovered["project_context"]))
+            tampered = json.loads(state_path.read_text(encoding="utf-8"))
+            tampered["automation"]["reviewer_repository_root"] = str(Path(directory) / "other-checkout")
+            state_path.write_text(json.dumps(tampered), encoding="utf-8")
+            with mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()):
+                with self.assertRaisesRegex(lcrl.LCRLError, "trusted source checkout"):
+                    lcrl.load_state(state_path)
+
+    def test_generic_subdirectory_uses_its_containing_git_root_for_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            subprocess.run(
+                ["git", "update-ref", "refs/remotes/origin/main", "HEAD"], cwd=root, check=True,
+            )
+            project = root / "src"
+            state = lcrl.load_state(state_path)
+            state["automation"]["project_path"] = str(project.resolve())
+            lcrl.save_state(state_path, state)
+            plan = lcrl.repository_rollover_recovery_plan(state_path, lcrl.load_state(state_path))
+            self.assertTrue(plan["ready"])
+            self.assertEqual(plan["project_root"], str(root.resolve()))
+
     def test_url_string_does_not_create_repository_access_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); state_path = self.make_repo_state(root)

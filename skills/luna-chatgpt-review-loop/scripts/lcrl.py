@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 142
-SKILL_REVISION = "2026-08-19.99"
+CONTROLLER_VERSION = 143
+SKILL_REVISION = "2026-08-19.100"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -2327,6 +2327,11 @@ def load_state(path: str | Path) -> dict[str, Any]:
 def apply_state_defaults(state: dict[str, Any]) -> None:
     """Add forward-compatible V8 defaults without changing the active review loop."""
     automation = state.setdefault("automation", {})
+    automation.setdefault("reviewer_repository_root", "none")
+    automation.setdefault("reviewer_repository_remote_url", "none")
+    automation.setdefault("reviewer_repository_commit_sha", "none")
+    automation.setdefault("reviewer_repository_tree_manifest_hash", "none")
+    automation.setdefault("reviewer_repository_identity", "none")
     automation.setdefault("interval_minutes", 0)
     automation.setdefault("heartbeat_mode", "foreground_only")
     automation.setdefault("title", "none")
@@ -2738,6 +2743,11 @@ def new_state(
                 deepcopy(retest_scope)
                 if profile == SUPERLUNA_REPO_RETEST_PROFILE else "none"
             ),
+            "reviewer_repository_root": "none",
+            "reviewer_repository_remote_url": "none",
+            "reviewer_repository_commit_sha": "none",
+            "reviewer_repository_tree_manifest_hash": "none",
+            "reviewer_repository_identity": "none",
             "interval_minutes": 0,
             "heartbeat_mode": heartbeat_mode,
             "title": "none",
@@ -3008,6 +3018,25 @@ def validate_state(state: dict[str, Any]) -> None:
                 errors.append("repository retest persisted scope is inconsistent")
     elif retest_scope != "none":
         errors.append("non-retest profile cannot retain a repository retest scope")
+    reviewer_repository_root = automation.get("reviewer_repository_root", "none")
+    reviewer_repository_values = (
+        reviewer_repository_root,
+        automation.get("reviewer_repository_remote_url", "none"),
+        automation.get("reviewer_repository_commit_sha", "none"),
+        automation.get("reviewer_repository_tree_manifest_hash", "none"),
+        automation.get("reviewer_repository_identity", "none"),
+    )
+    if any(value != "none" for value in reviewer_repository_values):
+        if any(not isinstance(value, str) or value in {"", "none"} for value in reviewer_repository_values):
+            errors.append("reviewer repository identity must be complete or unresolved")
+        elif not Path(str(reviewer_repository_root)).is_absolute():
+            errors.append("reviewer repository root must be absolute")
+        elif (
+            profile == SUPERLUNA_REPO_RETEST_PROFILE
+            and isinstance(retest_scope, dict)
+            and reviewer_repository_root != retest_scope.get("source_checkout")
+        ):
+            errors.append("repository retest reviewer root must be the trusted source checkout")
     interval_minutes = automation.get("interval_minutes")
     heartbeat_mode = automation.get("heartbeat_mode")
     if heartbeat_mode not in {"foreground_only", "waiting_only", "legacy_fixed"}:
@@ -8080,6 +8109,66 @@ def _git_output(project_root: Path, *arguments: str) -> str:
         raise LCRLError(f"Git evidence unavailable: {' '.join(arguments)}") from exc
 
 
+def reviewer_repository_root_for_state(state: dict[str, Any]) -> Path:
+    """Derive reviewer Git evidence independently from the implementation workspace."""
+    automation = state.get("automation", {})
+    implementation_root = Path(str(automation.get("project_path", "none"))).resolve(strict=True)
+    profile = str(automation.get("profile", "generic"))
+    if profile == SUPERLUNA_REPO_RETEST_PROFILE:
+        scope = automation.get("retest_scope")
+        if not isinstance(scope, dict):
+            raise LCRLError("repository retest reviewer source requires the trusted persisted scope")
+        reviewer_root = Path(str(scope.get("source_checkout", "none"))).resolve(strict=True)
+        discovered_checkout = source_checkout_root(implementation_root).resolve()
+        if reviewer_root != discovered_checkout:
+            raise LCRLError("repository retest reviewer source checkout identity mismatch")
+    else:
+        try:
+            reviewer_root = Path(
+                _git_output(implementation_root, "rev-parse", "--show-toplevel")
+            ).resolve(strict=True)
+        except LCRLError:
+            raise LCRLError("reviewer repository Git root is unavailable")
+        try:
+            implementation_root.relative_to(reviewer_root)
+        except ValueError as exc:
+            raise LCRLError("implementation workspace is outside the reviewer repository") from exc
+    if reviewer_root.is_symlink() or not reviewer_root.is_dir():
+        raise LCRLError("reviewer repository root must be one regular checkout directory")
+    git_root = Path(_git_output(reviewer_root, "rev-parse", "--show-toplevel")).resolve(strict=True)
+    if git_root != reviewer_root:
+        raise LCRLError("reviewer repository root must be the exact Git toplevel")
+    persisted_root = str(automation.get("reviewer_repository_root", "none"))
+    if persisted_root not in {"", "none"} and Path(persisted_root).resolve() != reviewer_root:
+        raise LCRLError("persisted reviewer repository root changed checkout identity")
+    return reviewer_root
+
+
+def persist_reviewer_repository_identity(
+    state: dict[str, Any], reviewer_root: Path, remote_url: str,
+    commit_sha: str, tree_manifest_hash: str,
+) -> str:
+    repository_identity = hashlib.sha256(remote_url.encode()).hexdigest()
+    automation = state["automation"]
+    stable_expected = {
+        "reviewer_repository_root": str(reviewer_root),
+        "reviewer_repository_remote_url": remote_url,
+        "reviewer_repository_identity": repository_identity,
+    }
+    for field, expected in stable_expected.items():
+        recorded = str(automation.get(field, "none"))
+        if recorded not in {"", "none", expected}:
+            raise LCRLError("reviewer repository stable identity changed checkout or remote")
+    automation.update({
+        "reviewer_repository_root": str(reviewer_root),
+        "reviewer_repository_remote_url": remote_url,
+        "reviewer_repository_commit_sha": commit_sha,
+        "reviewer_repository_tree_manifest_hash": tree_manifest_hash,
+        "reviewer_repository_identity": repository_identity,
+    })
+    return repository_identity
+
+
 def _canonical_repository_url(value: str) -> str:
     raw = str(value or "").strip()
     parsed = urlsplit(raw)
@@ -8100,8 +8189,9 @@ def _repository_review_dirty(
 ) -> bool:
     ignored: set[str] = set()
     try:
-        ignored.add(state_path.relative_to(project_root).as_posix())
-        ignored.add(state_path.with_name(f".{state_path.name}.lock").relative_to(project_root).as_posix())
+        canonical_state_path = state_path.resolve()
+        ignored.add(canonical_state_path.relative_to(project_root).as_posix())
+        ignored.add(state_lock_path(canonical_state_path).relative_to(project_root).as_posix())
     except ValueError:
         pass
     for value in ignored_paths:
@@ -8166,18 +8256,19 @@ def repository_rollover_recovery_plan(
     state_path: Path, state: dict[str, Any],
 ) -> dict[str, Any]:
     """Project a local-only exact repository recovery without claiming Chat access."""
-    project_root = Path(state.get("automation", {}).get("project_path", "none")).resolve()
-    if not project_root.is_dir():
+    implementation_root = Path(state.get("automation", {}).get("project_path", "none")).resolve()
+    if not implementation_root.is_dir():
         return {"ready": False, "reason_code": "repository_project_missing",
                 "system_next_action": "restore the exact repository project path"}
     try:
+        project_root = reviewer_repository_root_for_state(state)
         canonical_remote = _canonical_repository_url(
             _git_output(project_root, "remote", "get-url", "origin")
         )
         head_commit = _git_output(project_root, "rev-parse", "HEAD").lower()
-    except LCRLError:
-        return {"ready": False, "reason_code": "repository_remote_unknown",
-                "system_next_action": "restore one canonical HTTPS origin remote"}
+    except LCRLError as exc:
+        return {"ready": False, "reason_code": "repository_reviewer_source_unavailable",
+                "system_next_action": str(exc)}
     if not re.fullmatch(r"[0-9a-f]{40,64}", head_commit):
         return {"ready": False, "reason_code": "repository_exact_commit_missing",
                 "system_next_action": "restore one exact repository commit"}
@@ -8203,6 +8294,7 @@ def repository_rollover_recovery_plan(
     tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
     return {
         "ready": True,
+        "implementation_root": str(implementation_root),
         "project_root": str(project_root),
         "canonical_remote_url": canonical_remote,
         "head_commit": head_commit,
@@ -8267,7 +8359,7 @@ def prepare_repository_rollover_recovery_command(args: argparse.Namespace) -> di
             "revision": state["revision"],
         }
     prepared = prepare_repository_commit_review_command(argparse.Namespace(
-        state=str(state_path), project_path=plan["project_root"],
+        state=str(state_path), project_path=plan["implementation_root"],
         remote_url=plan["canonical_remote_url"], branch=str(args.branch or "none"),
         remote_commit_reachable=True, private_access_verified=True,
         rollover_handoff_file=None,
@@ -8291,9 +8383,11 @@ def prepare_repository_rollover_recovery_command(args: argparse.Namespace) -> di
     return prepared
 
 
-def _prepare_full_source_fallback(args: argparse.Namespace, reason: str) -> dict[str, Any]:
+def _prepare_full_source_fallback(
+    args: argparse.Namespace, reason: str, source_root: Path | None = None,
+) -> dict[str, Any]:
     result = prepare_project_context_command(argparse.Namespace(
-        state=args.state, project_path=args.project_path,
+        state=args.state, project_path=str(source_root or args.project_path),
         output_dir=args.fallback_output_dir, scope="full_source", file=None,
         authoritative_untracked=None,
         max_volume_bytes=args.max_volume_bytes,
@@ -8370,18 +8464,24 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
     state_path = Path(args.state).expanduser().resolve()
     state = load_state(state_path)
     revision = state["revision"]
-    project_root = Path(args.project_path).expanduser().resolve(strict=True)
-    if project_root != Path(state["automation"]["project_path"]).resolve():
-        raise LCRLError("repository review root must match the workflow project")
+    implementation_root = Path(args.project_path).expanduser().resolve(strict=True)
+    if implementation_root != Path(state["automation"]["project_path"]).resolve():
+        raise LCRLError("repository review request must match the implementation workspace")
+    try:
+        project_root = reviewer_repository_root_for_state(state)
+    except LCRLError:
+        if state["automation"].get("profile") == SUPERLUNA_REPO_RETEST_PROFILE:
+            raise
+        return _prepare_full_source_fallback(args, "repository_git_root_unavailable")
     canonical_url = _canonical_repository_url(args.remote_url)
     try:
         configured_remote = _canonical_repository_url(
             _git_output(project_root, "remote", "get-url", "origin")
         )
     except LCRLError:
-        return _prepare_full_source_fallback(args, "remote_missing")
+        return _prepare_full_source_fallback(args, "remote_missing", project_root)
     if configured_remote != canonical_url:
-        return _prepare_full_source_fallback(args, "remote_identity_mismatch")
+        return _prepare_full_source_fallback(args, "remote_identity_mismatch", project_root)
     tracked, head_commit, _dirty = _git_project_inventory(project_root)
     transient_paths = [
         *state.get("project_context", {}).get("package_paths", []),
@@ -8390,19 +8490,21 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
     ]
     dirty = _repository_review_dirty(project_root, state_path, transient_paths)
     if dirty:
-        return _prepare_full_source_fallback(args, "dirty_worktree")
+        return _prepare_full_source_fallback(args, "dirty_worktree", project_root)
     if getattr(args, "remote_commit_reachable", False) is not True:
-        return _prepare_full_source_fallback(args, "commit_not_verified_reachable")
+        return _prepare_full_source_fallback(args, "commit_not_verified_reachable", project_root)
     if getattr(args, "private_access_verified", False) is not True:
-        return _prepare_full_source_fallback(args, "private_repository_access_unverified")
+        return _prepare_full_source_fallback(args, "private_repository_access_unverified", project_root)
     tree_lines = _git_output(project_root, "ls-tree", "-r", "--full-tree", head_commit).splitlines()
     tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
     canaries = _repository_review_canaries(project_root, head_commit, tracked)
     if not canaries:
-        return _prepare_full_source_fallback(args, "tree_canaries_unavailable")
-    repository_identity = hashlib.sha256(canonical_url.encode()).hexdigest()
+        return _prepare_full_source_fallback(args, "tree_canaries_unavailable", project_root)
+    repository_identity = persist_reviewer_repository_identity(
+        state, project_root, canonical_url, head_commit, tree_manifest_hash,
+    )
     rollover_handoff = _repository_rollover_handoff(
-        state, project_root, getattr(args, "rollover_handoff_file", None),
+        state, implementation_root, getattr(args, "rollover_handoff_file", None),
     )
     context = empty_project_context()
     context.update({
@@ -8454,12 +8556,20 @@ def confirm_repository_access_receipt_command(args: argparse.Namespace) -> dict[
     state = load_state(path)
     revision = state["revision"]
     context = state["project_context"]
+    automation = state["automation"]
     if context.get("status") != "repository_access_receipt_required":
         raise LCRLError("repository access receipt is not currently required")
     if not (args.exact_commit_opened is True and args.full_tree_visible is True and int(args.visible_match_count) == 1):
         raise LCRLError("URL text or a repository page does not prove exact commit and full tree access")
     if args.repository_identity != context.get("repository_identity"):
         raise LCRLError("repository access receipt identity mismatch")
+    if (
+        automation.get("reviewer_repository_identity") != context.get("repository_identity")
+        or automation.get("reviewer_repository_remote_url") != context.get("repository_url")
+        or automation.get("reviewer_repository_commit_sha") != context.get("commit_sha")
+        or automation.get("reviewer_repository_tree_manifest_hash") != context.get("tree_manifest_hash")
+    ):
+        raise LCRLError("repository access receipt does not match persisted reviewer source identity")
     if args.commit_sha != context.get("commit_sha") or args.tree_manifest_hash != context.get("tree_manifest_hash"):
         raise LCRLError("repository access receipt must match the exact commit and tree manifest")
     expected = {item["path"]: item["blob_sha"] for item in context.get("canaries", [])}
@@ -8496,7 +8606,12 @@ def prepare_repository_review_round_command(args: argparse.Namespace) -> dict[st
     receipt = context.get("repository_access_receipt")
     if context.get("scope") != "repository_commit_review" or not isinstance(receipt, dict):
         raise LCRLError("incremental repository review requires a current Chat access receipt")
-    project_root = Path(state["automation"]["project_path"]).resolve()
+    project_root = reviewer_repository_root_for_state(state)
+    if (
+        state["automation"].get("reviewer_repository_identity") != context.get("repository_identity")
+        or state["automation"].get("reviewer_repository_remote_url") != context.get("repository_url")
+    ):
+        raise LCRLError("incremental review repository identity changed")
     base_commit = str(args.base_commit or "").strip().lower()
     head_commit = str(args.head_commit or "").strip().lower()
     for label, commit in (("base", base_commit), ("head", head_commit)):
@@ -8549,8 +8664,13 @@ def prepare_project_context_command(args: argparse.Namespace) -> dict[str, Any]:
     state = load_state(state_path)
     revision = state["revision"]
     project_root = Path(args.project_path).expanduser().resolve(strict=True)
-    if project_root != Path(state["automation"]["project_path"]).resolve():
-        raise LCRLError("project context root must match the workflow project")
+    implementation_root = Path(state["automation"]["project_path"]).resolve()
+    try:
+        reviewer_root = reviewer_repository_root_for_state(state)
+    except LCRLError:
+        reviewer_root = implementation_root
+    if project_root not in {implementation_root, reviewer_root}:
+        raise LCRLError("project context root must match the implementation or derived reviewer source")
     scope = args.scope
     tracked, commit, dirty = _git_project_inventory(project_root)
     declared = sorted(set(getattr(args, "authoritative_untracked", None) or []))

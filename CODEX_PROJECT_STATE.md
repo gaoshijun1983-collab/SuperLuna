@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.86`, Controller 142, Skill `2026-08-19.99`.
+- Source candidate: `0.2.0-alpha.87`, Controller 143, Skill `2026-08-19.100`.
+- Repository self-retests now keep implementation writes/execution in their
+  exact fixture while reviewer Git evidence is derived from the trusted source
+  checkout. Generic Git subprojects derive their containing Git toplevel.
+  State persists this reviewer repository identity separately without exposing
+  its local root to Chat.
 - The repository now owns an atomic, tracked reviewer-access canary pair:
   `SUPERLUNA_REVIEW_CANARY.txt` and `review-canary/NESTED_CANARY.txt`.
   Preparation accepts them only as regular exact-commit blobs, returns their
@@ -92,6 +97,10 @@ intervention.
   passed 15/15; release, closure, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. The deterministic archive contains 110
   tracked source files. Real App canary matching remains pending.
+- Alpha 87 repository regression passed 427/427 locally. Controller selftest
+  passed 15/15; release, closure, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Its deterministic archive contains 111
+  tracked source files. Real App old-state migration remains pending.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

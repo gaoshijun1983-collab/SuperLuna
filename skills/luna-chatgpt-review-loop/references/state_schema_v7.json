@@ -39,6 +39,11 @@
         "project_path",
         "profile",
         "retest_scope",
+        "reviewer_repository_root",
+        "reviewer_repository_remote_url",
+        "reviewer_repository_commit_sha",
+        "reviewer_repository_tree_manifest_hash",
+        "reviewer_repository_identity",
         "interval_minutes",
         "heartbeat_mode",
         "title",
@@ -57,6 +62,11 @@
         "implementation_thread_id": {"type": "string"},
         "project_path": {"type": "string"},
         "profile": {"type": "string"},
+        "reviewer_repository_root": {"type": "string"},
+        "reviewer_repository_remote_url": {"type": "string"},
+        "reviewer_repository_commit_sha": {"type": "string"},
+        "reviewer_repository_tree_manifest_hash": {"type": "string"},
+        "reviewer_repository_identity": {"type": "string"},
         "retest_scope": {
           "oneOf": [
             {"const": "none"},

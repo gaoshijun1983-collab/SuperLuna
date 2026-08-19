@@ -3,28 +3,33 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.86`（Python 元数据：`0.2.0a86`）
-- 当前源码控制器：142
+- 版本：`0.2.0-alpha.87`（Python 元数据：`0.2.0a87`）
+- 当前源码控制器：143
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.99`
+- 当前源码 Skill 修订：`2026-08-19.100`
 - 候选日期：2026-08-19
-- Alpha 86 当前为本地验证候选；基线 HEAD：`cfc1e628b99d39ce6d98c8c8ebf4594b2e45a2a0`
+- Alpha 87 当前为本地验证候选；基线 HEAD：`1a92b413e7eb2e1d346bffd131d9f72fb256d311`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：425/425 通过；控制器 selftest：15/15 通过。
+- 仓库测试：427/427 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 110 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.86.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 86 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 111 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.87.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 87 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 143 / Skill revision `2026-08-19.100` 修复 repo retest 把隔离 implementation fixture
+  错当 reviewer Git root 的概念路径错误。写入/执行仍锁在精确 fixture，repository preparation、guard、
+  canary 与每轮 diff 改从同一可信 retest scope 的 source checkout 推导；generic Git 项目解析 containing
+  Git toplevel，非 Git 保留完整源码附件。state 独立持久化 reviewer root、remote、commit、tree 与
+  identity，但本地路径不进入 Chat 证据；旧 state 自动解析，路径注入与跨 checkout 漂移失败关闭。
 - Controller 142 / Skill revision `2026-08-19.99` 为仓库新增稳定、tracked、无敏感内容的
   `SUPERLUNA_REVIEW_CANARY.txt` 与 `review-canary/NESTED_CANARY.txt`。prepare 与 rollover recovery
   现在原子选择这对 canary，并核对 exact commit 中两者都是普通 blob 后返回精确 blob SHA；任一缺失、

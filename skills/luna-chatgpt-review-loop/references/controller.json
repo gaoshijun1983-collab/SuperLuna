@@ -1,7 +1,7 @@
 {
-  "controller_version": 142,
+  "controller_version": 143,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-19.99",
+  "skill_revision": "2026-08-19.100",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",
@@ -36,6 +36,8 @@
   "turn_entry_repository_rollover_preparation_routing": true,
   "repository_rollover_anonymous_exact_commit_probe": true,
   "dedicated_repository_review_canaries": true,
+  "implementation_and_reviewer_repository_roots_separated": true,
+  "reviewer_repository_identity_persisted": true,
   "account_browser_health_followup_reuses_visible_tab": true,
   "account_browser_health_followup_tail_only": true,
   "stale_platform_wait_auto_recovery": true,

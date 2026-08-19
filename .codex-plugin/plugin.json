@@ -1,6 +1,6 @@
 {
   "name": "luna-review-loop",
-  "version": "0.2.0-alpha.86",
+  "version": "0.2.0-alpha.87",
   "description": "A safe Codex implementation and ChatGPT review loop for Codex Desktop.",
   "author": {
     "name": "SuperLuna Contributors"

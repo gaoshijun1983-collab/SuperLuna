@@ -131,6 +131,15 @@ to be regular blobs in the exact commit and returns their exact blob SHAs. A
 missing half, symlink, or path mismatch fails closed rather than silently using
 a volatile README or source file. Generic repositories without this dedicated
 pair may still use deterministic root+nested regular blobs.
+The implementation workspace and reviewer repository are separate identities.
+For `superluna_repo_retest_v1`, the implementation task remains confined to its
+exact `.superluna/retest-runs/<id>/project` fixture, while repository review is
+derived from the trusted `source_checkout` in that same validated retest scope.
+For generic Git projects it is the containing Git toplevel. State persists the
+local reviewer root separately from canonical remote, exact commit, tree hash,
+and repository identity; the local path is never sent as reviewer evidence.
+Old states resolve this identity during preparation. Injected roots, symlinks,
+cross-checkout roots, or stable identity drift fail closed before browser use.
 It cannot inherit only a prose summary or the previous Chat receipt. Normal operations on a bound Chat are tail-only and
 return `full_history_scan_allowed=false`. The workflow never switches
 model/reasoning or sends through a second transport. The user explicitly
