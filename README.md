@@ -24,8 +24,15 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.94`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 150 / Skill revision
+The current source candidate is `0.2.0-alpha.95`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 151 / Skill revision
+`2026-08-19.108` lets ordinary turn entry atomically rebuild one missing formal
+rate-limit retirement before the Alpha 94 orphan-provisioning recovery. It
+requires the same task/state/reviewer/generation, durable account rate-limit
+evidence, a rate-limited rollover, exact repository commit/tree, the canonical
+provisioned reviewer binding, no replacement/message side effect, and zero
+account slots. Incomplete evidence returns a stable `retirement_evidence_*`
+reason without browser access. Controller 150 / Skill revision
 `2026-08-19.107` adds one deterministic recovery for an already reclaimed
 replacement-startup provisioning that was consumed but provably produced no
 browser, Chat, message, or slot side effect. It requires the same task, state,

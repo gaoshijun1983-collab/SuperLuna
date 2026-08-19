@@ -2462,6 +2462,156 @@ class ControllerTests(unittest.TestCase):
                 ]
             )
 
+    def test_guard_rebuilds_missing_rate_limit_retirement_before_consumed_orphan_recovery(self):
+        """Alpha 94 real order: blocked rollover precedes orphan recovery."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry = root / "account-browser-gate.json"
+            task_id = "npc-state-owner-anonymous"
+            lcrl.save_state(state_path, lcrl.new_state(
+                "none", task_id, root, "first-reviewer",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            ))
+            state = lcrl.load_state(state_path)
+            repository_identity = "c" * 64
+            exact_commit = "413cc2e73e653e42c2aada86635615aeeb41d244"
+            tree_hash = "b" * 64
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": exact_commit,
+                "reviewer_repository_tree_manifest_hash": tree_hash,
+                "reviewer_repository_identity": repository_identity,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": repository_identity,
+                "commit_sha": exact_commit,
+                "tree_manifest_hash": tree_hash,
+                "repository_access_receipt": "none",
+                "generation": 1,
+            })
+            first_authorization = lcrl.mark_reviewer_chat_rollover_required(
+                state, "round_budget",
+            )
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            first_slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id=task_id, reviewer_thread_id="none",
+                new_chat_authorization_id=first_authorization,
+                new_chat_local_work_status="completed_and_verified",
+                operation="startup", state=str(state_path), registry=str(registry),
+                at="2026-08-19T05:13:54Z",
+            ))
+            limited_reviewer = "6a856748-7f94-83ea-befd-2727e1b4e7ba"
+            lcrl.complete_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), authorization_id=first_authorization,
+                new_reviewer_thread_id=limited_reviewer,
+                browser_id="browser-legacy-rate-limit",
+                provider_tab_id="provider-legacy-rate-limit",
+                url=f"https://chatgpt.com/c/{limited_reviewer}",
+                observed_title="Replacement", at="2026-08-19T05:14:00Z",
+            ))
+            limited = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id=task_id, lease_id=first_slot["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-19T05:14:01Z", health_proof=None,
+            ))
+            self.assertFalse(limited["reviewer_chat_retired"])
+            state = lcrl.load_state(state_path)
+            second_authorization = lcrl.mark_reviewer_chat_rollover_required(
+                state, "rate_limited",
+            )
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_failure_code": "controller_error",
+                "rollover_failure_count": 1,
+                "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+            })
+            state["project_context"]["generation"] = state["reviewer_chat"]["generation"]
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            gate = lcrl.load_account_browser_gate(registry)
+            gate["cooldown_until"] = "2026-08-19T05:15:00Z"
+            gate["provisioning_authorizations"].append({
+                "authorization_id": hashlib.sha256(second_authorization.encode()).hexdigest(),
+                "implementation_thread_id": task_id,
+                "authorized_at": "2026-08-19T05:14:02Z",
+                "scope": lcrl._generic_account_browser_scope(),
+                "state_identity": lcrl._provisioning_state_identity(state_path),
+                "reviewer_generation": state["reviewer_chat"]["generation"],
+                "repository_identity": repository_identity,
+                "reclaim_status": "consumed_after_reclaim",
+                "reclaim_count": 1,
+                "reconciled_at": "2026-08-19T05:14:03Z",
+            })
+            lcrl._save_account_browser_gate_locked(
+                registry, gate, expected_revision=gate["revision"],
+            )
+            missing_rate_limit = json.loads(json.dumps(gate))
+            missing_rate_limit["consecutive_rate_limits"] = 0
+            self.assertEqual(
+                lcrl._legacy_rate_limit_retirement_evidence_plan_from_gate(
+                    state_path, state, missing_rate_limit,
+                )["reason_code"],
+                "retirement_evidence_rate_limit_unconfirmed",
+            )
+            uncertain_slot = json.loads(json.dumps(gate))
+            uncertain_slot["slots"].append({
+                "lease_id": "uncertain-retirement-slot",
+                "implementation_thread_id": "other-task",
+                "reviewer_thread_id": "none",
+                "operation": "startup",
+                "acquired_at": "2026-08-19T05:14:02Z",
+                "expires_at": "2026-08-19T05:24:02Z",
+                "scope": lcrl._generic_account_browser_scope(),
+            })
+            self.assertEqual(
+                lcrl._legacy_rate_limit_retirement_evidence_plan_from_gate(
+                    state_path, state, uncertain_slot,
+                )["reason_code"],
+                "retirement_evidence_slot_uncertain",
+            )
+            registry_bytes = registry.read_bytes()
+            registry.write_text(
+                json.dumps(missing_rate_limit, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry):
+                blocked_guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id=task_id, minutes=10, replace=False,
+                ))
+            self.assertEqual(
+                blocked_guard["reason_code"],
+                "retirement_evidence_rate_limit_unconfirmed",
+            )
+            self.assertEqual(
+                blocked_guard["system_next_action"],
+                "reconcile_legacy_rate_limit_retirement_evidence_once",
+            )
+            self.assertFalse(blocked_guard["browser_access_allowed"])
+            self.assertFalse(blocked_guard["user_choice_required"])
+            registry.write_bytes(registry_bytes)
+
+            with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry):
+                guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id=task_id, minutes=10, replace=False,
+                ))
+            self.assertEqual(
+                guard["action"],
+                "consumed_orphaned_provisioning_reconcile_required",
+            )
+            self.assertTrue(guard["legacy_rate_limit_retirement_reconciled"])
+            self.assertFalse(guard["browser_access_allowed"])
+            retired = lcrl.load_account_browser_gate(registry)["retired_reviewer_chats"]
+            self.assertEqual(
+                [item["reviewer_thread_id"] for item in retired],
+                [limited_reviewer],
+            )
+
     def test_round_budget_requires_rollover_before_third_submission(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

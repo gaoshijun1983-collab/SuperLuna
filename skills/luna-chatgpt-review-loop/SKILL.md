@@ -392,6 +392,12 @@ operation 复用仍禁止。返回
    `zero_effect_recovery_id`，且只允许消费一次。任一条件缺失必须返回具体
    `consumed_orphaned_provisioning_*` reason code 与系统恢复动作，不得退回普通 turn-entry 或模糊
    `controller_error`。
+   若旧实机 state 在进入上述恢复前缺少当前限流 Chat 的正式 account-gate retirement，普通 guard
+   必须先运行持久证据诊断。只有同一 task/state/reviewer/generation、账户门限流归属、
+   `rate_limited` rollover、exact commit/tree、canonical provisioned binding、上一代唯一 startup
+   authorization、零 pending replacement/request/response 与全局零 slot 全部成立时，才原子补写一次
+   retirement 并紧接 orphan recovery。任何缺证返回具体 `retirement_evidence_*` 与系统自动下一步，
+   不得打开旧 Chat、凭 `rollover_blocked` 单字段推断或要求用户决定。
    SuperLuna 仓库自身固定使用 tracked 的 `SUPERLUNA_REVIEW_CANARY.txt` 与
    `review-canary/NESTED_CANARY.txt`。Controller 必须把这对路径作为原子 canary，核对 exact commit 中
    两者均为普通 blob 并返回精确 blob SHA；任一缺失、symlink 或路径身份不符时不得退回 README 等

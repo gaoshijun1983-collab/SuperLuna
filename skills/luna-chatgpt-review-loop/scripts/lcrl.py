@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 150
-SKILL_REVISION = "2026-08-19.107"
+CONTROLLER_VERSION = 151
+SKILL_REVISION = "2026-08-19.108"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -6970,6 +6970,84 @@ def reviewer_chat_browser_access_allowed(state: dict[str, Any]) -> bool:
     )
 
 
+def _legacy_rate_limit_retirement_evidence_plan_from_gate(
+    state_path: Path, state: dict[str, Any], gate: dict[str, Any],
+) -> dict[str, Any]:
+    """Diagnose whether durable evidence can retire one legacy limited Chat."""
+    automation = state.get("automation", {})
+    confirmation = state.get("confirmation", {})
+    binding = state.get("browser_binding", {})
+    reviewer_chat = state.get("reviewer_chat", {})
+    context = state.get("project_context", {})
+    task_id = str(automation.get("implementation_thread_id", "none"))
+    reviewer_id = str(confirmation.get("reviewer_thread_id", "none"))
+    generation = int(reviewer_chat.get("generation", 0))
+    repository_identity = str(automation.get("reviewer_repository_identity", "none"))
+    if task_id in {"", "none"} or not CHATGPT_UUID_PATTERN.fullmatch(reviewer_id):
+        return {"ready": False, "reason_code": "retirement_evidence_identity_unconfirmed"}
+    if not (
+        reviewer_chat.get("status") in {"rollover_pending", "rollover_blocked"}
+        and reviewer_chat.get("rollover_reason") == "rate_limited"
+        and generation >= 2
+    ):
+        return {"ready": False, "reason_code": "retirement_evidence_rollover_unconfirmed"}
+    exact_commit = str(automation.get("reviewer_repository_commit_sha", "none"))
+    tree_hash = str(automation.get("reviewer_repository_tree_manifest_hash", "none"))
+    if (
+        repository_identity in {"", "none"}
+        or not re.fullmatch(r"[0-9a-f]{40}", exact_commit)
+        or not re.fullmatch(r"[0-9a-f]{64}", tree_hash)
+        or context.get("scope") != "repository_commit_review"
+        or context.get("repository_identity") != repository_identity
+        or context.get("commit_sha") != exact_commit
+        or context.get("tree_manifest_hash") != tree_hash
+        or context.get("generation") != generation
+    ):
+        return {"ready": False, "reason_code": "retirement_evidence_repository_unconfirmed"}
+    review = state.get("review", {})
+    if (
+        reviewer_chat.get("pending_replacement", "none") != "none"
+        or any(
+            str(review.get(field, "none")) not in {"", "none"}
+            for field in (
+                "request_turn_id", "request_message_id", "request_persisted_at",
+                "response_turn_id", "response_message_id", "response_completed_at",
+            )
+        )
+    ):
+        return {"ready": False, "reason_code": "retirement_evidence_replacement_side_effect_uncertain"}
+    if gate.get("slots"):
+        return {"ready": False, "reason_code": "retirement_evidence_slot_uncertain"}
+    if (
+        gate.get("last_released_task_id") != task_id
+        or int(gate.get("consecutive_rate_limits", 0)) < 1
+    ):
+        return {"ready": False, "reason_code": "retirement_evidence_rate_limit_unconfirmed"}
+    if not (
+        binding.get("status") == "bound"
+        and binding.get("provisioned_chat") is True
+        and binding.get("conversation_id") == reviewer_id
+        and binding.get("conversation_url") == f"https://chatgpt.com/c/{reviewer_id}"
+        and binding.get("browser_id") not in {None, "", "none"}
+        and binding.get("provider_tab_id") not in {None, "", "none"}
+    ):
+        return {"ready": False, "reason_code": "retirement_evidence_binding_unconfirmed"}
+    expected_scope = account_browser_scope_for_state(state, state_path)
+    expected_state_identity = _provisioning_state_identity(state_path)
+    candidates = [
+        record for record in gate.get("provisioning_authorizations", [])
+        if record.get("implementation_thread_id") == task_id
+        and record.get("scope") == expected_scope
+        and record.get("state_identity") == expected_state_identity
+        and record.get("repository_identity") == repository_identity
+        and record.get("reviewer_generation") == generation - 1
+        and record.get("reclaim_status") in {"unreconciled", "consumed_after_reclaim"}
+    ]
+    if len(candidates) != 1:
+        return {"ready": False, "reason_code": "retirement_evidence_authorization_unconfirmed"}
+    return {"ready": True, "reason_code": "retirement_evidence_complete"}
+
+
 def _reconcile_legacy_none_startup_rate_limit_retirement(
     state_path: Path, state: dict[str, Any], gate_path: Path,
 ) -> bool:
@@ -6986,9 +7064,16 @@ def _reconcile_legacy_none_startup_rate_limit_retirement(
     )
     repository_identity = str(automation.get("reviewer_repository_identity", "none"))
     generation = int(reviewer_chat.get("generation", 0))
+    rollover_state_matches_rate_limit = (
+        reviewer_chat.get("status") in {"rollover_pending", "rollover_blocked"}
+        and reviewer_chat.get("rollover_reason") == "rate_limited"
+    )
     if not (
         CHATGPT_UUID_PATTERN.fullmatch(reviewer_id)
-        and reviewer_chat.get("status") in {"active", "rollover_pending"}
+        and (
+            reviewer_chat.get("status") == "active"
+            or rollover_state_matches_rate_limit
+        )
         and generation >= 2
         and binding.get("status") == "bound"
         and binding.get("provisioned_chat") is True
@@ -11304,6 +11389,44 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         provisioning_plan = orphaned_provisioning_reconcile_plan(
             path, state, registry_path,
         )
+        legacy_rate_limit_retirement_reconciled = False
+        if (
+            provisioning_plan.get("applicable")
+            and provisioning_plan.get("reason_code")
+            == "consumed_orphaned_provisioning_retirement_unconfirmed"
+        ):
+            try:
+                retirement_gate = load_account_browser_gate(registry_path)
+                retirement_evidence = (
+                    _legacy_rate_limit_retirement_evidence_plan_from_gate(
+                        path, state, retirement_gate,
+                    )
+                )
+            except LCRLError:
+                retirement_evidence = {
+                    "ready": False,
+                    "reason_code": "retirement_evidence_registry_unavailable",
+                }
+            if retirement_evidence.get("ready"):
+                legacy_rate_limit_retirement_reconciled = (
+                    _reconcile_legacy_none_startup_rate_limit_retirement(
+                        path, state, registry_path,
+                    )
+                )
+            if legacy_rate_limit_retirement_reconciled:
+                provisioning_plan = orphaned_provisioning_reconcile_plan(
+                    path, state, registry_path,
+                )
+            else:
+                provisioning_plan = {
+                    "ready": False,
+                    "applicable": True,
+                    "reason_code": (
+                        "retirement_evidence_binding_chain_unconfirmed"
+                        if retirement_evidence.get("ready")
+                        else retirement_evidence["reason_code"]
+                    ),
+                }
         if provisioning_plan.get("ready"):
             if implementation_thread_id == "none":
                 raise LCRLError("guard requires the exact implementation task identity")
@@ -11354,6 +11477,9 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                     "acquire_same_generation_replacement_startup" if already_reconciled
                     else "reconcile_orphaned_provisioning_once"
                 ),
+                "legacy_rate_limit_retirement_reconciled": (
+                    legacy_rate_limit_retirement_reconciled
+                ),
                 "revision": state["revision"],
             }
         if provisioning_plan.get("applicable"):
@@ -11377,7 +11503,14 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                 "continuation_required": True,
                 "turn_completion_allowed": False,
                 "user_choice_required": False,
-                "system_next_action": "rebuild_consumed_orphaned_provisioning_evidence_once",
+                "system_next_action": (
+                    "reconcile_legacy_rate_limit_retirement_evidence_once"
+                    if str(provisioning_plan["reason_code"]).startswith("retirement_evidence_")
+                    else "rebuild_consumed_orphaned_provisioning_evidence_once"
+                ),
+                "legacy_rate_limit_retirement_reconciled": (
+                    legacy_rate_limit_retirement_reconciled
+                ),
                 "revision": state["revision"],
             }
     if legacy_missing_wait_poisoned:

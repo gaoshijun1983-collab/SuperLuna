@@ -20,8 +20,12 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.94`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 150 / Skill revision `2026-08-19.107` 为“首次孤儿授权回收已消费、但仍可证明
+当前源码候选版本是 `0.2.0-alpha.95`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 151 / Skill revision `2026-08-19.108` 让普通 turn-entry 在 Alpha94 orphan
+provisioning 恢复前，自动补写一次缺失的正式限流退休记录。它必须同时核对同一 task/state/reviewer/
+generation、持久账户限流事实、`rate_limited` rollover、仓库 exact commit/tree、canonical provisioned
+reviewer binding、零 replacement/消息副作用及账户门全局零 slot；证据不足返回稳定
+`retirement_evidence_*`，不访问浏览器。Controller 150 / Skill revision `2026-08-19.107` 为“首次孤儿授权回收已消费、但仍可证明
 零浏览器/Chat/消息/slot 副作用”的中断增加唯一一次确定性恢复。恢复必须严格匹配同一 task、state、
 repository exact commit/tree、generation、已正式退休的旧 reviewer，并确认账户门全局零 slot；恢复身份
 持久化且只能消费一次。Controller 149 / Skill revision `2026-08-19.106` 修复真实限流早于临时 mode-selection
