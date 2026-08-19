@@ -20,8 +20,12 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.97`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 153 / Skill revision `2026-08-19.110` 允许普通 repo-retest guard
+当前源码候选版本是 `0.2.0-alpha.98`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 154 / Skill revision `2026-08-19.111` 会让 doctor/guard 按来源输出
+guard 参数、宿主 thread/session、state、run binding 和 registry identity 的存在性、表示类型、
+长度与截断 raw/normalized SHA-256，并列出精确不一致来源对，不暴露原始 ID。只允许同一 UUID 的
+大小写、花括号和明确 `urn:uuid:`/`thread:` 包装归一；不同 UUID 与 opaque identity 漂移继续
+失败关闭。Controller 153 / Skill revision `2026-08-19.110` 允许普通 repo-retest guard
 在宿主任务、state/run-binding、reviewer、schema/版本、精确 retest scope 与宿主 Codex root
 全部一致时，幂等原子重建遗失的唯一 task binding registry 条目并继续原 replacement rollover。
 任一漂移返回稳定 `task_binding_recovery_*`、`user_choice_required=false`，且不访问浏览器或 Chat。

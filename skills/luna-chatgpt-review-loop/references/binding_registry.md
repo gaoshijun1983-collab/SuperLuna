@@ -58,6 +58,15 @@ Generic projects, external paths, unrecorded run bindings, version drift, or
 registry identity conflicts remain fail-closed and grant no browser or Chat
 access.
 
+Identity diagnostics never echo task IDs. For each guard argument, host thread,
+auxiliary host session, state, review-run binding, and registry entry they expose
+only presence, representation kind, length, and 12-character raw/normalized
+SHA-256 prefixes, followed by the exact mismatching source-name pairs. UUID
+normalization is restricted to case, braces, and explicit `urn:uuid:`, `thread:`,
+or `thread_id:` wrappers. Opaque values and different UUIDs never become aliases.
+An unavailable host task-registry API is reported as unavailable rather than
+replaced by a title or delegation-source guess.
+
 If a user manually renames a surface, keep the binding because its stable ID is unchanged. Regenerate and apply the expected title at the next explicit naming event. If an ID changes, invalidate the confirmation lease and require the user to select the replacement Chat.
 
 If registry and state diverge, stop formal submission, run `doctor-registry` and `doctor`, then re-register the existing stable IDs. Never infer identity from a similar title.

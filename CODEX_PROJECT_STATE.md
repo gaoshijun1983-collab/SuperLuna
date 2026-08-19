@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.97`, Controller 153, Skill `2026-08-19.110`.
+- Source candidate: `0.2.0-alpha.98`, Controller 154, Skill `2026-08-19.111`.
+- Task-binding recovery diagnostics now identify every trusted source without
+  exposing IDs: existence, representation type, length, truncated raw and
+  normalized hashes, and exact mismatch pairs. Only strict representations of
+  the same UUID normalize; different UUIDs and opaque identity drift remain
+  blocked before project/browser/Chat access.
 - A legitimate legacy `repo_retest` state whose task binding registry entry was
   lost can now be rebuilt by ordinary guard without user choice. Recovery
   requires the current host task, persisted implementation and reviewer IDs,
@@ -174,6 +179,11 @@ intervention.
   The installed Skill reports Controller 153 / revision `2026-08-19.110`.
   Real App legacy binding reconstruction and rollover continuation remain
   unverified.
+- Alpha 98 repository regression passed 443/443 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Two deterministic builds produced the
+  same verified 122-file archive. Real App same-task identity normalization,
+  binding reconstruction, and rollover continuation remain unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

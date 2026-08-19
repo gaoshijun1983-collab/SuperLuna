@@ -24,9 +24,15 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.97`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 153 / Skill revision
-`2026-08-19.110` lets an ordinary repo-retest guard atomically rebuild a lost
+The current source candidate is `0.2.0-alpha.98`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 154 / Skill revision
+`2026-08-19.111` makes legacy task-binding identity diagnosis non-sensitive and
+source-specific. Doctor and guard report presence, representation kind, length,
+and truncated raw/normalized SHA-256 for the guard argument, host thread/session,
+state, run binding, and registry entry, plus the exact mismatching source pairs.
+Only canonical UUID case, braces, and explicit `urn:uuid:`/`thread:` wrappers may
+normalize to the same task; different UUIDs and opaque identity drift remain
+fail-closed. Controller 153 / Skill revision `2026-08-19.110` lets an ordinary repo-retest guard atomically rebuild a lost
 task-binding registry entry only when the current host task, persisted
 implementation identity, trusted review-run identity, schema/version contract,
 reviewer identity, exact retest scope, and host Codex root all agree. Doctor

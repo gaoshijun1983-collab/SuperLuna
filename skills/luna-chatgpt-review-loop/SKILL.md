@@ -260,6 +260,11 @@ Chat 已达到安全轮数上限，控制器必须在同一次 `begin-new-goal` 
    `task_binding_recovery_*`、`user_choice_required=false`，且浏览器、Chat、外部项目均禁止访问。
    `doctor --implementation-thread-id <当前任务ID>` 必须输出同一非敏感诊断，不能只显示笼统
    `task_binding_not_registered`。
+   诊断必须分别列出 guard 参数、`CODEX_THREAD_ID`、辅助 `CODEX_SESSION_ID`、state implementation、
+   run binding 与 binding registry entry 的存在性、表示类型、长度及截断 raw/normalized SHA-256，
+   并列出精确不一致来源对；不得输出原始 ID。只有严格可解析为同一 UUID 的大小写、花括号和明确
+   `urn:uuid:`、`thread:`、`thread_id:` 表示可以归一。不同 UUID 或 opaque identity 不得迁移。
+   若宿主没有可信 task registry API，必须明确标记 unavailable，禁止用标题或来源任务补证。
    无项目任务也必须使用自己已经分配的可写输出目录，不得硬编码 `/var/tmp`、桌面或另一个
    未授权路径，也不得为了通过预检自行创建替代目录：
 

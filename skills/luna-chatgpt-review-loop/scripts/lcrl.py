@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 import zipfile
 from urllib.parse import urlsplit
 from contextlib import contextmanager
@@ -34,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 153
-SKILL_REVISION = "2026-08-19.110"
+CONTROLLER_VERSION = 154
+SKILL_REVISION = "2026-08-19.111"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -795,6 +796,75 @@ def canonical_binding_registry_path(state: dict[str, Any]) -> Path:
     return host_codex_root / "lcrl" / "registry" / "tasks.json"
 
 
+def normalize_task_identity(value: Any) -> tuple[str, str]:
+    """Normalize only explicit UUID representations; preserve opaque IDs exactly."""
+    raw = str(value or "").strip()
+    if raw in {"", "none"}:
+        return "none", "missing"
+    candidate = raw
+    lowered = candidate.lower()
+    for prefix in ("urn:uuid:", "thread:", "thread_id:"):
+        if lowered.startswith(prefix):
+            candidate = candidate[len(prefix):]
+            break
+    if candidate.startswith("{") and candidate.endswith("}"):
+        candidate = candidate[1:-1]
+    try:
+        parsed = uuid.UUID(candidate)
+    except (ValueError, AttributeError):
+        return raw, "opaque"
+    if str(parsed).replace("-", "") != candidate.lower().replace("-", ""):
+        return raw, "opaque"
+    return str(parsed), "uuid"
+
+
+def safe_task_identity_summary(
+    value: Any,
+    source_status: str = "available",
+    *,
+    authoritative_for_recovery: bool = True,
+) -> dict[str, Any]:
+    """Return non-sensitive identity facts suitable for doctor/guard payloads."""
+    raw = str(value or "").strip()
+    normalized, identity_kind = normalize_task_identity(raw)
+    exists = raw not in {"", "none"}
+    return {
+        "exists": exists,
+        "source_status": source_status,
+        "authoritative_for_recovery": authoritative_for_recovery,
+        "identity_kind": identity_kind,
+        "raw_length": len(raw) if exists else 0,
+        "raw_sha256_12": hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12] if exists else "none",
+        "normalized_sha256_12": (
+            hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+            if exists else "none"
+        ),
+        "normalization_applied": exists and raw != normalized,
+    }
+
+
+def _binding_registry_implementation_identity(
+    state: dict[str, Any], state_implementation_id: str,
+) -> tuple[str, str]:
+    """Read one matching shared binding identity when its canonical registry exists."""
+    try:
+        registry_path = canonical_binding_registry_path(state)
+        registry = load_binding_registry(registry_path, allow_missing=True)
+    except LCRLError:
+        return "none", "registry_unavailable"
+    expected, _kind = normalize_task_identity(state_implementation_id)
+    matches = [
+        str(item.get("implementation_thread_id", "none"))
+        for item in registry.get("tasks", [])
+        if normalize_task_identity(item.get("implementation_thread_id"))[0] == expected
+    ]
+    if len(matches) == 1:
+        return matches[0], "available"
+    if len(matches) > 1:
+        return "none", "ambiguous"
+    return "none", "entry_missing"
+
+
 def legacy_task_binding_recovery_plan(
     state_path: str | Path,
     state: dict[str, Any],
@@ -806,18 +876,72 @@ def legacy_task_binding_recovery_plan(
     run_binding = state.get("review", {}).get("run_binding", {})
     supplied = str(supplied_implementation_thread_id or "none").strip()
     host = str(os.environ.get("CODEX_THREAD_ID") or "none").strip()
+    host_session = str(os.environ.get("CODEX_SESSION_ID") or "none").strip()
     expected = str(automation.get("implementation_thread_id", "none")).strip()
+    run_implementation = str(run_binding.get("implementation_thread_id", "none")).strip()
+    registry_implementation, registry_status = _binding_registry_implementation_identity(
+        state, expected,
+    )
+    normalized = {
+        "guard_argument": normalize_task_identity(supplied)[0],
+        "codex_thread_environment": normalize_task_identity(host)[0],
+        "codex_session_environment": normalize_task_identity(host_session)[0],
+        "state_implementation": normalize_task_identity(expected)[0],
+        "run_binding_implementation": normalize_task_identity(run_implementation)[0],
+        "binding_registry_entry": normalize_task_identity(registry_implementation)[0],
+    }
+    identity_sources = {
+        "guard_argument": safe_task_identity_summary(supplied),
+        "codex_thread_environment": safe_task_identity_summary(host),
+        "codex_session_environment": safe_task_identity_summary(
+            host_session, authoritative_for_recovery=False,
+        ),
+        "state_implementation": safe_task_identity_summary(expected),
+        "run_binding_implementation": safe_task_identity_summary(run_implementation),
+        "binding_registry_entry": safe_task_identity_summary(
+            registry_implementation, registry_status,
+        ),
+        "host_task_registry_entry": safe_task_identity_summary(
+            "none", "trusted_host_registry_api_unavailable",
+            authoritative_for_recovery=False,
+        ),
+    }
+    identity_mismatch_pairs: list[list[str]] = []
+    comparisons = (
+        ("guard_argument", "codex_thread_environment"),
+        ("state_implementation", "codex_thread_environment"),
+        ("run_binding_implementation", "state_implementation"),
+    )
+    if host_session not in {"", "none"}:
+        comparisons += (("codex_thread_environment", "codex_session_environment"),)
+    if registry_implementation not in {"", "none"}:
+        comparisons += (("binding_registry_entry", "state_implementation"),)
+    for left, right in comparisons:
+        if normalized[left] != normalized[right]:
+            identity_mismatch_pairs.append([left, right])
     profile = str(automation.get("profile", "generic"))
     checks = {
         "binding_unbound": state.get("binding", {}).get("status") == "unbound",
         "repo_retest_profile": profile == SUPERLUNA_REPO_RETEST_PROFILE,
         "host_task_identity_available": host not in {"", "none"},
-        "supplied_task_matches_host": supplied not in {"", "none"} and supplied == host,
-        "state_task_matches_host": expected not in {"", "none"} and expected == host,
+        "host_session_matches_thread": (
+            host_session in {"", "none"}
+            or normalized["codex_session_environment"] == normalized["codex_thread_environment"]
+        ),
+        "supplied_task_matches_host": (
+            supplied not in {"", "none"}
+            and normalized["guard_argument"] == normalized["codex_thread_environment"]
+        ),
+        "state_task_matches_host": (
+            expected not in {"", "none"}
+            and normalized["state_implementation"] == normalized["codex_thread_environment"]
+        ),
         "state_schema_compatible": state.get("schema_version") == SCHEMA_VERSION,
         "run_binding_trusted": run_binding.get("status") == "trusted",
         "run_binding_schema_matches": run_binding.get("state_schema_version") == SCHEMA_VERSION,
-        "run_binding_task_matches": run_binding.get("implementation_thread_id") == expected,
+        "run_binding_task_matches": (
+            normalized["run_binding_implementation"] == normalized["state_implementation"]
+        ),
         "run_binding_reviewer_matches": (
             run_binding.get("reviewer_thread_id") == confirmation.get("reviewer_thread_id")
             and confirmation.get("reviewer_thread_id") not in {None, "", "none"}
@@ -833,12 +957,12 @@ def legacy_task_binding_recovery_plan(
         ("binding_unbound", "task_binding_recovery_not_required"),
         ("repo_retest_profile", "task_binding_recovery_profile_not_repo_retest"),
         ("host_task_identity_available", "task_binding_recovery_host_identity_unavailable"),
-        ("supplied_task_matches_host", "task_binding_recovery_host_identity_mismatch"),
-        ("state_task_matches_host", "task_binding_recovery_state_identity_mismatch"),
+        ("supplied_task_matches_host", "task_binding_recovery_guard_argument_vs_host_mismatch"),
+        ("state_task_matches_host", "task_binding_recovery_state_vs_host_mismatch"),
         ("state_schema_compatible", "task_binding_recovery_schema_incompatible"),
         ("run_binding_trusted", "task_binding_recovery_run_binding_untrusted"),
         ("run_binding_schema_matches", "task_binding_recovery_run_binding_schema_mismatch"),
-        ("run_binding_task_matches", "task_binding_recovery_run_binding_task_mismatch"),
+        ("run_binding_task_matches", "task_binding_recovery_run_binding_vs_state_mismatch"),
         ("run_binding_reviewer_matches", "task_binding_recovery_run_binding_reviewer_mismatch"),
         ("run_binding_version_recorded", "task_binding_recovery_version_contract_incompatible"),
     )
@@ -860,6 +984,11 @@ def legacy_task_binding_recovery_plan(
         "reason_code": missing[0] if missing else "task_binding_recovery_ready",
         "missing_reason_codes": missing,
         "checks": checks,
+        "identity_sources": identity_sources,
+        "identity_mismatch_pairs": identity_mismatch_pairs,
+        "normalization_applied": any(
+            source["normalization_applied"] for source in identity_sources.values()
+        ),
         "registry_path": registry_path,
         "state_path": str(Path(state_path).resolve()),
         "controller_version": CONTROLLER_VERSION,
@@ -11535,6 +11664,10 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         expected_implementation_thread_id = state["automation"].get(
             "implementation_thread_id", "none"
         )
+        # Downstream legacy gates still compare the persisted representation.
+        # Once the strict UUID proof succeeds, use that exact persisted form for
+        # the remainder of this guard without rewriting the historical scope.
+        implementation_thread_id = str(expected_implementation_thread_id)
     status = state["review"]["status"]
     legacy_missing_wait_proof = next(
         (

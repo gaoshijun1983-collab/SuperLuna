@@ -7975,6 +7975,105 @@ class ControllerTests(unittest.TestCase):
                 self.assertEqual(state_path.read_bytes(), before)
                 self.assertFalse((codex_root / "lcrl" / "registry" / "tasks.json").exists())
 
+    def test_repo_retest_binding_recovery_normalizes_only_the_same_wrapped_uuid(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            codex_root = Path(directory) / "codex-home"
+            canonical = "019fc5e7-6559-7a32-bc30-b8d26a7b6dd9"
+            legacy = "URN:UUID:{019FC5E7-6559-7A32-BC30-B8D26A7B6DD9}"
+            _run_root, project, state_path = _repo_retest_paths(checkout, legacy)
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": canonical,
+                    "CODEX_SESSION_ID": canonical,
+                    "CODEX_HOME": str(codex_root),
+                }),
+            ):
+                state = lcrl.new_state(
+                    "none", legacy, str(project), "reviewer-binding-recovery",
+                    profile=lcrl.SUPERLUNA_REPO_RETEST_PROFILE,
+                    codex_root=str(codex_root), state_path=str(state_path),
+                )
+                lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+                lcrl.save_state(state_path, state)
+                diagnosis = lcrl.doctor(
+                    state_path, implementation_thread_id=f"thread:{canonical}",
+                )
+                result = lcrl.guard_action(Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry",
+                    implementation_thread_id=f"thread:{canonical}", replace=False,
+                ))
+
+            diagnostic = diagnosis["task_binding_recovery_diagnostic"]
+            self.assertEqual(diagnostic["reason_code"], "task_binding_recovery_ready")
+            self.assertEqual(diagnostic["identity_mismatch_pairs"], [])
+            self.assertTrue(diagnostic["normalization_applied"])
+            self.assertEqual(
+                set(diagnostic["identity_sources"]),
+                {
+                    "guard_argument", "codex_thread_environment",
+                    "codex_session_environment", "state_implementation",
+                    "run_binding_implementation", "binding_registry_entry",
+                    "host_task_registry_entry",
+                },
+            )
+            for source in diagnostic["identity_sources"].values():
+                self.assertNotIn(canonical, json.dumps(source))
+                self.assertIn("exists", source)
+                self.assertIn("normalized_sha256_12", source)
+            self.assertTrue(result["legacy_task_binding_rebuilt"])
+            self.assertFalse(result.get("browser_access_allowed", False))
+
+    def test_repo_retest_binding_recovery_reports_exact_mismatch_pair_without_values(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            codex_root = Path(directory) / "codex-home"
+            state_id = "019fc5e7-6559-7a32-bc30-b8d26a7b6dd9"
+            host_id = "029fc5e7-6559-7a32-bc30-b8d26a7b6dd9"
+            _run_root, project, state_path = _repo_retest_paths(checkout, state_id)
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                state = lcrl.new_state(
+                    "none", state_id, str(project), "reviewer-binding-recovery",
+                    profile=lcrl.SUPERLUNA_REPO_RETEST_PROFILE,
+                    codex_root=str(codex_root), state_path=str(state_path),
+                )
+                lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+                lcrl.save_state(state_path, state)
+                before = state_path.read_bytes()
+                with mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": host_id,
+                    "CODEX_SESSION_ID": host_id,
+                    "CODEX_HOME": str(codex_root),
+                }):
+                    result = lcrl.guard_action(Namespace(
+                        state=str(state_path), minutes=20, reason="turn_entry",
+                        implementation_thread_id=state_id, replace=False,
+                    ))
+
+            diagnostic = result["task_binding_recovery_diagnostic"]
+            self.assertEqual(
+                result["reason_code"],
+                "task_binding_recovery_guard_argument_vs_host_mismatch",
+            )
+            self.assertIn(
+                ["guard_argument", "codex_thread_environment"],
+                diagnostic["identity_mismatch_pairs"],
+            )
+            self.assertIn(
+                ["state_implementation", "codex_thread_environment"],
+                diagnostic["identity_mismatch_pairs"],
+            )
+            self.assertNotIn(state_id, json.dumps(diagnostic))
+            self.assertNotIn(host_id, json.dumps(diagnostic))
+            self.assertEqual(state_path.read_bytes(), before)
+            self.assertFalse(result["browser_access_allowed"])
+            self.assertFalse(result["user_choice_required"])
+
     def test_new_app_chat_discovery_returns_one_stable_candidate_without_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

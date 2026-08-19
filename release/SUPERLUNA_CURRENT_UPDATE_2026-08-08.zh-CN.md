@@ -3,15 +3,22 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.97`（Python 元数据：`0.2.0a97`）
-- 当前源码控制器：153
+- 版本：`0.2.0-alpha.98`（Python 元数据：`0.2.0a98`）
+- 当前源码控制器：154
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.110`
+- 当前源码 Skill 修订：`2026-08-19.111`
 - 候选日期：2026-08-19
-- Alpha 97 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
+- Alpha 98 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
+
+Alpha 98 把 task binding 身份阻断拆成可核验、非敏感的来源诊断。doctor/guard
+分别报告 guard 参数、`CODEX_THREAD_ID`、辅助 `CODEX_SESSION_ID`、state、run binding
+和 registry entry 是否存在、表示类型、长度、截断 raw/normalized SHA-256 及精确不一致
+来源对。只有能严格解析为同一 UUID 的大小写、花括号和明确
+`urn:uuid:`/`thread:` 包装才归一；不同 UUID 与 opaque identity 漂移仍失败关闭。
+宿主 task registry API 不可用时会如实标记，不再伪造该证据。
 
 Alpha 97 为合法旧 `repo_retest` state 增加同任务 task binding 自动重建。
 普通 guard 只有在宿主任务、state/run-binding、reviewer、schema/版本、精确

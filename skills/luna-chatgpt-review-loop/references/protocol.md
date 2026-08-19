@@ -690,3 +690,8 @@ review-run identity, compatible Controller/Skill/schema contract, and canonical
 host registry root. Every failed prerequisite returns a stable
 `task_binding_recovery_*` code, `user_choice_required=false`, and zero Chat or
 browser authority; success continues the pre-existing rollover generation.
+The diagnostic identifies the failing comparison without disclosing identities:
+each trusted source has presence, representation kind, length, and truncated
+raw/normalized SHA-256, plus exact mismatch pairs. Only strict representations
+of the same UUID may normalize. Different UUIDs, opaque values, delegation
+sources, or an unavailable host registry remain fail-closed.
