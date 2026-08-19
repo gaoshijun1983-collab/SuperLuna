@@ -74,6 +74,13 @@ rate-limit, and zero-slot evidence plan. This resolution does not synthesize a
 retirement record. Generic states, absent canonical gates, and identity drift
 remain fail-closed.
 
+The authoritative account-browser gate lives at
+`$CODEX_HOME/superluna/account-browser-gate.json`; OS temporary storage is not
+restart-durable authority. Legacy temporary paths may be read for compatibility,
+but persistent-gate discovery only changes the diagnostic source. Every normal
+identity, scope, generation, authorization, rate-limit, and zero-slot check still
+applies before any retirement or continuation write.
+
 If a user manually renames a surface, keep the binding because its stable ID is unchanged. Regenerate and apply the expected title at the next explicit naming event. If an ID changes, invalidate the confirmation lease and require the user to select the replacement Chat.
 
 If registry and state diverge, stop formal submission, run `doctor-registry` and `doctor`, then re-register the existing stable IDs. Never infer identity from a similar title.

@@ -3,15 +3,22 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.99`（Python 元数据：`0.2.0a99`）
-- 当前源码控制器：155
+- 版本：`0.2.0-alpha.100`（Python 元数据：`0.2.0a100`）
+- 当前源码控制器：156
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.112`
+- 当前源码 Skill 修订：`2026-08-19.113`
 - 候选日期：2026-08-19
-- Alpha 99 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
+- Alpha 100 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
+
+Alpha 100 的实机只读诊断确认：原 NPC state 的 registry 字段为 `none`，旧默认临时 gate 已被宿主
+清理，而真实持久 gate 位于 `$CODEX_HOME/superluna/account-browser-gate.json`。Controller 156
+把后续共享账户门默认位置迁到该持久目录，并让旧 repo-retest diagnostic 在临时路径遗失后发现它。
+发现 gate 不等于证据通过：真实持久 gate 缺少当前 task 的 rate-limit record 与 startup authorization，
+因此现有 NPC 仍必须失败关闭，但现在会返回精确 evidence 缺项而非 registry unavailable。控制器不会
+从 active/rollover 状态单独推断退休，也不会访问项目、浏览器或 Chat。
 
 Alpha 99 修复 repo-retest state 在宿主重启后仍指向已遗失临时 account gate 的恢复断点。
 只有 canonical host account gate 已经持有并通过同一 task、state scope、repository、generation、

@@ -24,8 +24,15 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.99`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 155 / Skill revision
+The current source candidate is `0.2.0-alpha.100`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 156 / Skill revision
+`2026-08-19.113` moves the shared account-browser gate from OS temporary storage
+to the host-owned `$CODEX_HOME/superluna/account-browser-gate.json`, so future
+authorization, slot, cooldown, and retirement evidence survives a host restart.
+Legacy repo-retest diagnostics discover that persistent gate and report its
+actual missing evidence instead of collapsing the condition into registry
+unavailable. Existing incomplete or differently owned gates remain fail-closed;
+no retirement fact is synthesized. Controller 155 / Skill revision
 `2026-08-19.112` recovers a lost repo-retest retirement-registry path only from
 the canonical host account gate when that existing gate independently proves
 the exact task, state scope, repository, generation, zero-slot state, startup

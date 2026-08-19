@@ -269,6 +269,9 @@ Chat 已达到安全轮数上限，控制器必须在同一次 `begin-new-goal` 
    host account gate，并要求该既有 gate 通过同 task、state scope、repository identity、generation、
    startup authorization、rate-limit history 与全局零 slot 的完整证据矩阵。不得新造退休事实；
    generic profile、canonical gate 缺失或任一身份不一致继续失败关闭。
+   新账户门必须默认写入宿主持久 `$CODEX_HOME/superluna/account-browser-gate.json`，不得再把 OS
+   临时目录作为 authoritative storage。旧临时 gate 只作兼容读取；发现持久 gate 后仍须逐项返回
+   evidence matrix，不能把“文件存在”升级为退休、限流或授权已证明。
    无项目任务也必须使用自己已经分配的可写输出目录，不得硬编码 `/var/tmp`、桌面或另一个
    未授权路径，也不得为了通过预检自行创建替代目录：
 

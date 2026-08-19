@@ -40,7 +40,14 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.99`, Controller 155, Skill `2026-08-19.112`.
+- Source candidate: `0.2.0-alpha.100`, Controller 156, Skill `2026-08-19.113`.
+- The account-browser gate now defaults to the host-owned persistent
+  `$CODEX_HOME/superluna/account-browser-gate.json`, rather than OS temporary
+  storage. Repo-retest restart recovery discovers that gate after a missing
+  legacy path and exposes the exact incomplete evidence matrix without creating
+  retirement facts. The Alpha 99 real gate was found, but it did not contain
+  the current task's rate-limit record or startup authorization; that real
+  continuation therefore remains correctly blocked.
 - A repo-retest state whose persisted temporary retirement-registry path was
   lost may now select the canonical host account gate only when that existing
   gate passes the full task/state scope/repository/generation/authorization/
@@ -194,6 +201,11 @@ intervention.
   passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. Real App canonical retirement-registry
   recovery and the subsequent replacement continuation remain unverified.
+- Alpha 100 repository regression passed 444/444 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Persistent-gate discovery is locally
+  verified; real App evidence remains blocked on the missing same-task
+  rate-limit record and startup authorization.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

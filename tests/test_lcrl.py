@@ -1946,14 +1946,16 @@ class ControllerTests(unittest.TestCase):
                     at="2026-08-12T08:00:00Z",
                 ))
 
-    def test_default_account_browser_gate_uses_system_temp_not_codex_home(self):
+    def test_default_account_browser_gate_survives_restart_under_codex_home(self):
         with tempfile.TemporaryDirectory() as directory:
             fake_codex_home = Path(directory) / "restricted-codex-home"
             with mock.patch.dict(os.environ, {"CODEX_HOME": str(fake_codex_home)}):
                 gate = lcrl.default_account_browser_gate_path()
 
-            self.assertTrue(gate.is_relative_to(Path(tempfile.gettempdir()).resolve()))
-            self.assertFalse(gate.is_relative_to(fake_codex_home.resolve()))
+            self.assertTrue(gate.is_relative_to(fake_codex_home.resolve()))
+            self.assertEqual(
+                gate, fake_codex_home.resolve() / "superluna" / "account-browser-gate.json",
+            )
             self.assertEqual(gate.name, "account-browser-gate.json")
 
     def test_account_browser_gate_enforces_two_under_process_race(self):
@@ -2670,9 +2672,9 @@ class ControllerTests(unittest.TestCase):
                 ))
             self.assertEqual(
                 wrong_identity["reason_code"],
-                "retirement_evidence_registry_unavailable",
+                "retirement_evidence_authorization_unconfirmed",
             )
-            self.assertFalse(wrong_identity["retirement_registry_recovered"])
+            self.assertTrue(wrong_identity["retirement_registry_recovered"])
             self.assertFalse(wrong_identity["browser_access_allowed"])
             self.assertEqual(state_path.read_bytes(), state_before_wrong_identity)
 
@@ -2801,6 +2803,91 @@ class ControllerTests(unittest.TestCase):
                 "retirement_evidence_binding_unconfirmed",
                 diagnostic["missing_reason_codes"],
             )
+
+    def test_repo_retest_retirement_diagnostic_discovers_persistent_host_gate_after_restart(self):
+        """Alpha 99 real shape: temp gate is gone, persistent gate still exists."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            checkout = root / "SuperLuna"
+            checkout.mkdir()
+            codex_root = root / "codex-home"
+            task_id = "019fc5e7-6559-7a32-bc30-b8d26a7b6dd9"
+            _run_root, project, state_path = _repo_retest_paths(checkout, task_id)
+            missing_temp_gate = root / "host-temp-cleared" / "account-browser-gate.json"
+            persistent_gate = codex_root / "superluna" / "account-browser-gate.json"
+            reviewer_id = "6a856748-7f94-83ea-befd-2727e1b4e7ba"
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": task_id,
+                    "CODEX_SESSION_ID": task_id,
+                    "CODEX_HOME": str(codex_root),
+                }),
+            ):
+                state = lcrl.new_state(
+                    "none", task_id, project, reviewer_id,
+                    continuation_mode="automatic", review_transport="in_app_browser",
+                    profile=lcrl.SUPERLUNA_REPO_RETEST_PROFILE,
+                    codex_root=str(codex_root), state_path=str(state_path),
+                )
+                repository_identity = "c" * 64
+                state["reviewer_chat"]["generation"] = 5
+                state["automation"].update({
+                    "reviewer_repository_root": str(checkout.resolve()),
+                    "reviewer_repository_remote_url": "https://github.com/example/project",
+                    "reviewer_repository_commit_sha": "a" * 40,
+                    "reviewer_repository_tree_manifest_hash": "b" * 64,
+                    "reviewer_repository_identity": repository_identity,
+                })
+                state["project_context"].update({
+                    "scope": "repository_commit_review",
+                    "status": "repository_access_receipt_required",
+                    "repository_url": "https://github.com/example/project",
+                    "repository_identity": repository_identity,
+                    "commit_sha": "a" * 40,
+                    "tree_manifest_hash": "b" * 64,
+                    "repository_access_receipt": "none",
+                    "generation": 5,
+                })
+                state["confirmation"].update({
+                    "reviewer_thread_id": reviewer_id,
+                    "confirmed_at": "2026-08-19T08:22:20Z",
+                })
+                state["browser_binding"].update({
+                    "status": "bound", "provisioned_chat": True,
+                    "conversation_id": reviewer_id,
+                    "conversation_url": f"https://chatgpt.com/c/{reviewer_id}",
+                    "browser_id": "browser-persistent-gate",
+                    "provider_tab_id": "tab-persistent-gate",
+                    "bound_at": "2026-08-19T08:22:20Z",
+                })
+                lcrl.save_state(state_path, state)
+                gate = lcrl.empty_account_browser_gate()
+                gate["last_released_task_id"] = "different-host-task"
+                lcrl._save_account_browser_gate_locked(
+                    persistent_gate, gate, expected_revision=gate["revision"],
+                )
+                state_before = state_path.read_bytes()
+                gate_before = persistent_gate.read_bytes()
+                with mock.patch.object(
+                    lcrl, "default_account_browser_gate_path",
+                    return_value=missing_temp_gate,
+                ):
+                    result = lcrl.diagnose_rate_limit_retirement_command(Namespace(
+                        state=str(state_path), registry=None,
+                        expected_controller_version=lcrl.CONTROLLER_VERSION,
+                        expected_skill_revision=lcrl.SKILL_REVISION,
+                    ))
+
+            self.assertEqual(
+                result["reason_code"], "retirement_evidence_rollover_unconfirmed",
+            )
+            self.assertTrue(result["retirement_registry_recovered"])
+            self.assertEqual(result["registry"], str(persistent_gate.resolve()))
+            self.assertFalse(result["browser_access_allowed"])
+            self.assertFalse(result["user_choice_required"])
+            self.assertEqual(state_path.read_bytes(), state_before)
+            self.assertEqual(persistent_gate.read_bytes(), gate_before)
 
     def test_round_budget_requires_rollover_before_third_submission(self):
         with tempfile.TemporaryDirectory() as directory:

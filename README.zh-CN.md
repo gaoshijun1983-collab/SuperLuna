@@ -20,8 +20,12 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.99`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 155 / Skill revision `2026-08-19.112` 只在 repo-retest state
+当前源码候选版本是 `0.2.0-alpha.100`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 156 / Skill revision `2026-08-19.113` 把共享 account-browser gate
+从系统临时目录迁到宿主持久 `$CODEX_HOME/superluna/account-browser-gate.json`，使后续 authorization、
+slot、cooldown 与 retirement evidence 能跨宿主重启保留。旧 repo-retest diagnostic 会发现该持久 gate，
+并输出真实缺项而不是继续笼统报告 registry unavailable；现有 gate 若证据不完整或属于不同任务，仍
+失败关闭且不会创建退休事实。Controller 155 / Skill revision `2026-08-19.112` 只在 repo-retest state
 持久化的退休 registry 路径遗失、且 canonical host account gate 已独立证明同一 task、state scope、
 repository、generation、零 slot、startup authorization 与 rate-limit chain 时恢复该既有 registry。
 它不会创建退休证据；canonical gate 不可用或身份漂移时，仍在项目、浏览器和 Chat 访问前失败关闭。

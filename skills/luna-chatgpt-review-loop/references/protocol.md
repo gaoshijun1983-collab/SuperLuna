@@ -697,6 +697,10 @@ of the same UUID may normalize. Different UUIDs, opaque values, delegation
 sources, or an unavailable host registry remain fail-closed.
 ## Lost retirement registry recovery
 
+The authoritative shared account-browser gate is
+`$CODEX_HOME/superluna/account-browser-gate.json`. New evidence must not use OS
+temporary storage as its durable authority.
+
 For `superluna_repo_retest_v1` only, a persisted temporary account-gate path
 that no longer exists may resolve to the canonical host account gate. The
 canonical gate must already prove the exact task, state scope, repository

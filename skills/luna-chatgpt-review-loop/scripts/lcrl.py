@@ -35,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 155
-SKILL_REVISION = "2026-08-19.112"
+CONTROLLER_VERSION = 156
+SKILL_REVISION = "2026-08-19.113"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -1099,13 +1099,25 @@ def reconcile_legacy_task_binding(
 
 
 def default_account_browser_gate_path() -> Path:
-    """Return the host-user gate reachable from project and projectless tasks."""
-    user_key = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(Path.home())).strip("-") or "default"
-    return (
-        Path(tempfile.gettempdir())
-        / f"superluna-{hashlib.sha256(user_key.encode('utf-8')).hexdigest()[:16]}"
-        / "account-browser-gate.json"
-    ).resolve()
+    """Return the host-owned account gate that survives OS temp cleanup."""
+    codex_root = Path(
+        os.environ.get("CODEX_HOME") or (Path.home() / ".codex")
+    ).expanduser().resolve()
+    return (codex_root / "superluna" / "account-browser-gate.json").resolve()
+
+
+def persistent_account_browser_gate_path(state: dict[str, Any]) -> Path:
+    """Return the host-owned persistent account gate for restart recovery."""
+    host_codex_root = Path(
+        os.environ.get("CODEX_HOME") or (Path.home() / ".codex")
+    ).expanduser().resolve()
+    recorded_root = str(state.get("runtime", {}).get("codex_root", "auto"))
+    if recorded_root not in {"", "auto", "none"}:
+        if Path(recorded_root).expanduser().resolve() != host_codex_root:
+            raise LCRLError(
+                "account browser recovery Codex root does not match the current host"
+            )
+    return (host_codex_root / "superluna" / "account-browser-gate.json").resolve()
 
 
 def source_checkout_root(path_hint: str | Path | None = None) -> Path:
@@ -7426,19 +7438,19 @@ def _load_rate_limit_retirement_gate(
     except LCRLError as requested_error:
         if state.get("automation", {}).get("profile") != SUPERLUNA_REPO_RETEST_PROFILE:
             raise requested_error
-        canonical_path = default_account_browser_gate_path().expanduser().resolve()
-        if canonical_path == requested_path:
-            raise requested_error
-        try:
-            canonical_gate = load_account_browser_gate(canonical_path)
-        except LCRLError:
-            raise requested_error
-        diagnostic = _legacy_rate_limit_retirement_evidence_plan_from_gate(
-            state_path, state, canonical_gate,
+        candidates = (
+            persistent_account_browser_gate_path(state),
+            default_account_browser_gate_path().expanduser().resolve(),
         )
-        if not diagnostic["ready"]:
-            raise requested_error
-        return canonical_path, canonical_gate, True
+        for canonical_path in candidates:
+            if canonical_path == requested_path:
+                continue
+            try:
+                canonical_gate = load_account_browser_gate(canonical_path)
+            except LCRLError:
+                continue
+            return canonical_path, canonical_gate, True
+        raise requested_error
 
 
 def diagnose_rate_limit_retirement_command(args: argparse.Namespace) -> dict[str, Any]:
