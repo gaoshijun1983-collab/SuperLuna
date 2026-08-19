@@ -398,6 +398,16 @@ operation 复用仍禁止。返回
    authorization、零 pending replacement/request/response 与全局零 slot 全部成立时，才原子补写一次
    retirement 并紧接 orphan recovery。任何缺证返回具体 `retirement_evidence_*` 与系统自动下一步，
    不得打开旧 Chat、凭 `rollover_blocked` 单字段推断或要求用户决定。
+   所有“当前限流 Chat 缺少退休记录”的出口，包括普通 `guard` 与显式
+   `require-reviewer-chat-rollover --reason rate_limited`，必须统一附带
+   `retirement_recovery_diagnostic`。该结构逐项公开非敏感布尔结果：Controller/Skill 版本、task 与
+   reviewer identity、rate-limited rollover、exact repository、零 replacement/message 副作用、零 slot、
+   持久限流事实、canonical browser binding 和上一代 authorization；同时给出有序的完整
+   `missing_reason_codes`。需要单独核对时只可运行
+   `diagnose-rate-limit-retirement --state <state> --registry <registry>`；该命令纯只读，禁止 state/
+   registry 写入、browser init 与 Chat 访问。安装入口版本不符时必须返回
+   `retirement_evidence_controller_version_mismatch` 或 `retirement_evidence_skill_revision_mismatch`，
+   不得再概括成 `controller_error`。
    SuperLuna 仓库自身固定使用 tracked 的 `SUPERLUNA_REVIEW_CANARY.txt` 与
    `review-canary/NESTED_CANARY.txt`。Controller 必须把这对路径作为原子 canary，核对 exact commit 中
    两者均为普通 blob 并返回精确 blob SHA；任一缺失、symlink 或路径身份不符时不得退回 README 等

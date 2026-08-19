@@ -24,9 +24,16 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.95`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 151 / Skill revision
-`2026-08-19.108` lets ordinary turn entry atomically rebuild one missing formal
+The current source candidate is `0.2.0-alpha.96`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 152 / Skill revision
+`2026-08-19.109` makes every missing rate-limit retirement exit return the same
+read-only `retirement_recovery_diagnostic`: all safety prerequisites are Boolean,
+all missing facts have stable `retirement_evidence_*` codes, and runtime controller/
+Skill versions are explicit. Ordinary guard now runs this diagnostic before the
+orphan-provisioning branch, while the direct rollover command can no longer collapse
+the same condition into `controller_error`. The standalone
+`diagnose-rate-limit-retirement` command performs no state, registry, browser, or Chat
+write. Controller 151 / Skill revision `2026-08-19.108` lets ordinary turn entry atomically rebuild one missing formal
 rate-limit retirement before the Alpha 94 orphan-provisioning recovery. It
 requires the same task/state/reviewer/generation, durable account rate-limit
 evidence, a rate-limited rollover, exact repository commit/tree, the canonical

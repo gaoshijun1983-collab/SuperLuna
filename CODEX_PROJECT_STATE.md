@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.95`, Controller 151, Skill `2026-08-19.108`.
+- Source candidate: `0.2.0-alpha.96`, Controller 152, Skill `2026-08-19.109`.
+- Every missing rate-limit retirement exit now exposes one non-sensitive machine
+  diagnostic with all prerequisite booleans and stable missing reason codes.
+  Guard evaluates it before orphan provisioning; direct rollover uses the same
+  contract. A standalone read-only diagnostic also exposes controller/Skill
+  entrypoint mismatch without touching state, registry, browser, or Chat.
 - A legacy replacement Chat that rate-limited before an ephemeral mode-selection
   lease existed can now rebuild exactly one retirement record from the unique
   startup authorization, exact task/state/repository and prior-generation
@@ -151,7 +156,7 @@ intervention.
   and Beta evidence validators passed. Its deterministic archive contains 116
   tracked source files. Real App replacement-identity retirement remains
   unverified.
-- Alpha 95 repository regression passed 438/438 locally. Controller selftest
+- Alpha 96 repository regression passed 439/439 locally. Controller selftest
   passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. Its deterministic archive contains 119
   tracked source files. Real App retirement reconstruction, consumed-orphan

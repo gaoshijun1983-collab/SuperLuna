@@ -3,28 +3,34 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.95`（Python 元数据：`0.2.0a95`）
-- 当前源码控制器：151
+- 版本：`0.2.0-alpha.96`（Python 元数据：`0.2.0a96`）
+- 当前源码控制器：152
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.108`
+- 当前源码 Skill 修订：`2026-08-19.109`
 - 候选日期：2026-08-19
-- Alpha 95 当前为本地验证候选；基线 HEAD：`10f188806c88922841f5cb603ef53d99c6d85704`
+- Alpha 96 当前为本地验证候选；基线 HEAD：`b656f194595b122d1f9740b5f03775e1c513298b`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：438/438 通过；控制器 selftest：15/15 通过。
+- 仓库测试：439/439 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 119 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.95.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 95 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 120 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.96.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 96 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 152 / Skill revision `2026-08-19.109` 修复 Alpha95 实机仍从旁路返回笼统
+  “退休记录缺失”的问题。所有缺失退休记录的入口现在统一经过只读
+  `retirement_recovery_diagnostic`：逐项返回版本、task/reviewer、rollover、repository、零副作用、
+  slot、限流事实、browser binding 与上一代 authorization 的布尔结果及完整稳定缺项列表。
+  guard 在 orphan provisioning 之前执行该诊断；直接 rollover 命令不再抛出泛化 controller error；
+  `diagnose-rate-limit-retirement` 可在零 state/registry 写入、零 browser/Chat 访问下单独核对入口版本漂移。
 - Controller 151 / Skill revision `2026-08-19.108` 修复 Alpha94 实机中普通 guard 先看到“当前限流
   Chat 无退休记录”并停止、无法进入 consumed orphan provisioning recovery 的顺序缺口。guard 现在
   仅在同一 task/state/reviewer/generation、持久账户限流、`rate_limited` rollover、exact commit/tree、

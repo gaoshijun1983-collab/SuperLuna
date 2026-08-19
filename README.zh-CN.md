@@ -20,8 +20,13 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.95`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 151 / Skill revision `2026-08-19.108` 让普通 turn-entry 在 Alpha94 orphan
+当前源码候选版本是 `0.2.0-alpha.96`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 152 / Skill revision `2026-08-19.109` 统一所有“限流 Chat 退休记录缺失”
+出口：普通 guard 会在 orphan provisioning 分支之前执行同一份只读
+`retirement_recovery_diagnostic`，逐项返回布尔前置条件、稳定 `retirement_evidence_*` 缺项、当前
+Controller 与 Skill 版本；直接 rollover 命令也不再把相同问题压成 `controller_error`。新增
+`diagnose-rate-limit-retirement` 纯只读命令，不写 state/registry、不访问浏览器或 Chat，并能明确
+暴露 Controller/Skill 入口版本漂移。Controller 151 / Skill revision `2026-08-19.108` 让普通 turn-entry 在 Alpha94 orphan
 provisioning 恢复前，自动补写一次缺失的正式限流退休记录。它必须同时核对同一 task/state/reviewer/
 generation、持久账户限流事实、`rate_limited` rollover、仓库 exact commit/tree、canonical provisioned
 reviewer binding、零 replacement/消息副作用及账户门全局零 slot；证据不足返回稳定

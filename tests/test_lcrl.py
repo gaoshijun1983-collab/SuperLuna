@@ -2593,6 +2593,15 @@ class ControllerTests(unittest.TestCase):
             )
             self.assertFalse(blocked_guard["browser_access_allowed"])
             self.assertFalse(blocked_guard["user_choice_required"])
+            diagnostic = blocked_guard["retirement_recovery_diagnostic"]
+            self.assertFalse(diagnostic["checks"]["rate_limit_recorded"])
+            self.assertTrue(diagnostic["checks"]["identity_confirmed"])
+            self.assertEqual(
+                diagnostic["missing_reason_codes"],
+                ["retirement_evidence_rate_limit_unconfirmed"],
+            )
+            self.assertEqual(blocked_guard["controller_version"], lcrl.CONTROLLER_VERSION)
+            self.assertEqual(blocked_guard["skill_revision"], lcrl.SKILL_REVISION)
             registry.write_bytes(registry_bytes)
 
             with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry):
@@ -2610,6 +2619,100 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(
                 [item["reviewer_thread_id"] for item in retired],
                 [limited_reviewer],
+            )
+
+    def test_missing_retirement_exit_always_returns_machine_diagnostic(self):
+        """The direct rollover command must not collapse evidence into controller_error."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry = root / "account-browser-gate.json"
+            task_id = "npc-state-owner-anonymous"
+            reviewer_id = "6a856748-7f94-83ea-befd-2727e1b4e7ba"
+            state = lcrl.new_state(
+                "none", task_id, root, reviewer_id,
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_reason": "rate_limited",
+                "rollover_authorization_id": "rollover-0123456789abcdef",
+                "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+                "rollover_failure_code": "controller_error",
+                "rollover_failure_count": 1,
+                "generation": 2,
+            })
+            repository_identity = "c" * 64
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": "a" * 40,
+                "reviewer_repository_tree_manifest_hash": "b" * 64,
+                "reviewer_repository_identity": repository_identity,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": repository_identity,
+                "commit_sha": "a" * 40,
+                "tree_manifest_hash": "b" * 64,
+                "repository_access_receipt": "none",
+                "generation": 2,
+            })
+            lcrl.save_state(state_path, state)
+            gate = lcrl.empty_account_browser_gate()
+            gate.update({
+                "last_released_task_id": task_id,
+                "consecutive_rate_limits": 1,
+            })
+            gate["provisioning_authorizations"].append({
+                "authorization_id": "d" * 64,
+                "implementation_thread_id": task_id,
+                "authorized_at": "2026-08-19T05:13:54Z",
+                "scope": lcrl.account_browser_scope_for_state(state, state_path),
+                "state_identity": lcrl._provisioning_state_identity(state_path),
+                "reviewer_generation": 1,
+                "repository_identity": repository_identity,
+                "reclaim_status": "unreconciled",
+            })
+            lcrl._save_account_browser_gate_locked(
+                registry, gate, expected_revision=gate["revision"],
+            )
+
+            state_before = state_path.read_bytes()
+            gate_before = registry.read_bytes()
+            diagnostic_only = lcrl.diagnose_rate_limit_retirement_command(Namespace(
+                state=str(state_path), registry=str(registry),
+                expected_controller_version=lcrl.CONTROLLER_VERSION + 1,
+                expected_skill_revision=lcrl.SKILL_REVISION,
+            ))
+            self.assertEqual(
+                diagnostic_only["reason_code"],
+                "retirement_evidence_controller_version_mismatch",
+            )
+            self.assertFalse(
+                diagnostic_only["retirement_recovery_diagnostic"]["checks"][
+                    "controller_version_match"
+                ]
+            )
+            self.assertTrue(diagnostic_only["state_write_performed"] is False)
+            self.assertEqual(state_path.read_bytes(), state_before)
+            self.assertEqual(registry.read_bytes(), gate_before)
+
+            result = lcrl.require_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), reason="rate_limited", registry=str(registry),
+            ))
+
+            self.assertEqual(result["action"], "rate_limit_retirement_recovery_blocked")
+            self.assertEqual(result["reason_code"], "retirement_evidence_binding_unconfirmed")
+            self.assertFalse(result["browser_access_allowed"])
+            self.assertFalse(result["user_choice_required"])
+            diagnostic = result["retirement_recovery_diagnostic"]
+            self.assertFalse(diagnostic["checks"]["binding_receipt_confirmed"])
+            self.assertIn(
+                "retirement_evidence_binding_unconfirmed",
+                diagnostic["missing_reason_codes"],
             )
 
     def test_round_budget_requires_rollover_before_third_submission(self):

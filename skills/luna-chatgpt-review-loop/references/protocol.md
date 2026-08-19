@@ -149,6 +149,13 @@ and tree, canonical provisioned binding, the unique prior-generation startup
 authorization, zero replacement/message side effects, and an empty gate all
 match. Missing evidence returns a stable `retirement_evidence_*` reason and
 automatic next action; `rollover_blocked` alone is never proof.
+Every missing-retirement exit uses the same non-sensitive
+`retirement_recovery_diagnostic`, including ordinary guard and explicit
+rate-limit rollover. It reports every prerequisite as a Boolean plus the full
+ordered missing-reason list and current Controller/Skill versions. The
+`diagnose-rate-limit-retirement` entrypoint is read-only and may compare an
+expected Controller/Skill version; mismatch has its own stable reason and never
+falls through to generic `controller_error`.
 SuperLuna publishes the atomic tracked pair `SUPERLUNA_REVIEW_CANARY.txt` and
 `review-canary/NESTED_CANARY.txt` for this proof. Preparation requires both paths
 to be regular blobs in the exact commit and returns their exact blob SHAs. A

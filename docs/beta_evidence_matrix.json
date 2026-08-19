@@ -1,6 +1,6 @@
 {
   "contract_version": "1",
-  "candidate_version": "0.2.0-alpha.95",
+  "candidate_version": "0.2.0-alpha.96",
   "candidate_commit": "8fd20966ddd453f9c76398c66c9fa1c00726d5e8",
   "required_consecutive_cycles": 10,
   "gates": {
