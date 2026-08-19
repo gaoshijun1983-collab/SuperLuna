@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.101`, Controller 157, Skill `2026-08-19.114`.
+- Source candidate: `0.2.0-alpha.102`, Controller 158, Skill `2026-08-19.115`.
+- Coordinator recovery inspection is now distinct from implementation
+  authority. A coordinator whose guard identity matches its host may validate
+  the exact original task in state/trusted run binding and request one platform
+  wakeup. It cannot read or write the project/state, use browser/Chat, or rebuild
+  the binding; only the awakened original task can continue with ordinary guard.
 - One repo-retest generation with permanently lost legacy account-gate evidence
   may now be administratively sealed without creating rate-limit or retirement
   facts. The state records the missing-evidence matrix and source hashes, keeps
@@ -217,6 +222,11 @@ intervention.
   and Beta evidence validators passed. Administrative generation sealing and a
   clean generation-6 startup/binding are locally verified; the original NPC
   ordinary continuation remains a real-App gate.
+- Alpha 102 repository regression passed 445/445 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Coordinator read-only handoff and
+  original-task-only execution are locally verified. The original NPC wakeup
+  and rollover continuation remain a real-App gate.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

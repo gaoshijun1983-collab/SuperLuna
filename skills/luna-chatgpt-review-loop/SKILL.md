@@ -265,6 +265,14 @@ Chat 已达到安全轮数上限，控制器必须在同一次 `begin-new-goal` 
    并列出精确不一致来源对；不得输出原始 ID。只有严格可解析为同一 UUID 的大小写、花括号和明确
    `urn:uuid:`、`thread:`、`thread_id:` 表示可以归一。不同 UUID 或 opaque identity 不得迁移。
    若宿主没有可信 task registry API，必须明确标记 unavailable，禁止用标题或来源任务补证。
+   协调任务不得把自己的宿主 identity 作为原实施任务传给普通 guard。需要检查或恢复旧
+   repo-retest state 时，只能显式使用
+   `guard --caller-role coordinator_recovery --implementation-thread-id <协调任务ID> --target-implementation-thread-id <state中的原实施任务ID>`。
+   控制器仅在协调 ID 与当前宿主一致、目标与 state/trusted run binding 一致且精确 retest scope
+   未漂移时返回 `coordinator_recovery_handoff_required`；该结果只授权平台向原实施任务发送一次
+   “继续”，项目/state/browser/Chat 权限全部为 false。协调任务不得写 registry 或冒充实施任务；
+   只有被唤醒的原实施任务以其稳定 ID 执行普通 guard 后才可取得执行权。缺项返回稳定
+   `coordinator_recovery_*`，`user_choice_required=false`。
    repo-retest state 保存的限流退休 account gate 路径若因宿主重启遗失，只能回到 canonical
    host account gate，并要求该既有 gate 通过同 task、state scope、repository identity、generation、
    startup authorization、rate-limit history 与全局零 slot 的完整证据矩阵。不得新造退休事实；

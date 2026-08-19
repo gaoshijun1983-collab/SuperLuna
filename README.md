@@ -24,8 +24,15 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.101`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 157 / Skill revision
+The current source candidate is `0.2.0-alpha.102`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 158 / Skill revision
+`2026-08-19.115` separates coordinator recovery inspection from implementation
+authority. An explicitly identified coordinator may validate the exact
+repo-retest state/run-binding/task identity and request one platform wakeup of
+the original implementation task, but receives zero project, state, browser,
+or Chat authority. A wrong target, scope drift, or identity mismatch remains
+fail-closed; only the original stable implementation task may rebuild its
+binding and continue rollover. Controller 157 / Skill revision
 `2026-08-19.114` can administratively seal one repo-retest reviewer generation
 whose legacy temporary account-gate evidence is permanently lost. The seal is
 not a rate-limit retirement: it records the exact missing-evidence diagnostic,

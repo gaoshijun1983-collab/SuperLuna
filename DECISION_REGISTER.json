@@ -160,13 +160,13 @@
       "id": "repo-retest-task-binding-auto-recovery",
       "scope_key": "workflow.task_binding_recovery",
       "status": "user_approved",
-      "decision": "合法旧 repo_retest state 的 task binding registry 条目缺失时，普通 guard 必须在同一宿主任务、state implementation identity、trusted review-run binding、reviewer identity、兼容 schema/Controller/Skill 合同、精确 retest scope 与宿主 Codex root 全部一致后，幂等原子重建唯一绑定并继续原 replacement rollover。身份诊断只输出各可信来源的存在性、表示类型、长度、截断 raw/normalized SHA-256 与精确不一致来源对；只有严格可解析为同一 UUID 的大小写、花括号和明确 wrapper 可归一，不同 UUID 与 opaque identity 不得迁移。任一证据缺失或漂移必须返回稳定 task_binding_recovery_*，user_choice_required=false，且不得访问浏览器、Chat 或外部项目。",
-      "scope": "适用于 repo_retest 旧 state、turn-entry guard、doctor、共享 binding registry 与 replacement rollover 恢复。",
+      "decision": "合法旧 repo_retest state 的 task binding registry 条目缺失时，普通 guard 必须在同一宿主任务、state implementation identity、trusted review-run binding、reviewer identity、兼容 schema/Controller/Skill 合同、精确 retest scope 与宿主 Codex root 全部一致后，幂等原子重建唯一绑定并继续原 replacement rollover。身份诊断只输出各可信来源的存在性、表示类型、长度、截断 raw/normalized SHA-256 与精确不一致来源对；只有严格可解析为同一 UUID 的大小写、花括号和明确 wrapper 可归一，不同 UUID 与 opaque identity 不得迁移。协调任务只能用显式 coordinator_recovery 只读投影核对自身宿主身份、state/run-binding 中的精确原实施目标与 retest scope，并触发平台单次唤醒原任务；不得写 state/registry、读项目、访问 Chat 或取得实施权。只有被唤醒的原实施任务可用稳定身份继续。任一证据缺失或漂移必须返回稳定 task_binding_recovery_* 或 coordinator_recovery_*，user_choice_required=false。",
+      "scope": "适用于 repo_retest 旧 state、turn-entry guard、协调恢复投影、doctor、共享 binding registry 与 replacement rollover 恢复。",
       "recorded_on": "2026-08-19",
       "authority_sources": [
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/binding_registry.md"},
-        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.98.md"}
+        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.102.md"}
       ],
       "change_rule": "不得从相似标题、generic project、外部路径、旧任务 ID 或不兼容版本推断绑定；不得以重建绑定为由创建第二个 Chat 或等待任务。"
     },

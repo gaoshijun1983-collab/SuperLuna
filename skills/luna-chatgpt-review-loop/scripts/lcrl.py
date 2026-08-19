@@ -35,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 157
-SKILL_REVISION = "2026-08-19.114"
+CONTROLLER_VERSION = 158
+SKILL_REVISION = "2026-08-19.115"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -993,6 +993,111 @@ def legacy_task_binding_recovery_plan(
         ),
         "registry_path": registry_path,
         "state_path": str(Path(state_path).resolve()),
+        "controller_version": CONTROLLER_VERSION,
+        "skill_revision": SKILL_REVISION,
+    }
+
+
+def coordinator_task_binding_recovery_plan(
+    state_path: str | Path,
+    state: dict[str, Any],
+    supplied_coordinator_thread_id: str | None,
+    target_implementation_thread_id: str | None,
+) -> dict[str, Any]:
+    """Authorize only a read-only platform handoff to the original implementation task."""
+    base = legacy_task_binding_recovery_plan(
+        state_path, state, supplied_coordinator_thread_id,
+    )
+    automation = state.get("automation", {})
+    run_binding = state.get("review", {}).get("run_binding", {})
+    confirmation = state.get("confirmation", {})
+    supplied = str(supplied_coordinator_thread_id or "none").strip()
+    host = str(os.environ.get("CODEX_THREAD_ID") or "none").strip()
+    target = str(target_implementation_thread_id or "none").strip()
+    expected = str(automation.get("implementation_thread_id", "none")).strip()
+    run_implementation = str(run_binding.get("implementation_thread_id", "none")).strip()
+    normalized = {
+        "guard_argument": normalize_task_identity(supplied)[0],
+        "codex_thread_environment": normalize_task_identity(host)[0],
+        "target_implementation": normalize_task_identity(target)[0],
+        "state_implementation": normalize_task_identity(expected)[0],
+        "run_binding_implementation": normalize_task_identity(run_implementation)[0],
+    }
+    try:
+        validate_repo_retest_scope(
+            str(automation.get("profile", "generic")),
+            expected,
+            automation.get("project_path"),
+            state_path,
+        )
+        scope_valid = True
+    except (LCRLError, OSError, ValueError):
+        scope_valid = False
+    checks = {
+        "binding_unbound": state.get("binding", {}).get("status") == "unbound",
+        "repo_retest_profile": (
+            automation.get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
+        ),
+        "repo_retest_scope_valid": scope_valid,
+        "coordinator_host_identity_available": host not in {"", "none"},
+        "coordinator_guard_matches_host": (
+            supplied not in {"", "none"}
+            and normalized["guard_argument"] == normalized["codex_thread_environment"]
+        ),
+        "coordinator_is_not_implementation": (
+            normalized["codex_thread_environment"] != normalized["state_implementation"]
+        ),
+        "target_identity_available": target not in {"", "none"},
+        "target_matches_state": (
+            normalized["target_implementation"] == normalized["state_implementation"]
+        ),
+        "run_binding_trusted": run_binding.get("status") == "trusted",
+        "run_binding_schema_matches": run_binding.get("state_schema_version") == SCHEMA_VERSION,
+        "run_binding_matches_state": (
+            normalized["run_binding_implementation"] == normalized["state_implementation"]
+        ),
+        "run_binding_reviewer_matches": (
+            run_binding.get("reviewer_thread_id") == confirmation.get("reviewer_thread_id")
+            and confirmation.get("reviewer_thread_id") not in {None, "", "none"}
+        ),
+        "state_schema_compatible": state.get("schema_version") == SCHEMA_VERSION,
+        "recovery_state_active": state.get("reviewer_chat", {}).get("status")
+        in {"rollover_pending", "rollover_blocked"},
+    }
+    reason_order = (
+        ("binding_unbound", "coordinator_recovery_binding_not_unbound"),
+        ("repo_retest_profile", "coordinator_recovery_profile_not_repo_retest"),
+        ("repo_retest_scope_valid", "coordinator_recovery_scope_mismatch"),
+        ("coordinator_host_identity_available", "coordinator_recovery_host_identity_unavailable"),
+        ("coordinator_guard_matches_host", "coordinator_recovery_guard_vs_host_mismatch"),
+        ("coordinator_is_not_implementation", "coordinator_recovery_role_invalid"),
+        ("target_identity_available", "coordinator_recovery_target_identity_unavailable"),
+        ("target_matches_state", "coordinator_recovery_target_identity_mismatch"),
+        ("run_binding_trusted", "coordinator_recovery_run_binding_untrusted"),
+        ("run_binding_schema_matches", "coordinator_recovery_run_binding_schema_mismatch"),
+        ("run_binding_matches_state", "coordinator_recovery_run_binding_identity_mismatch"),
+        ("run_binding_reviewer_matches", "coordinator_recovery_reviewer_identity_mismatch"),
+        ("state_schema_compatible", "coordinator_recovery_schema_incompatible"),
+        ("recovery_state_active", "coordinator_recovery_state_not_active"),
+    )
+    missing = [reason for check, reason in reason_order if not checks[check]]
+    return {
+        "ready": not missing,
+        "reason_code": (
+            missing[0] if missing
+            else "coordinator_recovery_original_implementation_required"
+        ),
+        "missing_reason_codes": missing,
+        "checks": checks,
+        "identity_sources": {
+            "guard_argument": safe_task_identity_summary(supplied),
+            "codex_thread_environment": safe_task_identity_summary(host),
+            "target_implementation": safe_task_identity_summary(target),
+            "state_implementation": safe_task_identity_summary(expected),
+            "run_binding_implementation": safe_task_identity_summary(run_implementation),
+        },
+        "implementation_recovery_diagnostic": base,
+        "target_implementation_thread_id": expected if not missing else "none",
         "controller_version": CONTROLLER_VERSION,
         "skill_revision": SKILL_REVISION,
     }
@@ -11827,6 +11932,53 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
     expected_implementation_thread_id = state["automation"].get(
         "implementation_thread_id", "none"
     )
+    caller_role = str(getattr(args, "caller_role", "implementation") or "implementation")
+    if caller_role == "coordinator_recovery":
+        coordinator_plan = coordinator_task_binding_recovery_plan(
+            path,
+            state,
+            implementation_thread_id,
+            getattr(args, "target_implementation_thread_id", None),
+        )
+        ready = coordinator_plan["ready"]
+        return {
+            "ok": True,
+            "action": (
+                "coordinator_recovery_handoff_required"
+                if ready else "coordinator_recovery_blocked"
+            ),
+            "status": state["review"]["status"],
+            "reason_code": coordinator_plan["reason_code"],
+            "coordinator_recovery_diagnostic": coordinator_plan,
+            "target_implementation_thread_id": coordinator_plan[
+                "target_implementation_thread_id"
+            ],
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "chat_read_allowed": False,
+            "old_chat_access_allowed": False,
+            "state_write_performed": False,
+            "registry_write_performed": False,
+            "coordinator_platform_recovery_allowed": ready,
+            "user_choice_required": False,
+            "system_next_action": (
+                "wake_original_implementation_task_once"
+                if ready else "verify_coordinator_recovery_identity_evidence"
+            ),
+            "user_message_zh": (
+                "协调任务仅可唤醒原实施任务；不会读取项目、访问 Chat 或接管执行。"
+                if ready else "协调恢复身份或范围证据不完整，系统已安全停止。"
+            ),
+            "user_message_en": (
+                "The coordinator may only wake the original implementation task; it cannot read the project, access Chat, or take over execution."
+                if ready else "Coordinator recovery identity or scope evidence is incomplete; the system stopped safely."
+            ),
+            "revision": revision,
+        }
+    if caller_role != "implementation":
+        raise LCRLError(f"unsupported guard caller role: {caller_role}")
     binding_rebuilt = False
     binding_plan = legacy_task_binding_recovery_plan(
         path, state, implementation_thread_id,
@@ -15213,6 +15365,12 @@ def build_parser() -> argparse.ArgumentParser:
     guard.add_argument("--minutes", type=int, default=20)
     guard.add_argument("--reason", required=True)
     guard.add_argument("--implementation-thread-id")
+    guard.add_argument(
+        "--caller-role",
+        choices=("implementation", "coordinator_recovery"),
+        default="implementation",
+    )
+    guard.add_argument("--target-implementation-thread-id")
     guard.add_argument("--replace", action="store_true")
 
     begin_new_goal = sub.add_parser("begin-new-goal")

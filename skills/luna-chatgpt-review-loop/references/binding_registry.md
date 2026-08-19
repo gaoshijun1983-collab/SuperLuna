@@ -67,6 +67,15 @@ or `thread_id:` wrappers. Opaque values and different UUIDs never become aliases
 An unavailable host task-registry API is reported as unavailable rather than
 replaced by a title or delegation-source guess.
 
+Coordinator recovery is a separate, read-only projection. With explicit
+`caller_role=coordinator_recovery`, the caller must identify itself as the
+current host and name the exact original implementation target already present
+in both state and trusted run binding. Canonical repo-retest scope is rechecked.
+Success authorizes only a one-shot platform wake of the original task; it never
+writes this registry, mutates state, reads the project, or grants browser/Chat
+authority. Only the original task's later ordinary guard may rebuild a missing
+entry. Target, host, run-binding, or scope drift fails closed.
+
 A missing persisted repo-retest retirement-registry path may resolve to the
 canonical host account gate only when that already-existing gate passes the
 complete task, state scope, repository, generation, startup authorization,

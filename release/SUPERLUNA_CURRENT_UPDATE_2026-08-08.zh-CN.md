@@ -3,15 +3,26 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.101`（Python 元数据：`0.2.0a101`）
-- 当前源码控制器：157
+- 版本：`0.2.0-alpha.102`（Python 元数据：`0.2.0a102`）
+- 当前源码控制器：158
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.114`
+- 当前源码 Skill 修订：`2026-08-19.115`
 - 候选日期：2026-08-19
-- Alpha 101 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
+- Alpha 102 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
+
+Alpha 102 把协调恢复检查与实施执行权分离。协调任务必须显式声明
+`coordinator_recovery`，以自身宿主 ID 调用 guard，并把 state/trusted run binding 中的原实施任务
+作为 target。只有协调宿主、目标、schema 与精确 repo-retest scope 全部一致时，控制器才返回唯一
+平台动作 `wake_original_implementation_task_once`；协调侧项目/state/browser/Chat 权限与写入事实均为
+false。错误目标、身份或路径继续失败关闭。原任务被唤醒后仍须使用自己的稳定 ID 执行普通 guard，
+协调任务不能接管。
+
+- 仓库测试：445/445 通过；控制器 selftest：15/15 通过。
+- closure-check、Skill、plugin、decision register、milestone 与 Beta evidence validator 通过。
+- 这些只证明本地控制器合同；原 NPC 的平台唤醒、真实 App rollover 与 reviewer Chat 闭环尚未验证。
 
 Alpha 101 为 Alpha 100 已确认“历史安全证据永久无法重建”的 repo-retest generation 增加行政封存。
 它不补写 rate-limit、authorization 或 retirement：只有 task/run binding、repository identity、generation、

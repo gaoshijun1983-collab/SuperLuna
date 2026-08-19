@@ -695,6 +695,16 @@ each trusted source has presence, representation kind, length, and truncated
 raw/normalized SHA-256, plus exact mismatch pairs. Only strict representations
 of the same UUID may normalize. Different UUIDs, opaque values, delegation
 sources, or an unavailable host registry remain fail-closed.
+
+A coordinator is not an implementation identity. It may use the explicit
+`coordinator_recovery` guard role only to prove that its own guard argument
+matches the current host, that the requested target is the exact state and
+trusted run-binding implementation, and that the repository-retest scope is
+canonical. A successful projection grants only one platform wakeup of that
+original implementation task. It performs no state or registry write and grants
+no project, browser, old-Chat, or current-Chat access. The original task must
+then run ordinary guard with its stable identity. Every mismatch returns a
+stable `coordinator_recovery_*` reason with `user_choice_required=false`.
 ## Lost retirement registry recovery
 
 The authoritative shared account-browser gate is

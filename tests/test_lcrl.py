@@ -8394,6 +8394,94 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(result["browser_access_allowed"])
             self.assertFalse(result["user_choice_required"])
 
+    def test_repo_retest_coordinator_guard_hands_off_without_impersonating_implementation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "SuperLuna"
+            checkout.mkdir()
+            codex_root = Path(directory) / "codex-home"
+            implementation_id = "019ff9af-e920-7493-b307-9130afff8163"
+            coordinator_id = "029ff9af-e920-7493-b307-9130afff8163"
+            _run_root, project, state_path = _repo_retest_paths(
+                checkout, implementation_id,
+            )
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                state = lcrl.new_state(
+                    "none", implementation_id, str(project), "reviewer-binding-recovery",
+                    profile=lcrl.SUPERLUNA_REPO_RETEST_PROFILE,
+                    codex_root=str(codex_root), state_path=str(state_path),
+                )
+                lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+                lcrl.save_state(state_path, state)
+                before = state_path.read_bytes()
+                coordinator_args = Namespace(
+                    state=str(state_path), minutes=20, reason="turn_entry",
+                    implementation_thread_id=coordinator_id, replace=False,
+                    caller_role="coordinator_recovery",
+                    target_implementation_thread_id=implementation_id,
+                )
+                with mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": coordinator_id,
+                    "CODEX_SESSION_ID": coordinator_id,
+                    "CODEX_HOME": str(codex_root),
+                }):
+                    handoff = lcrl.guard_action(coordinator_args)
+                    wrong_target = lcrl.guard_action(Namespace(
+                        **{
+                            **vars(coordinator_args),
+                            "target_implementation_thread_id": "039ff9af-e920-7493-b307-9130afff8163",
+                        },
+                    ))
+
+                self.assertEqual(
+                    handoff["action"], "coordinator_recovery_handoff_required",
+                )
+                self.assertEqual(
+                    handoff["reason_code"],
+                    "coordinator_recovery_original_implementation_required",
+                )
+                self.assertEqual(
+                    handoff["target_implementation_thread_id"], implementation_id,
+                )
+                self.assertTrue(handoff["coordinator_platform_recovery_allowed"])
+                self.assertEqual(
+                    handoff["system_next_action"],
+                    "wake_original_implementation_task_once",
+                )
+                for key in (
+                    "execution_allowed", "project_read_allowed", "project_write_allowed",
+                    "browser_access_allowed", "chat_read_allowed", "state_write_performed",
+                    "registry_write_performed",
+                ):
+                    self.assertFalse(handoff[key], key)
+                self.assertFalse(handoff["user_choice_required"])
+                self.assertEqual(
+                    wrong_target["reason_code"],
+                    "coordinator_recovery_target_identity_mismatch",
+                )
+                self.assertFalse(wrong_target["coordinator_platform_recovery_allowed"])
+                self.assertEqual(state_path.read_bytes(), before)
+                self.assertFalse(
+                    (codex_root / "lcrl" / "registry" / "tasks.json").exists(),
+                )
+
+                with mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": implementation_id,
+                    "CODEX_SESSION_ID": implementation_id,
+                    "CODEX_HOME": str(codex_root),
+                }):
+                    implementation = lcrl.guard_action(Namespace(
+                        state=str(state_path), minutes=20, reason="turn_entry",
+                        implementation_thread_id=implementation_id, replace=False,
+                        caller_role="implementation",
+                        target_implementation_thread_id=None,
+                    ))
+            self.assertTrue(implementation["legacy_task_binding_rebuilt"])
+            self.assertNotEqual(
+                implementation["action"], "coordinator_recovery_handoff_required",
+            )
+
     def test_new_app_chat_discovery_returns_one_stable_candidate_without_binding(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
