@@ -3,28 +3,33 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.89`（Python 元数据：`0.2.0a89`）
-- 当前源码控制器：145
+- 版本：`0.2.0-alpha.90`（Python 元数据：`0.2.0a90`）
+- 当前源码控制器：146
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.102`
+- 当前源码 Skill 修订：`2026-08-19.103`
 - 候选日期：2026-08-19
-- Alpha 89 当前为本地验证候选；基线 HEAD：`23b8bc4dbd9580e1ede1aaa22ede91589d4ee55e`
+- Alpha 90 当前为本地验证候选；基线 HEAD：`d84281c63d63139dc4f2f211fb735e019047f193`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：430/430 通过；控制器 selftest：15/15 通过。
+- 仓库测试：432/432 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 113 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.89.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 89 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 114 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.90.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 90 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 146 / Skill revision `2026-08-19.103` 补齐 Alpha89 对旧 state 的兼容迁移。guard 与
+  show-status 会用同一 task/state/reviewer generation/repository identity、有效账户冷却及零 slot
+  证据严格核对旧 `controller_error/external_blocked`。匹配时 guard 原子恢复未发送 submission 和唯一
+  RDATE 等待，show-status 可只读投影；已有恢复只复用。任何身份漂移或不确定 slot 都保持 state 不变、
+  浏览器权限为零，并以技术 reason code 失败关闭。
 - Controller 145 / Skill revision `2026-08-19.102` 修复 replacement startup 真实限流被顶层
   `controller_error` 覆盖的问题。`account_rate_limited` 现在贯穿错误分类、state 与中英文 UI；账户门
   的精确 `cooldown_until` 是唯一截止时间。冷却期禁止 Chat/browser 访问和主动探测，到期仅创建或

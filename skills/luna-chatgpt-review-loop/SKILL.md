@@ -862,6 +862,10 @@ replacement startup 一旦出现真实限流，后续 `record-reviewer-chat-roll
 账户门 registry。Controller 以其中精确 `cooldown_until` 为权威，将旧 `controller_error` 迁移为稳定
 `account_rate_limited`，并创建或复用唯一 `submission_retry` RDATE 单次恢复。中英文状态必须显示截止
 时间、冷却期零 Chat 访问和恢复是否已绑定；不得 recurring、重复 token、冷却期探测或要求用户决定。
+旧 state 若仍为 `controller_error/external_blocked`，guard/show-status 只有在账户门同时严格匹配同一
+task、state identity、reviewer generation、repository identity、有效 cooldown 且不存在任何 task slot
+时，才可迁移或投影为 `account_rate_limited`。guard 恢复原未发送 submission 并绑定一个 RDATE；已有
+等待只复用。任一证据不符必须保持 state 不变并返回技术阻断，不能落入孤儿 provisioning 或浏览器路径。
 
 完整网页合同见 [browser_transport.md](references/browser_transport.md)，状态机细节见
 [protocol.md](references/protocol.md)。

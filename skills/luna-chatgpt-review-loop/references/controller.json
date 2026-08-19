@@ -1,7 +1,7 @@
 {
-  "controller_version": 145,
+  "controller_version": 146,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-19.102",
+  "skill_revision": "2026-08-19.103",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",
@@ -42,6 +42,8 @@
   "provisioning_reclaim_single_use": true,
   "rate_limit_reason_preserved_end_to_end": true,
   "rate_limit_recovery_wait_bound_once": true,
+  "legacy_rate_limit_guard_migration": true,
+  "legacy_rate_limit_status_projection": true,
   "account_browser_health_followup_reuses_visible_tab": true,
   "account_browser_health_followup_tail_only": true,
   "stale_platform_wait_auto_recovery": true,

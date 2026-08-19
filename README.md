@@ -24,8 +24,12 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.89`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 145 / Skill revision
+The current source candidate is `0.2.0-alpha.90`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 146 / Skill revision
+`2026-08-19.103` migrates or safely projects legacy `controller_error` rollover
+states when the account gate proves the same task, state, reviewer generation,
+and repository identity still owns an active cooldown. It reuses one bound wait
+or requests one RDATE binding; identity drift fails closed. Controller 145 / Skill revision
 `2026-08-19.102` preserves a real account rate limit through controller error
 handling and status projection. It reports the exact cooldown deadline, makes
 no Chat access during cooldown, and creates or reuses only one RDATE-bound

@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 145
-SKILL_REVISION = "2026-08-19.102"
+CONTROLLER_VERSION = 146
+SKILL_REVISION = "2026-08-19.103"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -1366,6 +1366,151 @@ def orphaned_provisioning_reconcile_plan(
     except LCRLError:
         return {"ready": False, "reason_code": "provisioning_registry_unavailable"}
     return _orphaned_provisioning_plan_from_gate(state_path, state, gate)
+
+
+def legacy_account_rate_limit_plan(
+    state_path: Path, state: dict[str, Any], registry_path: Path,
+    *, now: datetime | None = None,
+) -> dict[str, Any]:
+    """Match an old generic rollover error to current account-cooldown evidence."""
+    try:
+        gate = load_account_browser_gate(registry_path)
+    except LCRLError:
+        return {"applicable": False, "active_cooldown": False}
+    observed_at = now or datetime.now(timezone.utc)
+    cooldown_until = parse_time(gate.get("cooldown_until"))
+    active = bool(
+        cooldown_until is not None
+        and cooldown_until > observed_at
+        and int(gate.get("consecutive_rate_limits", 0)) > 0
+    )
+    reviewer_chat = state.get("reviewer_chat", {})
+    failure_code = reviewer_chat.get("rollover_failure_code", "none")
+    applicable = bool(
+        active
+        and reviewer_chat.get("status") == "rollover_blocked"
+        and failure_code in {"controller_error", "cooldown_active", "account_rate_limited"}
+        and state.get("review", {}).get("status") in {
+            "external_blocked", "review_submit_pending",
+        }
+    )
+    if not applicable:
+        return {"applicable": False, "active_cooldown": active}
+    task_id = str(state.get("automation", {}).get("implementation_thread_id", "none"))
+    if gate.get("last_released_task_id") != task_id:
+        return {
+            "applicable": True, "active_cooldown": True, "ready": False,
+            "reason_code": "account_rate_limit_identity_unconfirmed",
+        }
+    if any(slot.get("implementation_thread_id") == task_id for slot in gate.get("slots", [])):
+        return {
+            "applicable": True, "active_cooldown": True, "ready": False,
+            "reason_code": "account_rate_limit_slot_uncertain",
+        }
+    authorization_raw = str(reviewer_chat.get("rollover_authorization_id", "none"))
+    if not re.fullmatch(r"rollover-[0-9a-f]{16}", authorization_raw):
+        return {
+            "applicable": True, "active_cooldown": True, "ready": False,
+            "reason_code": "account_rate_limit_identity_unconfirmed",
+        }
+    authorization_id = hashlib.sha256(authorization_raw.encode("utf-8")).hexdigest()
+    matches = [
+        record for record in gate.get("provisioning_authorizations", [])
+        if record.get("authorization_id") == authorization_id
+    ]
+    automation = state.get("automation", {})
+    context = state.get("project_context", {})
+    repository_identity = str(automation.get("reviewer_repository_identity", "none"))
+    expected_scope = account_browser_scope_for_state(state, state_path)
+    expected_state_identity = _provisioning_state_identity(state_path)
+    record = matches[0] if len(matches) == 1 else {}
+    identity_matches = bool(
+        len(matches) == 1
+        and record.get("implementation_thread_id") == task_id
+        and record.get("scope") == expected_scope
+        and record.get("state_identity") == expected_state_identity
+        and record.get("reviewer_generation") == reviewer_chat.get("generation")
+        and record.get("repository_identity") == repository_identity
+        and repository_identity not in {"", "none"}
+        and context.get("scope") == "repository_commit_review"
+        and context.get("repository_identity") == repository_identity
+        and context.get("generation") == reviewer_chat.get("generation")
+        and state.get("review", {}).get("request_message_id", "none") == "none"
+        and state.get("review", {}).get("request_turn_id", "none") == "none"
+    )
+    if not identity_matches:
+        return {
+            "applicable": True, "active_cooldown": True, "ready": False,
+            "reason_code": "account_rate_limit_identity_unconfirmed",
+        }
+    return {
+        "applicable": True,
+        "active_cooldown": True,
+        "ready": True,
+        "retry_not_before": str(gate["cooldown_until"]),
+        "registry": str(registry_path),
+        "task_id": task_id,
+        "reviewer_generation": reviewer_chat["generation"],
+        "repository_identity": repository_identity,
+    }
+
+
+def account_rate_limit_projection(
+    state_path: Path, state: dict[str, Any], plan: dict[str, Any],
+    *, waiting_action: str,
+) -> dict[str, Any]:
+    automation = state["automation"]
+    bound = automation.get("waiting_check_automation_id", "none") != "none"
+    retry_not_before = plan["retry_not_before"]
+    result = {
+        "ok": True,
+        "action": "account_rate_limit_cooldown_active",
+        "status": state["review"]["status"],
+        "workflow_status": "账户冷却中",
+        "reason_code": "account_rate_limited",
+        "retry_not_before": retry_not_before,
+        "execution_allowed": False,
+        "project_read_allowed": False,
+        "project_write_allowed": False,
+        "browser_access_allowed": False,
+        "browser_runtime_initialization_allowed": False,
+        "chat_read_allowed": False,
+        "old_chat_access_allowed": False,
+        "proactive_probe_allowed": False,
+        "waiting_check_kind": "submission_retry",
+        "waiting_check_action": waiting_action,
+        "waiting_check_token": automation["waiting_check_token"],
+        "waiting_check_automation_id": automation.get("waiting_check_automation_id", "none"),
+        "waiting_check_expected_rdate": automation["waiting_check_expected_rdate"],
+        "single_recovery_available": True,
+        "single_recovery_bound": bound,
+        "recurring_recovery_allowed": False,
+        "user_status": "正在开发",
+        "user_message": (
+            f"账户正在冷却，截止时间为 {retry_not_before}。"
+            "冷却期间不会访问 Chat；到期只进行一次恢复检查。"
+        ),
+        "user_message_en": (
+            f"The account is cooling down until {retry_not_before}. "
+            "SuperLuna will not access Chat during cooldown and will run only "
+            "one recovery check when it expires."
+        ),
+        "user_next_choice": (
+            "无需操作；唯一单次恢复已绑定。"
+            if bound else "无需操作；系统正在绑定唯一单次恢复。"
+        ),
+        "user_choice_required": False,
+        "system_next_action": (
+            "wait_for_bound_rate_limit_recovery"
+            if bound else "bind_one_rate_limit_recovery_rdate"
+        ),
+        "continuation_required": not bound,
+        "turn_completion_allowed": bound,
+        "revision": state["revision"],
+    }
+    result = add_platform_wait_contract(result)
+    result.update(platform_wait_binding_barrier_contract(state_path, state))
+    return result
 
 
 def reconcile_orphaned_provisioning_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -4932,6 +5077,67 @@ def progress_query_command(args: argparse.Namespace) -> dict[str, Any]:
             "continuation_required": not bound,
             "turn_completion_allowed": bound,
         })
+    registry_value = str(
+        state.get("automation", {}).get("waiting_check_account_registry", "none")
+    )
+    registry_path = (
+        Path(registry_value).expanduser().resolve()
+        if registry_value not in {"", "none"}
+        else default_account_browser_gate_path()
+    )
+    legacy_rate_plan = legacy_account_rate_limit_plan(
+        Path(args.state).expanduser().resolve(), state, registry_path,
+        now=_account_gate_now(None),
+    )
+    if legacy_rate_plan.get("applicable"):
+        if legacy_rate_plan.get("ready"):
+            wait_available = bool(
+                state["automation"].get("waiting_check_active") is True
+                and state["automation"].get("waiting_check_kind") == "submission_retry"
+            )
+            wait_bound = bool(
+                wait_available
+                and state["automation"].get("waiting_check_automation_id", "none") != "none"
+            )
+            retry_not_before = legacy_rate_plan["retry_not_before"]
+            output.update({
+                "workflow_status": "账户冷却中",
+                "reason_code": "account_rate_limited",
+                "retry_not_before": retry_not_before,
+                "user_status": "正在开发",
+                "user_message": (
+                    f"账户正在冷却，截止时间为 {retry_not_before}。"
+                    "冷却期间不会访问 Chat；到期只进行一次恢复检查。"
+                ),
+                "user_message_en": (
+                    f"The account is cooling down until {retry_not_before}. "
+                    "SuperLuna will not access Chat during cooldown and will run "
+                    "only one recovery check when it expires."
+                ),
+                "single_recovery_available": wait_available,
+                "single_recovery_bound": wait_bound,
+                "browser_access_allowed": False,
+                "browser_runtime_initialization_allowed": False,
+                "chat_read_allowed": False,
+                "proactive_probe_allowed": False,
+                "recurring_recovery_allowed": False,
+                "user_choice_required": False,
+                "system_next_action": (
+                    "wait_for_bound_rate_limit_recovery"
+                    if wait_bound else "run_guard_to_bind_one_rate_limit_recovery_rdate"
+                ),
+            })
+        else:
+            output.update({
+                "reason_code": legacy_rate_plan["reason_code"],
+                "browser_access_allowed": False,
+                "browser_runtime_initialization_allowed": False,
+                "chat_read_allowed": False,
+                "single_recovery_available": False,
+                "single_recovery_bound": False,
+                "user_choice_required": False,
+                "system_next_action": "verify_exact_rate_limit_recovery_identity",
+            })
     return output
 
 
@@ -10670,6 +10876,102 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             "system_next_action": plan["system_next_action"],
             "revision": state["revision"],
         }
+    rate_registry_value = str(
+        state.get("automation", {}).get("waiting_check_account_registry", "none")
+    )
+    rate_registry_path = (
+        Path(rate_registry_value).expanduser().resolve()
+        if rate_registry_value not in {"", "none"}
+        else default_account_browser_gate_path()
+    )
+    rate_limit_plan = legacy_account_rate_limit_plan(
+        path, state, rate_registry_path, now=_account_gate_now(None),
+    )
+    if rate_limit_plan.get("applicable"):
+        if implementation_thread_id == "none":
+            raise LCRLError("guard requires the exact implementation task identity")
+        if implementation_thread_id != expected_implementation_thread_id:
+            raise LCRLError("account rate-limit recovery belongs to a different implementation task")
+        if not rate_limit_plan.get("ready"):
+            return {
+                "ok": True,
+                "action": "account_rate_limit_recovery_blocked",
+                "status": state["reviewer_chat"]["status"],
+                "reason_code": rate_limit_plan["reason_code"],
+                "execution_allowed": False,
+                "project_read_allowed": False,
+                "project_write_allowed": False,
+                "browser_access_allowed": False,
+                "browser_runtime_initialization_allowed": False,
+                "chat_read_allowed": False,
+                "old_chat_access_allowed": False,
+                "single_recovery_available": False,
+                "single_recovery_bound": False,
+                "user_choice_required": False,
+                "system_next_action": "verify_exact_rate_limit_recovery_identity",
+                "continuation_required": False,
+                "turn_completion_allowed": True,
+                "revision": state["revision"],
+            }
+        expected_rdate = rdate_from_timestamp(rate_limit_plan["retry_not_before"])
+        automation = state["automation"]
+        if automation.get("waiting_check_active") is True:
+            exact_existing_wait = bool(
+                automation.get("waiting_check_kind") == "submission_retry"
+                and Path(str(automation.get("waiting_check_account_registry")))
+                .expanduser().resolve() == rate_registry_path
+                and automation.get("waiting_check_expected_rdate") == expected_rdate
+            )
+            if not exact_existing_wait:
+                return {
+                    "ok": True,
+                    "action": "account_rate_limit_recovery_blocked",
+                    "status": state["reviewer_chat"]["status"],
+                    "reason_code": "account_rate_limit_recovery_identity_conflict",
+                    "execution_allowed": False,
+                    "browser_access_allowed": False,
+                    "browser_runtime_initialization_allowed": False,
+                    "chat_read_allowed": False,
+                    "old_chat_access_allowed": False,
+                    "single_recovery_available": False,
+                    "single_recovery_bound": False,
+                    "user_choice_required": False,
+                    "system_next_action": "retain_existing_wait_and_fail_closed",
+                    "continuation_required": False,
+                    "turn_completion_allowed": True,
+                    "revision": state["revision"],
+                }
+        revision = state["revision"]
+        state["reviewer_chat"]["rollover_failure_code"] = "account_rate_limited"
+        state["review"]["recovery_action"] = "account_rate_limited"
+        if state["review"]["status"] == "external_blocked":
+            state["review"]["status"] = "review_submit_pending"
+        state["recovery"].update({
+            "network_state": "rate_limited",
+            "next_retry_not_before": rate_limit_plan["retry_not_before"],
+        })
+        if automation.get("waiting_check_active") is not True:
+            automation.update({
+                "waiting_check_token": "wait-" + secrets.token_hex(8),
+                "waiting_check_active": True,
+                "waiting_check_kind": "submission_retry",
+                "waiting_check_account_registry": str(rate_registry_path),
+                "waiting_check_automation_id": "none",
+                "waiting_check_claimed_id": "none",
+                "waiting_check_expected_rdate": expected_rdate,
+                "waiting_check_recovery_armed_lease_id": "none",
+                "waiting_check_recovery_armed_rdate": "none",
+            })
+        save_state(path, state, expected_revision=revision)
+        state = load_state(path)
+        waiting_action = (
+            "keep_once"
+            if state["automation"].get("waiting_check_automation_id", "none") != "none"
+            else "schedule_once"
+        )
+        return account_rate_limit_projection(
+            path, state, rate_limit_plan, waiting_action=waiting_action,
+        )
     if state.get("reviewer_chat", {}).get("status") in {"rollover_pending", "rollover_blocked"}:
         registry_value = str(
             state.get("automation", {}).get("waiting_check_account_registry", "none")

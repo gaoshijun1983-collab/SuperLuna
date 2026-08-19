@@ -2268,6 +2268,179 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(due["action"], "submission_retry_ready")
             self.assertFalse(due["old_chat_access_allowed"])
 
+    def test_guard_migrates_matching_legacy_rate_limit_and_projects_bound_wait(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            registry = root / "account-browser-gate.json"
+            self.transition(
+                state_path, "review_submit_pending", stage="LEGACY-RATE",
+                fingerprint="legacy-rate-packet",
+            )
+            state = lcrl.load_state(state_path)
+            authorization = lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_recovery_id": "rollover-recovery-1111111111111111",
+                "rollover_failure_code": "controller_error",
+                "rollover_failure_count": 1,
+            })
+            state["review"].update({
+                "status": "external_blocked",
+                "recovery_action": "controller_error",
+            })
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": "a" * 40,
+                "reviewer_repository_tree_manifest_hash": "b" * 64,
+                "reviewer_repository_identity": "c" * 64,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": "c" * 64,
+                "commit_sha": "a" * 40,
+                "tree_manifest_hash": "b" * 64,
+                "repository_access_receipt": "none",
+                "generation": state["reviewer_chat"]["generation"],
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            gate = lcrl.empty_account_browser_gate()
+            gate.update({
+                "cooldown_until": "2026-08-19T08:30:00Z",
+                "consecutive_rate_limits": 1,
+                "last_released_task_id": "implementation",
+            })
+            gate["provisioning_authorizations"].append({
+                "authorization_id": hashlib.sha256(authorization.encode()).hexdigest(),
+                "implementation_thread_id": "implementation",
+                "authorized_at": "2026-08-19T07:55:00Z",
+                "scope": lcrl._generic_account_browser_scope(),
+                "state_identity": lcrl._provisioning_state_identity(state_path),
+                "reviewer_generation": state["reviewer_chat"]["generation"],
+                "repository_identity": "c" * 64,
+                "reclaim_status": "consumed_after_reclaim",
+                "reclaim_count": 1,
+                "reconciled_at": "2026-08-19T07:54:00Z",
+            })
+            lcrl._save_account_browser_gate_locked(registry, gate, expected_revision=0)
+
+            with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry), \
+                 mock.patch.object(lcrl, "_account_gate_now", return_value=lcrl.parse_time("2026-08-19T08:00:00Z")):
+                legacy_projection = lcrl.progress_query_command(Namespace(state=str(state_path)))
+                guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id="implementation", minutes=10,
+                    replace=False,
+                ))
+                projected = lcrl.progress_query_command(Namespace(state=str(state_path)))
+
+            self.assertEqual(legacy_projection["reason_code"], "account_rate_limited")
+            self.assertEqual(legacy_projection["retry_not_before"], "2026-08-19T08:30:00Z")
+            self.assertFalse(legacy_projection["single_recovery_available"])
+            self.assertFalse(legacy_projection["single_recovery_bound"])
+            self.assertEqual(
+                legacy_projection["system_next_action"],
+                "run_guard_to_bind_one_rate_limit_recovery_rdate",
+            )
+            self.assertEqual(guard["reason_code"], "account_rate_limited")
+            self.assertEqual(guard["retry_not_before"], "2026-08-19T08:30:00Z")
+            self.assertFalse(guard["browser_access_allowed"])
+            self.assertFalse(guard["user_choice_required"])
+            self.assertTrue(guard["single_recovery_available"])
+            self.assertFalse(guard["single_recovery_bound"])
+            self.assertEqual(guard["system_next_action"], "bind_one_rate_limit_recovery_rdate")
+            self.assertEqual(projected["reason_code"], "account_rate_limited")
+            self.assertFalse(projected["single_recovery_bound"])
+            migrated = lcrl.load_state(state_path)
+            self.assertEqual(migrated["review"]["status"], "review_submit_pending")
+            self.assertEqual(migrated["reviewer_chat"]["rollover_failure_code"], "account_rate_limited")
+            token = migrated["automation"]["waiting_check_token"]
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=token,
+                automation_id="legacy-rate-limit-once",
+                scheduled_rdate=lcrl.rdate_from_timestamp("2026-08-19T08:30:00Z"),
+            ))
+            bound_state = lcrl.load_state(state_path)
+            self.assertEqual(bound_state["automation"]["waiting_check_kind"], "submission_retry")
+            self.assertEqual(bound_state["automation"]["waiting_check_account_registry"], str(registry))
+            self.assertEqual(
+                bound_state["automation"]["waiting_check_expected_rdate"],
+                lcrl.rdate_from_timestamp("2026-08-19T08:30:00Z"),
+            )
+            with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry), \
+                 mock.patch.object(lcrl, "_account_gate_now", return_value=lcrl.parse_time("2026-08-19T08:01:00Z")):
+                bound = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id="implementation", minutes=10,
+                    replace=False,
+                ))
+            self.assertTrue(bound["single_recovery_bound"], bound)
+            self.assertEqual(bound["waiting_check_action"], "keep_once")
+
+    def test_guard_rejects_legacy_rate_limit_with_repository_identity_drift(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            registry = root / "account-browser-gate.json"
+            state = lcrl.load_state(state_path)
+            authorization = lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_recovery_id": "rollover-recovery-2222222222222222",
+                "rollover_failure_code": "controller_error",
+                "rollover_failure_count": 1,
+            })
+            state["review"].update({"status": "external_blocked", "recovery_action": "controller_error"})
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": "a" * 40,
+                "reviewer_repository_tree_manifest_hash": "b" * 64,
+                "reviewer_repository_identity": "c" * 64,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": "c" * 64,
+                "commit_sha": "a" * 40,
+                "tree_manifest_hash": "b" * 64,
+                "repository_access_receipt": "none",
+                "generation": state["reviewer_chat"]["generation"],
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            gate = lcrl.empty_account_browser_gate()
+            gate.update({
+                "cooldown_until": "2026-08-19T08:30:00Z",
+                "consecutive_rate_limits": 1,
+                "last_released_task_id": "implementation",
+            })
+            gate["provisioning_authorizations"].append({
+                "authorization_id": hashlib.sha256(authorization.encode()).hexdigest(),
+                "implementation_thread_id": "implementation",
+                "authorized_at": "2026-08-19T07:55:00Z",
+                "scope": lcrl._generic_account_browser_scope(),
+                "state_identity": lcrl._provisioning_state_identity(state_path),
+                "reviewer_generation": state["reviewer_chat"]["generation"],
+                "repository_identity": "d" * 64,
+            })
+            lcrl._save_account_browser_gate_locked(registry, gate, expected_revision=0)
+            before = state_path.read_bytes()
+            with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry), \
+                 mock.patch.object(lcrl, "_account_gate_now", return_value=lcrl.parse_time("2026-08-19T08:00:00Z")):
+                blocked = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id="implementation", minutes=10,
+                    replace=False,
+                ))
+            self.assertEqual(blocked["reason_code"], "account_rate_limit_identity_unconfirmed")
+            self.assertFalse(blocked["browser_access_allowed"])
+            self.assertFalse(blocked["user_choice_required"])
+            self.assertEqual(before, state_path.read_bytes())
+
     def test_waiting_round_budget_keeps_old_wait_until_replacement_is_bound(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

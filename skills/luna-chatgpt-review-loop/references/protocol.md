@@ -522,6 +522,12 @@ probe. The controller creates or reuses exactly one `submission_retry` RDATE
 wait, reports whether it is bound, and allows one recovery check only at expiry.
 Missing platform-wait capability is a technical blocker with an explicit host
 next action and never a product decision.
+Legacy `controller_error/external_blocked` states use the same rule. Guard may
+atomically migrate, and show-status may read-only project, only when the live
+account cooldown matches the exact task, state identity, reviewer generation,
+repository identity, and there is no task slot. Migration restores the unsent
+submission and one RDATE wait. An already-bound wait is reused. Any mismatch
+leaves the state unchanged and grants zero browser authority.
 Slot acquisition normally never re-labels an existing lease: same-task reuse
 requires the same operation. The only controller-owned exception is a one-time
 replacement-Chat provisioning `startup` that atomically continues to that new

@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.89`, Controller 145, Skill `2026-08-19.102`.
+- Source candidate: `0.2.0-alpha.90`, Controller 146, Skill `2026-08-19.103`.
+- Guard and show-status now recognize legacy `controller_error/external_blocked`
+  as an active account rate limit only when task, state, reviewer generation,
+  repository identity, and zero-slot evidence match. Guard atomically restores
+  the unsent submission and one RDATE wait; show-status projects without
+  mutation. Identity drift remains blocked with zero browser authority.
 - Real replacement-startup rate limits now retain `account_rate_limited`
   through top-level errors and status projection. The account gate's exact
   cooldown deadline is authoritative; cooldown has zero Chat access and only
@@ -118,6 +123,10 @@ intervention.
   passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. Its deterministic archive contains 113
   tracked source files. Real App cooldown expiry recovery remains unverified.
+- Alpha 90 repository regression passed 432/432 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Its deterministic archive contains 114
+  tracked source files. Real App legacy cooldown migration remains unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the
