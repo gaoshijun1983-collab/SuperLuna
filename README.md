@@ -24,9 +24,13 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.83`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 139 / Skill revision
-`2026-08-19.96` gates complete-source attachment transport before any Chat or
+The current source candidate is `0.2.0-alpha.84`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 140 / Skill revision
+`2026-08-19.97` reroutes a clean, reachable exact-commit repository rollover
+before the attachment capability gate. It clears only the stale attachment
+blocker, preserves a hashed structured rollover handoff, and still requires a
+fresh replacement-Chat repository access receipt. Complete-source attachment
+fallback continues to gate upload transport before any Chat or
 browser startup. Only a host-declared `direct_file_upload` capability may be
 used; a missing capability, a filechooser failure, or a missing current-composer
 receipt fails closed without a text send, Chat read, refresh, or replacement

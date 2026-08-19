@@ -20,9 +20,13 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.83`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 139 / Skill revision `2026-08-19.96` 对干净且可访问的 Git 项目优先
-在 Chat 或浏览器启动前检查完整源码包附件能力：只有宿主明确声明
+当前源码候选版本是 `0.2.0-alpha.84`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 140 / Skill revision `2026-08-19.97` 会在 replacement Chat 启动与附件
+能力门之前重新核对 clean、canonical、reachable 的 exact-commit 仓库。核对成功后只撤销旧附件
+阻断，恢复唯一 `rollover_pending`，保留 rollover authorization，并绑定包含已完成轮次、锁定决策、
+未解决问题、runtime/machine evidence 索引与 base→head 的结构化 handoff；replacement Chat 仍须重新
+提供 exact commit、完整 tree 和根目录/嵌套 canary 回执，不继承旧 Chat receipt。只有确实回退
+完整源码包时才检查附件能力：只有宿主明确声明
 `direct_file_upload` 可用才允许上传；能力缺失、filechooser 未触发或当前 composer 回执缺失时，
 均不发送文字、不读取 Chat、不刷新页面、不重建包。唯一恢复复用同一 package identity，第二次
 失败进入终态 `attachment_upload_capability_missing`。Git exact-commit 模式不依赖附件，仍优先

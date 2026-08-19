@@ -357,6 +357,13 @@ operation 复用仍禁止。返回
    历史，但不能替代本轮 diff 覆盖。dirty、remote 缺失、commit 不可达、私库访问/认证未核验时，
    必须自动回退 `prepare-project-context --scope full_source`，不得 partial formal review。不得自动
    commit、push、发布或公开私有仓库。
+   如果旧 rollover state 已因附件能力进入 `rollover_blocked`，恢复时必须先重新运行同一个
+   `prepare-repository-commit-review`。只要当前 worktree clean、canonical remote、exact commit
+   reachable、访问身份与 tree canary 条件全部成立，Controller 会在任何 `startup` 名额或浏览器动作前
+   原子撤销旧附件阻断，回到 `rollover_pending`，保留原 rollover authorization，并要求唯一 replacement
+   Chat。可用 `--rollover-handoff-file` 提供结构化 JSON；未提供时 Controller 从 state 生成包含已完成轮次、
+   锁定安全决策、未解决恢复点、runtime/machine evidence 索引与 base→head 的确定性 handoff。两种方式
+   都只绑定 handoff hash，不继承旧 Chat receipt，也不把本地文件路径当作 reviewer 已看到的证据。
    没有可验证 Git 仓库时必须用 `prepare-project-context --scope full_source` 生成确定性脱敏完整源码包；
    在取得 `startup` 账户名额、初始化浏览器或创建首次/replacement Chat 前，必须先运行
    `declare-attachment-upload-capability`。只有宿主明确声明 `direct_file_upload` 可用时才能继续；

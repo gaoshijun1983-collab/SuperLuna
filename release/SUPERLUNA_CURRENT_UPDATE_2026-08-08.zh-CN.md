@@ -3,28 +3,34 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.83`（Python 元数据：`0.2.0a83`）
-- 当前源码控制器：139
+- 版本：`0.2.0-alpha.84`（Python 元数据：`0.2.0a84`）
+- 当前源码控制器：140
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.96`
+- 当前源码 Skill 修订：`2026-08-19.97`
 - 候选日期：2026-08-19
-- Alpha 83 implementation candidate：`9729d92f48bfd89f778808a41d0478621fdffe61`
+- Alpha 84 当前为未提交本地候选；基线 HEAD：`921ede990187599bfaa940bec71f9e2f708cf21c`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：419/419 通过；控制器 selftest：15/15 通过。
+- 仓库测试：421/421 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性源码包与 SHA-256 将由本轮最终 build/verify 写入
-  `dist/SuperLuna-0.2.0-alpha.83.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 83 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 105 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.84.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 84 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 140 / Skill revision `2026-08-19.97` 修复已因附件能力受阻的 rollover
+  无法重新选择 Git exact-commit 的问题。`prepare-repository-commit-review` 在 replacement startup
+  前重新核对 clean worktree、canonical remote、exact commit reachability、访问身份与 tree canary；
+  成功时只清除旧附件阻断并恢复唯一 `rollover_pending`。结构化 handoff 以确定性 hash 绑定已完成
+  轮次、锁定决策、未解决问题、runtime/machine evidence 索引和 base→head；不伪造 replacement Chat
+  的 repository access receipt。失败仍回完整源码包，并在浏览器前 fail closed。
 - Controller 139 / Skill revision `2026-08-19.96` 在账户名额、浏览器和首次/replacement Chat
   创建前检查宿主附件上传能力。只有显式 `direct_file_upload` 才能上传；filechooser 或上传失败
   一次关闭并保留同包，仅允许一次恢复，第二次进入 `attachment_upload_capability_missing`。

@@ -132,13 +132,13 @@
       "id": "repository-commit-review-preferred",
       "scope_key": "workflow.repository_commit_review",
       "status": "user_approved",
-      "decision": "Git-backed 项目默认优先 exact repository commit 审阅。必须绑定 canonical remote、repository identity、exact commit、tree manifest，并由当前 Chat 以根目录与嵌套 blob canary 证明完整 tree 可访问；每轮另行证明 base→head diff。dirty、remote/commit 不可达、私库访问或认证未核验时自动回退完整脱敏源码附件包，禁止 partial formal review。",
+      "decision": "Git-backed 项目默认优先 exact repository commit 审阅。必须绑定 canonical remote、repository identity、exact commit、tree manifest，并由当前 Chat 以根目录与嵌套 blob canary 证明完整 tree 可访问；每轮另行证明 base→head diff。replacement rollover 即使旧 state 已因附件能力受阻，也必须在任何 startup 或浏览器动作前重新核对当前 Git 条件；核对成功只撤销旧附件阻断、保留唯一换卷授权并绑定结构化 handoff，不得要求附件能力或伪造新 Chat receipt。dirty、remote/commit 不可达、私库访问或认证未核验时自动回退完整脱敏源码附件包，禁止 partial formal review。",
       "scope": "适用于首次 Chat、已有 Chat、replacement Chat、每轮正式审阅、恢复、状态/UI 和发布证据声明。",
       "recorded_on": "2026-08-19",
       "authority_sources": [
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/protocol.md"},
-        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.82.md"}
+        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.84.md"}
       ],
       "change_rule": "不得把 branch/HEAD URL、页面出现、摘要或旧 Chat receipt 当作访问证明；不得自动 commit、push 或公开私库。"
     },

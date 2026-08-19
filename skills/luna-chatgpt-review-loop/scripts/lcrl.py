@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 139
-SKILL_REVISION = "2026-08-19.96"
+CONTROLLER_VERSION = 140
+SKILL_REVISION = "2026-08-19.97"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -7920,6 +7920,7 @@ def empty_project_context() -> dict[str, Any]:
         "canaries": [],
         "repository_access_receipt": "none",
         "round_review": "none",
+        "rollover_handoff": "none",
         "github_access_verified": False,
         "runtime_evidence": {"status": "not_included", "sources": [], "gaps": ["runtime behavior is not proved by source files"]},
     }
@@ -8094,14 +8095,23 @@ def _canonical_repository_url(value: str) -> str:
     return f"https://{parsed.netloc.casefold()}{path}"
 
 
-def _repository_review_dirty(project_root: Path, state_path: Path) -> bool:
+def _repository_review_dirty(
+    project_root: Path, state_path: Path, ignored_paths: Iterable[str] = (),
+) -> bool:
     ignored: set[str] = set()
     try:
         ignored.add(state_path.relative_to(project_root).as_posix())
         ignored.add(state_path.with_name(f".{state_path.name}.lock").relative_to(project_root).as_posix())
     except ValueError:
         pass
-    entries = _git_output(project_root, "status", "--porcelain").splitlines()
+    for value in ignored_paths:
+        try:
+            ignored.add(Path(value).resolve().relative_to(project_root).as_posix())
+        except (OSError, ValueError):
+            continue
+    entries = _git_output(
+        project_root, "status", "--porcelain", "--untracked-files=all",
+    ).splitlines()
     for entry in entries:
         candidate = entry[3:].split(" -> ")[-1] if len(entry) > 3 else ""
         if candidate not in ignored:
@@ -8125,6 +8135,64 @@ def _prepare_full_source_fallback(args: argparse.Namespace, reason: str) -> dict
     return result
 
 
+def _repository_rollover_handoff(
+    state: dict[str, Any], project_root: Path, value: str | None,
+) -> dict[str, Any]:
+    """Load one deterministic handoff without treating paths as reviewer evidence."""
+    if value not in (None, "", "none"):
+        handoff_input = Path(str(value)).expanduser()
+        if handoff_input.is_symlink():
+            raise LCRLError("rollover handoff must not be a symlink")
+        handoff_path = handoff_input.resolve(strict=True)
+        try:
+            handoff_path.relative_to(project_root)
+        except ValueError as exc:
+            raise LCRLError("rollover handoff must remain inside the workflow project") from exc
+        if not handoff_path.is_file():
+            raise LCRLError("rollover handoff must be one regular project file")
+        try:
+            payload = json.loads(handoff_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise LCRLError("rollover handoff must be valid UTF-8 JSON") from exc
+    else:
+        runtime_evidence = state.get("project_context", {}).get("runtime_evidence", {})
+        payload = {
+            "completed_formal_rounds": [
+                {"round": number, "source": "controller_state"}
+                for number in range(1, current_reviewer_chat_formal_rounds(state) + 1)
+            ],
+            "locked_decisions": [
+                "old reviewer Chat access is forbidden after rollover",
+                "formal review requires verified complete project context",
+                "runtime evidence remains separate from source coverage",
+            ],
+            "unresolved_issues": [str(state.get("review", {}).get("recovery_action", "none"))],
+            "runtime_evidence_index": list(runtime_evidence.get("sources", [])),
+            "machine_evidence_index": list(runtime_evidence.get("gaps", [])),
+            "base_head_chain": {
+                "base": state.get("project_context", {}).get("commit_sha", "none"),
+                "head": _git_output(project_root, "rev-parse", "HEAD"),
+            },
+        }
+    required_lists = (
+        "completed_formal_rounds", "locked_decisions", "unresolved_issues",
+        "runtime_evidence_index", "machine_evidence_index",
+    )
+    if not isinstance(payload, dict):
+        raise LCRLError("rollover handoff must be a JSON object")
+    if any(not isinstance(payload.get(field), list) for field in required_lists):
+        raise LCRLError("rollover handoff requires round, decision, issue, runtime, and machine evidence lists")
+    chain = payload.get("base_head_chain")
+    if not isinstance(chain, dict) or set(chain) != {"base", "head"}:
+        raise LCRLError("rollover handoff requires one exact base to head chain")
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return {
+        "schema_version": 1,
+        "payload": payload,
+        "sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    }
+
+
 def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[str, Any]:
     """Prefer exact repository review, falling back to a complete source package."""
     state_path = Path(args.state).expanduser().resolve()
@@ -8143,7 +8211,12 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
     if configured_remote != canonical_url:
         return _prepare_full_source_fallback(args, "remote_identity_mismatch")
     tracked, head_commit, _dirty = _git_project_inventory(project_root)
-    dirty = _repository_review_dirty(project_root, state_path)
+    transient_paths = [
+        *state.get("project_context", {}).get("package_paths", []),
+        state.get("project_context", {}).get("manifest_path", "none"),
+        str(getattr(args, "rollover_handoff_file", None) or "none"),
+    ]
+    dirty = _repository_review_dirty(project_root, state_path, transient_paths)
     if dirty:
         return _prepare_full_source_fallback(args, "dirty_worktree")
     if getattr(args, "remote_commit_reachable", False) is not True:
@@ -8163,6 +8236,9 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
         {"path": preferred_nested, "blob_sha": _git_output(project_root, "rev-parse", f"{head_commit}:{preferred_nested}")},
     ]
     repository_identity = hashlib.sha256(canonical_url.encode()).hexdigest()
+    rollover_handoff = _repository_rollover_handoff(
+        state, project_root, getattr(args, "rollover_handoff_file", None),
+    )
     context = empty_project_context()
     context.update({
         "generation": state["reviewer_chat"]["generation"],
@@ -8175,8 +8251,25 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
         "branch": str(args.branch or "none"),
         "tree_manifest_hash": tree_manifest_hash,
         "canaries": canaries,
+        "rollover_handoff": rollover_handoff,
     })
     state["project_context"] = context
+    reviewer_chat = state.get("reviewer_chat", {})
+    if (
+        reviewer_chat.get("status") == "rollover_blocked"
+        and reviewer_chat.get("rollover_failure_code") in {
+            "attachment_upload_capability_missing", "browser_filechooser_unavailable",
+        }
+    ):
+        reviewer_chat.update({
+            "status": "rollover_pending",
+            "rollover_recovery_id": "none",
+            "rollover_failure_code": "none",
+            "rollover_failure_count": 0,
+        })
+        state["review"]["recovery_action"] = "repository_commit_rollover_prepared"
+        state["recovery"]["next_retry_not_before"] = "none"
+    state.setdefault("capability_probes", {})["attachment_upload"] = empty_attachment_upload()
     save_state(state_path, state, expected_revision=revision)
     return {
         "ok": True, "action": "repository_access_receipt_required",
@@ -8184,6 +8277,8 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
         "repository_url": canonical_url, "repository_identity": repository_identity,
         "head_commit": head_commit, "branch": context["branch"],
         "tree_manifest_hash": tree_manifest_hash, "canaries": canaries,
+        "rollover_handoff_sha256": rollover_handoff["sha256"],
+        "attachment_upload_required": False,
         "exact_commit_url_required": True, "floating_ref_allowed": False,
         "full_history_scan_required": True, "revision": state["revision"],
     }
@@ -12490,6 +12585,7 @@ def build_parser() -> argparse.ArgumentParser:
     prepare_repository.add_argument("--branch", default="none")
     prepare_repository.add_argument("--remote-commit-reachable", action="store_true")
     prepare_repository.add_argument("--private-access-verified", action="store_true")
+    prepare_repository.add_argument("--rollover-handoff-file")
     prepare_repository.add_argument("--fallback-output-dir", required=True)
     prepare_repository.add_argument("--max-volume-bytes", type=int, default=20 * 1024 * 1024)
 

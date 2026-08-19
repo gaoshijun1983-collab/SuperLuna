@@ -467,7 +467,7 @@
     },
     "project_context": {
       "type": "object",
-      "required": ["schema_version", "generation", "status", "scope", "identity", "manifest_path", "package_paths", "package_names", "package_sha256", "file_count", "total_bytes", "included_files", "uncovered_files", "reviewer_thread_id", "receipt_confirmed_at", "repository_url", "repository_identity", "commit_sha", "branch", "tree_manifest_hash", "canaries", "repository_access_receipt", "round_review", "github_access_verified", "runtime_evidence"],
+      "required": ["schema_version", "generation", "status", "scope", "identity", "manifest_path", "package_paths", "package_names", "package_sha256", "file_count", "total_bytes", "included_files", "uncovered_files", "reviewer_thread_id", "receipt_confirmed_at", "repository_url", "repository_identity", "commit_sha", "branch", "tree_manifest_hash", "canaries", "repository_access_receipt", "round_review", "rollover_handoff", "github_access_verified", "runtime_evidence"],
       "properties": {
         "schema_version": {"const": 1},
         "generation": {"type": "integer", "minimum": 1},
@@ -479,6 +479,7 @@
         "included_files": {"type": "array", "items": {"type": "string"}},
         "uncovered_files": {"type": "array", "items": {"type": "string"}},
         "canaries": {"type": "array", "items": {"type": "object"}},
+        "rollover_handoff": {"oneOf": [{"const": "none"}, {"type": "object"}]},
         "github_access_verified": {"type": "boolean"}
       }
     },

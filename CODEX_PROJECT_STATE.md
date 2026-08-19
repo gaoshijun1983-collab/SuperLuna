@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.83`, Controller 139, Skill `2026-08-19.96`.
+- Source candidate: `0.2.0-alpha.84`, Controller 140, Skill `2026-08-19.97`.
+- Repository-backed rollover recovery now re-runs exact-commit preparation
+  before the attachment capability gate. A successful current repository check
+  clears only the stale attachment blocker, restores the unique pending
+  replacement continuation, and binds a deterministic structured handoff; the
+  replacement Chat still needs its own repository access receipt.
 - Complete-source attachment runs now require a host-declared direct upload
   capability before Chat/browser startup and an exact current-composer receipt
   over package identity, names, sizes, and SHA-256 values before text send. One
@@ -64,8 +69,15 @@ intervention.
   provisioning failure becomes `rollover_blocked` with one recovery identity
   and never masquerades as `review_waiting`.
 - Frozen Alpha 83 implementation candidate commit: `9729d92f48bfd89f778808a41d0478621fdffe61`.
+  Alpha 84 is currently an uncommitted local candidate based on
+  `921ede990187599bfaa940bec71f9e2f708cf21c`; it has no frozen candidate commit
+  and receives no real-device or Public Beta credit.
   The following documentation-only binding commit does not add product code or
   real-device evidence.
+- Alpha 84 repository regression passed 421/421. Controller selftest passed
+  15/15; closure-check, Skill, plugin, decision-register, milestone, and
+  Beta-evidence validators passed. The 105-file deterministic archive was
+  rebuilt and verified locally. This remains local-only evidence.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

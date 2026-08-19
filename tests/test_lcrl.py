@@ -201,6 +201,7 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             private_access_verified=True,
             fallback_output_dir=str(root / "context-fallback"),
             max_volume_bytes=20 * 1024 * 1024,
+            rollover_handoff_file=None,
         )
         values.update(overrides)
         return Namespace(**values)
@@ -311,6 +312,74 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             migrated = lcrl.load_state(state_path)
             self.assertEqual(migrated["project_context"]["status"], "context_refresh_required")
             self.assertFalse(lcrl.project_context_ready(migrated))
+
+    def test_blocked_attachment_rollover_is_recovered_by_exact_commit_before_startup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            package = self.prepare(root, state_path)
+            state = lcrl.load_state(state_path)
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_reason": "round_budget",
+                "rollover_authorization_id": "rollover-0123456789abcdef",
+                "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+                "rollover_failure_code": "attachment_upload_capability_missing",
+                "rollover_failure_count": 1,
+            })
+            state["capability_probes"]["attachment_upload"].update({
+                "status": "missing", "package_identity": package["context_identity"],
+                "failure_reason": "attachment_upload_capability_missing",
+            })
+            lcrl.save_state(state_path, state)
+
+            prepared = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path)
+            )
+            recovered = lcrl.load_state(state_path)
+            self.assertEqual(prepared["action"], "repository_access_receipt_required")
+            self.assertEqual(recovered["project_context"]["scope"], "repository_commit_review")
+            self.assertEqual(recovered["reviewer_chat"]["status"], "rollover_pending")
+            self.assertEqual(recovered["reviewer_chat"]["rollover_failure_code"], "none")
+            self.assertEqual(lcrl.rollover_future_action(recovered), (True, "provision_one_replacement_reviewer_chat"))
+
+            slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="impl", reviewer_thread_id="none",
+                new_chat_authorization_id="rollover-0123456789abcdef",
+                new_chat_local_work_status="completed_and_verified", operation="startup",
+                state=str(state_path), registry=str(root / "account-gate.json"),
+                project_path=None, profile=None, at=None,
+            ))
+            self.assertTrue(slot["slot_acquired"])
+            self.assertNotIn("attachment_upload", slot["action"])
+
+    def test_replacement_exact_commit_context_preserves_structured_rollover_handoff(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            handoff = {
+                "completed_formal_rounds": [
+                    {"round": 1, "decision": "retain fail-closed account gate"},
+                    {"round": 2, "decision": "retire old reviewer Chat"},
+                ],
+                "locked_decisions": ["old Chat access remains forbidden"],
+                "unresolved_issues": ["verify exact commit access in replacement Chat"],
+                "runtime_evidence_index": ["release/reports/runtime-local.json"],
+                "machine_evidence_index": ["release/reports/macos-app-pending.json"],
+                "base_head_chain": {"base": "a" * 40, "head": "b" * 40},
+            }
+            handoff_path = root / "rollover-handoff.json"
+            handoff_path.write_text(json.dumps(handoff), encoding="utf-8")
+
+            prepared = lcrl.prepare_repository_commit_review_command(
+                self.repository_args(root, state_path, rollover_handoff_file=str(handoff_path))
+            )
+            context = lcrl.load_state(state_path)["project_context"]
+            self.assertEqual(context["rollover_handoff"]["payload"], handoff)
+            self.assertEqual(
+                context["rollover_handoff"]["sha256"],
+                hashlib.sha256(json.dumps(handoff, sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+            )
+            self.assertEqual(prepared["rollover_handoff_sha256"], context["rollover_handoff"]["sha256"])
+            self.assertFalse(prepared["attachment_upload_required"])
 
     def test_replacement_chat_does_not_inherit_old_receipt(self):
         with tempfile.TemporaryDirectory() as directory:

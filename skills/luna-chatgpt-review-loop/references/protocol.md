@@ -109,6 +109,13 @@ a replacement Chat. A bounded rollover is allowed only after two formal
 reviews, counted by exact Chat identity across run boundaries, or a real rate
 limit; it retires the old Chat and provisions exactly one replacement with
 the same-generation complete source package plus a structured rollover handoff.
+For a clean reachable Git-backed project, the same recovery first re-runs
+`prepare-repository-commit-review`. A successful exact-commit preparation
+atomically supersedes only a stale attachment-upload rollover blocker, retains
+the unique rollover authorization, binds a deterministic structured handoff,
+and returns to the one replacement-Chat startup. No repository access receipt
+is fabricated; the replacement Chat must prove exact commit, full tree, and both
+blob canaries before formal review.
 It cannot inherit only a prose summary or the previous Chat receipt. Normal operations on a bound Chat are tail-only and
 return `full_history_scan_allowed=false`. The workflow never switches
 model/reasoning or sends through a second transport. The user explicitly

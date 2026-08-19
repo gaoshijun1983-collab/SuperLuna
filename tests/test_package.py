@@ -1309,20 +1309,19 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(report["skill_revision"], registry["skill_revision"])
         if report["release_validation_pending"]:
             self.assertTrue(report["source_contains_unreleased_hotfix"])
-            self.assertFalse(report["dist_archive_matches_current_source"])
         else:
             self.assertFalse(report["source_contains_unreleased_hotfix"])
-            self.assertTrue(report["dist_archive_matches_current_source"])
+        self.assertTrue(report["dist_archive_matches_current_source"])
         archive = report["dist_archive"]
         self.assertEqual(archive["filename"], f"SuperLuna-{manifest['version']}.zip")
         self.assertGreater(archive["tracked_source_files"], 50)
         self.assertEqual(
             archive["embedded_manifest_verified"],
-            not report["release_validation_pending"],
+            report["dist_archive_matches_current_source"],
         )
         self.assertEqual(
             archive["deterministic_rebuild_verified"],
-            not report["release_validation_pending"],
+            report["dist_archive_matches_current_source"],
         )
         self.assertEqual(report["compatibility_entrypoints"]["skill"], "luna-chatgpt-review-loop")
         self.assertEqual(report["compatibility_entrypoints"]["plugin"], "luna-review-loop")
