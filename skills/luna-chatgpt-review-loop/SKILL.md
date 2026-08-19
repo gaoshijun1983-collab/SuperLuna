@@ -380,6 +380,12 @@ operation 复用仍禁止。返回
    该命令再用禁用 credential helper 的 `git ls-remote` 证明 exact commit 可匿名访问，成功后原子恢复
    `rollover_pending`。remote 未知、dirty、commit 未跟踪/不可匿名访问、task identity 不符或 canary
    缺失时保持原 state 并失败关闭；全过程不得启动浏览器，也不得把 Git 可达性写成 Chat access receipt。
+   若 repository preparation 已完成，但旧版曾消费 replacement startup provisioning 且实际没有产生
+   browser init、Chat identity、submission/read receipt 或任何活动/过期但不确定的 slot，普通 guard
+   必须返回唯一 `reconcile-orphaned-provisioning` 系统动作。该动作只可在同一 task、state、reviewer
+   generation 与 repository identity 下原子恢复一次同代 provisioning；恢复后仍由
+   `acquire-account-browser-slot` 建立唯一 startup slot。任何缺证、不同 identity、已有副作用或并发 slot
+   均失败关闭，不得创建第二个 Chat，也不得把本地 Git 事实冒充 reviewer access receipt。
    SuperLuna 仓库自身固定使用 tracked 的 `SUPERLUNA_REVIEW_CANARY.txt` 与
    `review-canary/NESTED_CANARY.txt`。Controller 必须把这对路径作为原子 canary，核对 exact commit 中
    两者均为普通 blob 并返回精确 blob SHA；任一缺失、symlink 或路径身份不符时不得退回 README 等

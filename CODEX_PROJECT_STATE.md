@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.87`, Controller 143, Skill `2026-08-19.100`.
+- Source candidate: `0.2.0-alpha.88`, Controller 144, Skill `2026-08-19.101`.
+- A legacy replacement-startup provisioning that was consumed without any
+  browser, Chat, submission, read, or slot side effect can now be atomically
+  reconciled once. The reclaim is bound to the same task, state, reviewer
+  generation, and repository identity; missing or ambiguous evidence remains
+  blocked and no second Chat authorization is created.
 - Repository self-retests now keep implementation writes/execution in their
   exact fixture while reviewer Git evidence is derived from the trusted source
   checkout. Generic Git subprojects derive their containing Git toplevel.
@@ -101,6 +106,10 @@ intervention.
   passed 15/15; release, closure, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. Its deterministic archive contains 111
   tracked source files. Real App old-state migration remains pending.
+- Alpha 88 repository regression passed 429/429 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Its deterministic archive contains 112
+  tracked source files. Real App orphan reconciliation remains unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

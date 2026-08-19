@@ -20,11 +20,13 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.87`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 143 / Skill revision `2026-08-19.100` 明确拆分可写 implementation workspace
+当前源码候选版本是 `0.2.0-alpha.88`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 144 / Skill revision `2026-08-19.101` 明确拆分可写 implementation workspace
 与 reviewer repository source。仓库自测的写入和执行继续锁在任务隔离 fixture，exact-commit 审核
 证据只从精确 retest scope 绑定的可信 SuperLuna source checkout 推导；generic Git 项目使用所选项目
-所属的 Git toplevel，非 Git 项目保持完整源码附件路径。Controller 142 / Skill revision
+所属的 Git toplevel，非 Git 项目保持完整源码附件路径。历史 replacement startup provisioning
+只有在同一 task、state、reviewer generation 与 repository identity 严格匹配且零副作用时才可原子
+回收一次；证据缺失、身份不符或 slot 不确定均继续失败关闭。Controller 142 / Skill revision
 `2026-08-19.99` 在仓库根目录与嵌套目录提供一对稳定、
 tracked、无敏感内容的 reviewer-access canary。repository preparation 会原子选择这对 canary，要求
 两者都是 exact commit 中的普通 blob；缺失一项、symlink 或身份不符都在浏览器动作前失败关闭。

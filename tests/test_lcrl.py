@@ -1281,6 +1281,134 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(repeated["slot_acquired"])
             self.assertFalse(repeated["provisioning_home_navigation_allowed"])
 
+    def test_orphaned_zero_side_effect_provisioning_is_reconciled_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            registry = root / "account-browser-gate.json"
+            task_id = "implementation-orphaned-provisioning"
+            state = lcrl.new_state(
+                "none", task_id, root, "old-reviewer-chat",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            authorization = lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+            state["reviewer_chat"].update({
+                "status": "rollover_blocked",
+                "rollover_recovery_id": "rollover-recovery-0123456789abcdef",
+                "rollover_failure_code": "controller_error",
+                "rollover_failure_count": 1,
+            })
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": "a" * 40,
+                "reviewer_repository_tree_manifest_hash": "b" * 64,
+                "reviewer_repository_identity": "c" * 64,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": "c" * 64,
+                "commit_sha": "a" * 40,
+                "tree_manifest_hash": "b" * 64,
+                "repository_access_receipt": "none",
+                "generation": state["reviewer_chat"]["generation"],
+            })
+            lcrl.save_state(state_path, state)
+            gate = lcrl.empty_account_browser_gate()
+            gate["provisioning_authorizations"].append({
+                "authorization_id": hashlib.sha256(authorization.encode()).hexdigest(),
+                "implementation_thread_id": task_id,
+                "authorized_at": "2026-08-19T05:13:54Z",
+                "scope": lcrl._generic_account_browser_scope(),
+                "state_identity": lcrl._provisioning_state_identity(state_path),
+                "reviewer_generation": state["reviewer_chat"]["generation"],
+                "repository_identity": "c" * 64,
+            })
+            lcrl._save_account_browser_gate_locked(registry, gate, expected_revision=0)
+
+            with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry):
+                guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id=task_id, minutes=10, replace=False,
+                ))
+            self.assertEqual(guard["action"], "orphaned_provisioning_reconcile_required")
+            self.assertFalse(guard["browser_access_allowed"])
+            reconciled = lcrl.reconcile_orphaned_provisioning_command(Namespace(
+                state=str(state_path), registry=str(registry),
+                implementation_thread_id=task_id, at="2026-08-19T06:00:00Z",
+            ))
+            self.assertEqual(reconciled["action"], "orphaned_provisioning_reclaimed")
+            startup = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id=task_id, reviewer_thread_id="none",
+                new_chat_authorization_id=authorization,
+                new_chat_local_work_status="completed_and_verified",
+                operation="startup", state=str(state_path), registry=str(registry),
+                at="2026-08-19T06:00:01Z",
+            ))
+            self.assertTrue(startup["slot_acquired"])
+            self.assertTrue(startup["provisioning_home_navigation_allowed"])
+            self.assertTrue(startup["orphaned_provisioning_reclaimed"])
+            repeated = lcrl.reconcile_orphaned_provisioning_command(Namespace(
+                state=str(state_path), registry=str(registry),
+                implementation_thread_id=task_id, at="2026-08-19T06:00:02Z",
+            ))
+            self.assertEqual(repeated["action"], "orphaned_provisioning_reconcile_blocked")
+            self.assertFalse(repeated["browser_runtime_initialization_allowed"])
+            self.assertEqual(len(lcrl.load_account_browser_gate(registry)["slots"]), 1)
+
+    def test_orphaned_provisioning_with_uncertain_slot_stays_blocked(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            authorization = lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": "a" * 40,
+                "reviewer_repository_tree_manifest_hash": "b" * 64,
+                "reviewer_repository_identity": "c" * 64,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": "c" * 64,
+                "commit_sha": "a" * 40,
+                "tree_manifest_hash": "b" * 64,
+                "repository_access_receipt": "none",
+                "generation": state["reviewer_chat"]["generation"],
+            })
+            lcrl.save_state(state_path, state)
+            registry = root / "account-browser-gate.json"
+            gate = lcrl.empty_account_browser_gate()
+            gate["provisioning_authorizations"].append({
+                "authorization_id": hashlib.sha256(authorization.encode()).hexdigest(),
+                "implementation_thread_id": "implementation",
+                "authorized_at": "2026-08-19T05:13:54Z",
+                "scope": lcrl._generic_account_browser_scope(),
+                "state_identity": lcrl._provisioning_state_identity(state_path),
+                "reviewer_generation": state["reviewer_chat"]["generation"],
+                "repository_identity": "c" * 64,
+            })
+            gate["slots"].append({
+                "lease_id": "browser-slot-uncertain",
+                "implementation_thread_id": "implementation",
+                "reviewer_thread_id": "none",
+                "operation": "startup",
+                "acquired_at": "2026-08-19T05:13:54Z",
+                "expires_at": "2026-08-19T07:13:54Z",
+                "scope": lcrl._generic_account_browser_scope(),
+            })
+            lcrl._save_account_browser_gate_locked(registry, gate, expected_revision=0)
+            blocked = lcrl.reconcile_orphaned_provisioning_command(Namespace(
+                state=str(state_path), registry=str(registry),
+                implementation_thread_id="implementation", at="2026-08-19T06:00:00Z",
+            ))
+            self.assertEqual(blocked["action"], "orphaned_provisioning_reconcile_blocked")
+            self.assertEqual(blocked["reason_code"], "account_browser_slot_uncertain")
+
     def test_replacement_chat_startup_atomically_continues_to_first_submission(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

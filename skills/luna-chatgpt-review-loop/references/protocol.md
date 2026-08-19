@@ -125,6 +125,15 @@ advertisement with credential helpers disabled. Missing identity, dirty state,
 unknown remote, absent remote tracking, unreachable commit, or missing canaries
 stays blocked with zero browser authority. Success restores `rollover_pending`
 but leaves the replacement Chat repository access receipt unconfirmed.
+If an older controller consumed the same-generation replacement-startup
+provisioning but provably produced no browser initialization, Chat identity,
+submission/read receipt, or active/expired-but-uncertain slot, ordinary turn
+entry exposes one `reconcile-orphaned-provisioning` action. Reconciliation is
+atomic, single-use, and requires the exact implementation task, state identity,
+reviewer generation, and repository identity. Missing evidence, identity drift,
+any side effect, or a concurrent slot remains fail-closed. The recovered
+authorization can create only the original generation's one startup slot and
+does not constitute a repository access receipt.
 SuperLuna publishes the atomic tracked pair `SUPERLUNA_REVIEW_CANARY.txt` and
 `review-canary/NESTED_CANARY.txt` for this proof. Preparation requires both paths
 to be regular blobs in the exact commit and returns their exact blob SHAs. A

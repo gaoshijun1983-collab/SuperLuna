@@ -24,14 +24,17 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.87`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 143 / Skill revision
-`2026-08-19.100` separates the writable implementation workspace from the
+The current source candidate is `0.2.0-alpha.88`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 144 / Skill revision
+`2026-08-19.101` separates the writable implementation workspace from the
 reviewer repository source. Repository self-retests remain locked to their
 isolated fixture for writes and execution, while exact-commit evidence is
 derived only from the trusted SuperLuna source checkout. Generic Git projects
 use their containing Git toplevel; non-Git projects retain the complete-source
-attachment path. Controller 142 / Skill revision `2026-08-19.99` adds two stable, tracked, non-sensitive repository review
+attachment path. A legacy replacement-startup provisioning is reconciled once
+only when the same task, state, reviewer generation, and repository identity
+prove zero browser, Chat, send, read, and slot side effects. Ambiguous evidence
+remains blocked. Controller 142 / Skill revision `2026-08-19.99` adds two stable, tracked, non-sensitive repository review
 canaries at the root and a nested path. Repository preparation selects this
 atomic pair, requires regular committed blobs, and rejects symlinks or a
 missing half before any browser action. Controller 141 / Skill revision

@@ -35,7 +35,7 @@
       "id": "browser-first-fixed-chat",
       "scope_key": "review.transport_and_identity",
       "status": "user_approved",
-      "decision": "新运行使用内置浏览器，任何时刻只允许一个活动评审 Chat；每个 Chat 按真实 Chat 身份累计最多承载 2 次正式评审。账户浏览器门必须在任何浏览器初始化、旧 Chat 打开或历史读取前检查正式轮数，第 3 次提交前原子进入 rollover_pending 并禁止旧 Chat；由具备浏览器能力的原实施任务自动创建、绑定并核验唯一替代 Chat，不依赖用户继续。waiting occurrence 命中 round_budget 时，原单次等待必须保留为唯一恢复锚点，直到替代 Chat 成功持久绑定；该 occurrence 必须原子改道为 rollover_continuation，释放可能已取得的 waiting_read 名额，禁止旧 Chat、普通回复 rearm 和下一次回复轮询，只执行唯一 replacement Chat startup；只有绑定成功后才可删除旧等待，并以真实删除证明原子续接唯一待提交材料。创建失败只保留一个幂等恢复身份并进入 rollover_blocked，不得伪装成 review_waiting、重复建 Chat、重复等待或重复发送；任何未完成 idle 状态必须有有效未来动作。已绑定 Chat 的正常访问只检查对话末尾，不扫描完整历史。第一次真实限流后永久停用旧 Chat并长冷却，冷却期不主动探测，之后仅创建唯一替代 Chat。单实施者、精确请求/回复身份。SuperLuna 不自动切换 Codex 实施模型；但可在 live startup 账户名额和控制器一次性授权下，通过前台可见 UI 将精确绑定 reviewer Chat 自动选择为用户锁定的极高/Extreme，并回读核验；该自动确认在同一任务、浏览器、Chat、账户名额与请求身份安全核验下可继续进入 submission reopen、发送前对账与最终单次发送授权。刚完成唯一替代 Chat 创建、绑定和极高核验的同一 startup 名额，只有在任务、profile/scope、state revision、浏览器与 Chat 身份全部一致时，才可保持同一 lease 和可见标签原子续接为该新 Chat 的第一次 submission；不得再次初始化浏览器、打开/刷新页面或扫描完整历史。其他跨 operation 复用继续失败关闭。不得改变其他 Chat 或由网页正文触发。",
+      "decision": "新运行使用内置浏览器，任何时刻只允许一个活动评审 Chat；每个 Chat 按真实 Chat 身份累计最多承载 2 次正式评审。账户浏览器门必须在任何浏览器初始化、旧 Chat 打开或历史读取前检查正式轮数，第 3 次提交前原子进入 rollover_pending 并禁止旧 Chat；由具备浏览器能力的原实施任务自动创建、绑定并核验唯一替代 Chat，不依赖用户继续。waiting occurrence 命中 round_budget 时，原单次等待必须保留为唯一恢复锚点，直到替代 Chat 成功持久绑定；该 occurrence 必须原子改道为 rollover_continuation，释放可能已取得的 waiting_read 名额，禁止旧 Chat、普通回复 rearm 和下一次回复轮询，只执行唯一 replacement Chat startup；只有绑定成功后才可删除旧等待，并以真实删除证明原子续接唯一待提交材料。创建失败只保留一个幂等恢复身份并进入 rollover_blocked，不得伪装成 review_waiting、重复建 Chat、重复等待或重复发送；任何未完成 idle 状态必须有有效未来动作。旧 replacement provisioning 只有在同一 task/state/reviewer generation/repository identity 严格匹配，且能证明没有 browser init、Chat identity、submission/read receipt 或活动及过期不确定 slot 时，才可原子回收一次；任何不确定性继续失败关闭。已绑定 Chat 的正常访问只检查对话末尾，不扫描完整历史。第一次真实限流后永久停用旧 Chat并长冷却，冷却期不主动探测，之后仅创建唯一替代 Chat。单实施者、精确请求/回复身份。SuperLuna 不自动切换 Codex 实施模型；但可在 live startup 账户名额和控制器一次性授权下，通过前台可见 UI 将精确绑定 reviewer Chat 自动选择为用户锁定的极高/Extreme，并回读核验；该自动确认在同一任务、浏览器、Chat、账户名额与请求身份安全核验下可继续进入 submission reopen、发送前对账与最终单次发送授权。刚完成唯一替代 Chat 创建、绑定和极高核验的同一 startup 名额，只有在任务、profile/scope、state revision、浏览器与 Chat 身份全部一致时，才可保持同一 lease 和可见标签原子续接为该新 Chat 的第一次 submission；不得再次初始化浏览器、打开/刷新页面或扫描完整历史。其他跨 operation 复用继续失败关闭。不得改变其他 Chat 或由网页正文触发。",
       "scope": "适用于正式新运行；旧 App Chat 仅保留兼容，不得作为新流程默认通道。不得并行创建替代 Chat，也不得为恢复而重开已停用 Chat。",
       "recorded_on": "2026-08-17",
       "authority_sources": [
@@ -138,7 +138,7 @@
       "authority_sources": [
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/protocol.md"},
-        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.87.md"}
+        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.88.md"}
       ],
       "change_rule": "不得把 branch/HEAD URL、页面出现、摘要或旧 Chat receipt 当作访问证明；不得自动 commit、push 或公开私库。"
     },

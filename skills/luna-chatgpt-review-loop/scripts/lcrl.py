@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 143
-SKILL_REVISION = "2026-08-19.100"
+CONTROLLER_VERSION = 144
+SKILL_REVISION = "2026-08-19.101"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -1176,6 +1176,12 @@ def validate_account_browser_gate(value: dict[str, Any]) -> None:
             errors.append(f"account browser provisioning authorization {index} requires a task identity")
         if not is_timestamp(authorization.get("authorized_at")):
             errors.append(f"account browser provisioning authorization {index} requires authorized_at")
+        if authorization.get("reclaim_status", "unreconciled") not in {
+            "unreconciled", "available_once", "consumed_after_reclaim",
+        }:
+            errors.append(f"account browser provisioning authorization {index} has invalid reclaim status")
+        if authorization.get("reclaim_count", 0) not in {0, 1}:
+            errors.append(f"account browser provisioning authorization {index} has invalid reclaim count")
         _validate_account_browser_scope_record(
             authorization.get("scope"), task_id,
             f"account browser provisioning authorization {index}", errors,
@@ -1261,11 +1267,167 @@ def load_account_browser_gate(path: str | Path, allow_missing: bool = False) -> 
     for authorization in value["provisioning_authorizations"]:
         if isinstance(authorization, dict):
             authorization.setdefault("scope", _generic_account_browser_scope())
+            authorization.setdefault("reclaim_status", "unreconciled")
+            authorization.setdefault("reclaim_count", 0)
+            authorization.setdefault("reviewer_generation", "none")
+            authorization.setdefault("repository_identity", "none")
+            authorization.setdefault("state_identity", "none")
+            authorization.setdefault("reconciled_at", "none")
     for slot in value.get("slots", []):
         if isinstance(slot, dict):
             slot.setdefault("scope", _generic_account_browser_scope())
     validate_account_browser_gate(value)
     return value
+
+
+def _provisioning_state_identity(state_path: Path) -> str:
+    return hashlib.sha256(str(state_path.resolve()).encode("utf-8")).hexdigest()
+
+
+def _orphaned_provisioning_plan_from_gate(
+    state_path: Path, state: dict[str, Any], gate: dict[str, Any],
+) -> dict[str, Any]:
+    automation = state.get("automation", {})
+    reviewer_chat = state.get("reviewer_chat", {})
+    task_id = str(automation.get("implementation_thread_id", "none"))
+    authorization_raw = str(reviewer_chat.get("rollover_authorization_id", "none"))
+    if (
+        reviewer_chat.get("status") not in {"rollover_pending", "rollover_blocked"}
+        or not re.fullmatch(r"rollover-[0-9a-f]{16}", authorization_raw)
+    ):
+        return {"ready": False, "reason_code": "rollover_provisioning_not_pending"}
+    context = state.get("project_context", {})
+    repository_identity = str(automation.get("reviewer_repository_identity", "none"))
+    if (
+        context.get("scope") != "repository_commit_review"
+        or context.get("repository_access_receipt", "none") != "none"
+        or repository_identity in {"", "none"}
+        or context.get("repository_identity") != repository_identity
+        or context.get("generation") != reviewer_chat.get("generation")
+    ):
+        return {"ready": False, "reason_code": "reviewer_repository_identity_unconfirmed"}
+    if reviewer_chat.get("pending_replacement", "none") != "none":
+        return {"ready": False, "reason_code": "replacement_chat_side_effect_uncertain"}
+    old_reviewer = str(state.get("confirmation", {}).get("reviewer_thread_id", "none"))
+    bound_reviewer = str(state.get("browser_binding", {}).get("conversation_id", "none"))
+    if bound_reviewer not in {"none", old_reviewer}:
+        return {"ready": False, "reason_code": "replacement_chat_side_effect_uncertain"}
+    if any(slot.get("implementation_thread_id") == task_id for slot in gate.get("slots", [])):
+        return {"ready": False, "reason_code": "account_browser_slot_uncertain"}
+    authorization_id = hashlib.sha256(authorization_raw.encode("utf-8")).hexdigest()
+    matches = [
+        item for item in gate.get("provisioning_authorizations", [])
+        if item.get("authorization_id") == authorization_id
+    ]
+    if len(matches) != 1:
+        return {"ready": False, "reason_code": "provisioning_authorization_identity_uncertain"}
+    record = matches[0]
+    requested_scope = account_browser_scope_for_state(state, state_path)
+    if (
+        record.get("implementation_thread_id") != task_id
+        or record.get("scope") != requested_scope
+    ):
+        return {"ready": False, "reason_code": "provisioning_authorization_scope_mismatch"}
+    expected_state_identity = _provisioning_state_identity(state_path)
+    recorded_state_identity = str(record.get("state_identity", "none"))
+    legacy_retest_scope = requested_scope.get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
+    if recorded_state_identity not in {"none", expected_state_identity}:
+        return {"ready": False, "reason_code": "provisioning_state_identity_mismatch"}
+    if recorded_state_identity == "none" and not legacy_retest_scope:
+        return {"ready": False, "reason_code": "provisioning_state_identity_unconfirmed"}
+    recorded_generation = record.get("reviewer_generation", "none")
+    if recorded_generation not in {"none", reviewer_chat.get("generation")}:
+        return {"ready": False, "reason_code": "provisioning_generation_mismatch"}
+    recorded_repository = str(record.get("repository_identity", "none"))
+    if recorded_repository not in {"none", repository_identity}:
+        return {"ready": False, "reason_code": "provisioning_repository_identity_mismatch"}
+    status = str(record.get("reclaim_status", "unreconciled"))
+    if status == "consumed_after_reclaim":
+        return {"ready": False, "reason_code": "orphaned_provisioning_reclaim_already_consumed"}
+    return {
+        "ready": True,
+        "record": record,
+        "authorization_id": authorization_id,
+        "authorization_raw": authorization_raw,
+        "task_id": task_id,
+        "scope": requested_scope,
+        "reviewer_generation": reviewer_chat["generation"],
+        "repository_identity": repository_identity,
+        "state_identity": expected_state_identity,
+        "already_reconciled": status == "available_once",
+    }
+
+
+def orphaned_provisioning_reconcile_plan(
+    state_path: Path, state: dict[str, Any], registry_path: Path,
+) -> dict[str, Any]:
+    try:
+        gate = load_account_browser_gate(registry_path)
+    except LCRLError:
+        return {"ready": False, "reason_code": "provisioning_registry_unavailable"}
+    return _orphaned_provisioning_plan_from_gate(state_path, state, gate)
+
+
+def reconcile_orphaned_provisioning_command(args: argparse.Namespace) -> dict[str, Any]:
+    state_path = Path(args.state).expanduser().resolve()
+    registry_path = Path(args.registry).expanduser().resolve()
+    expected_task = str(args.implementation_thread_id)
+    with acquire_state_lock(
+        registry_path, timeout=ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS,
+    ):
+        state = load_state(state_path)
+        state_revision = state["revision"]
+        if state["automation"].get("implementation_thread_id") != expected_task:
+            raise LCRLError("orphaned provisioning belongs to a different implementation task")
+        gate = load_account_browser_gate(registry_path)
+        gate_revision = gate["revision"]
+        plan = _orphaned_provisioning_plan_from_gate(state_path, state, gate)
+        if not plan.get("ready"):
+            return {
+                "ok": True, "action": "orphaned_provisioning_reconcile_blocked",
+                "reason_code": plan["reason_code"], "slot_acquired": False,
+                "browser_runtime_initialization_allowed": False,
+                "provisioning_home_navigation_allowed": False,
+                "user_choice_required": False,
+            }
+        if plan["already_reconciled"]:
+            return {
+                "ok": True, "action": "orphaned_provisioning_reclaimed",
+                "duplicate": True, "slot_acquired": False,
+                "browser_runtime_initialization_allowed": False,
+                "next_action": "acquire_same_generation_replacement_startup",
+                "user_choice_required": False,
+            }
+        current_state = load_state(state_path)
+        if current_state["revision"] != state_revision:
+            return {
+                "ok": True, "action": "orphaned_provisioning_reconcile_blocked",
+                "reason_code": "provisioning_state_revision_changed", "slot_acquired": False,
+                "browser_runtime_initialization_allowed": False,
+                "user_choice_required": False,
+            }
+        plan["record"].update({
+            "reclaim_status": "available_once",
+            "reclaim_count": 1,
+            "reviewer_generation": plan["reviewer_generation"],
+            "repository_identity": plan["repository_identity"],
+            "state_identity": plan["state_identity"],
+            "reconciled_at": getattr(args, "at", None) or utc_now(),
+        })
+        _save_account_browser_gate_locked(
+            registry_path, gate, expected_revision=gate_revision,
+        )
+        return {
+            "ok": True, "action": "orphaned_provisioning_reclaimed",
+            "duplicate": False, "slot_acquired": False,
+            "browser_runtime_initialization_allowed": False,
+            "provisioning_home_navigation_allowed": False,
+            "reviewer_generation": plan["reviewer_generation"],
+            "repository_identity": plan["repository_identity"],
+            "next_action": "acquire_same_generation_replacement_startup",
+            "continuation_required": True, "turn_completion_allowed": False,
+            "user_choice_required": False,
+        }
 
 
 def _save_account_browser_gate_locked(
@@ -1504,6 +1666,8 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
     # sidecar lock behind.
     requested_scope = account_browser_scope_from_args(args, task_id)
     state_path_arg = getattr(args, "state", None)
+    state: dict[str, Any] | None = None
+    state_path: Path | None = None
     if (
         state_path_arg not in (None, "", "none")
         and Path(state_path_arg).expanduser().is_file()
@@ -1871,19 +2035,44 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             ),
             None,
         ) if new_chat_authorization_id != "none" else None
+        orphaned_provisioning_reclaimed = False
         if prior_provisioning:
-            return {
-                "ok": True,
-                "action": "account_browser_provisioning_already_used",
-                "slot_acquired": False,
-                "browser_skill_read_allowed": False,
-                "browser_runtime_initialization_allowed": False,
-                "provisioning_home_navigation_allowed": False,
-                "new_automation_allowed": False,
-                "authorized_task_id": prior_provisioning["implementation_thread_id"],
-                "authorized_at": prior_provisioning["authorized_at"],
-                "registry": str(gate_path),
-            }
+            if (
+                prior_provisioning.get("reclaim_status") == "available_once"
+                and state is not None
+                and state_path is not None
+            ):
+                reclaim_plan = _orphaned_provisioning_plan_from_gate(
+                    state_path, state, gate,
+                )
+                if reclaim_plan.get("ready") and reclaim_plan.get("already_reconciled"):
+                    prior_provisioning["reclaim_status"] = "consumed_after_reclaim"
+                    orphaned_provisioning_reclaimed = True
+                else:
+                    return {
+                        "ok": True,
+                        "action": "account_browser_orphaned_provisioning_reclaim_blocked",
+                        "reason_code": reclaim_plan.get("reason_code", "orphaned_provisioning_uncertain"),
+                        "slot_acquired": False,
+                        "browser_skill_read_allowed": False,
+                        "browser_runtime_initialization_allowed": False,
+                        "provisioning_home_navigation_allowed": False,
+                        "new_automation_allowed": False,
+                        "registry": str(gate_path),
+                    }
+            else:
+                return {
+                    "ok": True,
+                    "action": "account_browser_provisioning_already_used",
+                    "slot_acquired": False,
+                    "browser_skill_read_allowed": False,
+                    "browser_runtime_initialization_allowed": False,
+                    "provisioning_home_navigation_allowed": False,
+                    "new_automation_allowed": False,
+                    "authorized_task_id": prior_provisioning["implementation_thread_id"],
+                    "authorized_at": prior_provisioning["authorized_at"],
+                    "registry": str(gate_path),
+                }
         handoff_not_before = parse_time(gate.get("handoff_not_before"))
         last_released_task_id = str(gate.get("last_released_task_id", "none"))
         handoff_bypass_allowed = (
@@ -1965,13 +2154,28 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             slot["rate_limit_recovery_rollover"] = True
         if new_chat_authorization_id != "none":
             slot["new_chat_authorization_id"] = new_chat_authorization_id
-            gate["provisioning_authorizations"].append({
-                "authorization_id": new_chat_authorization_id,
-                "implementation_thread_id": task_id,
-                "authorized_at": acquired_at,
-                "scope": deepcopy(requested_scope),
-            })
-            gate["provisioning_authorizations"] = gate["provisioning_authorizations"][-64:]
+            if not orphaned_provisioning_reclaimed:
+                gate["provisioning_authorizations"].append({
+                    "authorization_id": new_chat_authorization_id,
+                    "implementation_thread_id": task_id,
+                    "authorized_at": acquired_at,
+                    "scope": deepcopy(requested_scope),
+                    "reclaim_status": "unreconciled",
+                    "reclaim_count": 0,
+                    "reviewer_generation": (
+                        state["reviewer_chat"]["generation"] if state is not None else "none"
+                    ),
+                    "repository_identity": (
+                        state["automation"].get("reviewer_repository_identity", "none")
+                        if state is not None else "none"
+                    ),
+                    "state_identity": (
+                        _provisioning_state_identity(state_path)
+                        if state_path is not None else "none"
+                    ),
+                    "reconciled_at": "none",
+                })
+                gate["provisioning_authorizations"] = gate["provisioning_authorizations"][-64:]
         gate["slots"].append(slot)
         _save_account_browser_gate_locked(gate_path, gate, expected_revision=revision)
         return {
@@ -1999,6 +2203,7 @@ def acquire_account_browser_slot_command(args: argparse.Namespace) -> dict[str, 
             "active_count": len(gate["slots"]),
             "scope": deepcopy(requested_scope),
             "registry": str(gate_path),
+            "orphaned_provisioning_reclaimed": orphaned_provisioning_reclaimed,
             **visible_browser_surface_contract(),
         }
 
@@ -10319,6 +10524,57 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             "system_next_action": plan["system_next_action"],
             "revision": state["revision"],
         }
+    if state.get("reviewer_chat", {}).get("status") in {"rollover_pending", "rollover_blocked"}:
+        registry_value = str(
+            state.get("automation", {}).get("waiting_check_account_registry", "none")
+        )
+        registry_path = (
+            Path(registry_value).expanduser().resolve()
+            if registry_value not in {"", "none"}
+            else default_account_browser_gate_path()
+        )
+        provisioning_plan = orphaned_provisioning_reconcile_plan(
+            path, state, registry_path,
+        )
+        if provisioning_plan.get("ready"):
+            if implementation_thread_id == "none":
+                raise LCRLError("guard requires the exact implementation task identity")
+            if implementation_thread_id != expected_implementation_thread_id:
+                raise LCRLError("orphaned provisioning belongs to a different implementation task")
+            already_reconciled = provisioning_plan["already_reconciled"]
+            return {
+                "ok": True,
+                "action": (
+                    "orphaned_provisioning_startup_required" if already_reconciled
+                    else "orphaned_provisioning_reconcile_required"
+                ),
+                "status": state["reviewer_chat"]["status"],
+                "reason_code": (
+                    "orphaned_provisioning_reclaimed" if already_reconciled
+                    else "orphaned_provisioning_zero_side_effects"
+                ),
+                "execution_allowed": False,
+                "project_read_allowed": False,
+                "project_write_allowed": False,
+                "browser_access_allowed": False,
+                "chat_read_allowed": False,
+                "old_chat_access_allowed": False,
+                "mandatory_next_controller_command": (
+                    "acquire-account-browser-slot" if already_reconciled
+                    else "reconcile-orphaned-provisioning"
+                ),
+                "registry": str(registry_path),
+                "reviewer_generation": provisioning_plan["reviewer_generation"],
+                "repository_identity": provisioning_plan["repository_identity"],
+                "continuation_required": True,
+                "turn_completion_allowed": False,
+                "user_choice_required": False,
+                "system_next_action": (
+                    "acquire_same_generation_replacement_startup" if already_reconciled
+                    else "reconcile_orphaned_provisioning_once"
+                ),
+                "revision": state["revision"],
+            }
     if legacy_missing_wait_poisoned:
         if implementation_thread_id == "none":
             raise LCRLError("guard requires the exact implementation task identity")
@@ -12987,6 +13243,15 @@ def build_parser() -> argparse.ArgumentParser:
     acquire_account_browser_slot.add_argument("--profile")
     acquire_account_browser_slot.add_argument("--at")
 
+    reconcile_orphaned_provisioning = sub.add_parser(
+        "reconcile-orphaned-provisioning",
+        help="原子回收已证明零副作用的同代 replacement startup provisioning",
+    )
+    reconcile_orphaned_provisioning.add_argument("--state", required=True)
+    reconcile_orphaned_provisioning.add_argument("--registry", required=True)
+    reconcile_orphaned_provisioning.add_argument("--implementation-thread-id", required=True)
+    reconcile_orphaned_provisioning.add_argument("--at")
+
     release_account_browser_slot = sub.add_parser(
         "release-account-browser-slot",
         help="释放网页 Chat 名额；真实限流会打开账户级熔断",
@@ -13487,6 +13752,8 @@ def main(argv: list[str] | None = None) -> int:
             result = browser_startup_plan_command(args)
         elif args.command == "acquire-account-browser-slot":
             result = acquire_account_browser_slot_command(args)
+        elif args.command == "reconcile-orphaned-provisioning":
+            result = reconcile_orphaned_provisioning_command(args)
         elif args.command == "release-account-browser-slot":
             result = release_account_browser_slot_command(args)
         elif args.command == "show-account-browser-gate":
