@@ -708,3 +708,15 @@ identity, reviewer generation, unique startup authorization, recorded rate
 limit, and zero active slots. The controller creates no evidence during
 selection. Generic profiles, missing gates, parse failures, or any mismatched
 identity remain blocked before project, browser, or Chat access.
+
+### Administrative generation seal
+
+A repo-retest generation whose legacy temporary gate was destroyed may be
+sealed without being described as rate-limited or retired. This requires an
+exact missing set of rollover, rate-limit, and startup-authorization evidence;
+trusted task/run binding; matching repository identity and generation; prior
+legacy rate-limit lineage; a matching replacement-binding timestamp chain; no
+current request/response receipt; no wait; and no active account slot. The seal
+records diagnostic hashes, permanently denies old-Chat access, and produces one
+normal replacement-startup authorization. Generation increments only after the
+new Chat is bound, and repository access must be verified again.

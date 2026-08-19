@@ -3,15 +3,22 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.100`（Python 元数据：`0.2.0a100`）
-- 当前源码控制器：156
+- 版本：`0.2.0-alpha.101`（Python 元数据：`0.2.0a101`）
+- 当前源码控制器：157
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.113`
+- 当前源码 Skill 修订：`2026-08-19.114`
 - 候选日期：2026-08-19
-- Alpha 100 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
+- Alpha 101 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
+
+Alpha 101 为 Alpha 100 已确认“历史安全证据永久无法重建”的 repo-retest generation 增加行政封存。
+它不补写 rate-limit、authorization 或 retirement：只有 task/run binding、repository identity、generation、
+旧限流 lineage、replacement binding 时间链、当前零消息回执、零 wait、零 active slot 与精确三项缺失
+诊断全部一致时，guard 才记录不可恢复证据并生成唯一 clean replacement startup authorization。旧 Chat
+保持禁止访问；新 Chat 绑定后 generation 才递增，并重新要求 repository access receipt。generic 项目、
+已有消息、活动 slot 或任一身份漂移均失败关闭。
 
 Alpha 100 的实机只读诊断确认：原 NPC state 的 registry 字段为 `none`，旧默认临时 gate 已被宿主
 清理，而真实持久 gate 位于 `$CODEX_HOME/superluna/account-browser-gate.json`。Controller 156

@@ -40,7 +40,13 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.100`, Controller 156, Skill `2026-08-19.113`.
+- Source candidate: `0.2.0-alpha.101`, Controller 157, Skill `2026-08-19.114`.
+- One repo-retest generation with permanently lost legacy account-gate evidence
+  may now be administratively sealed without creating rate-limit or retirement
+  facts. The state records the missing-evidence matrix and source hashes, keeps
+  the old Chat unreadable, and exposes one normal replacement-startup
+  authorization. Message receipts, active waits/slots, task/repository/
+  generation drift, or generic profiles block the seal.
 - The account-browser gate now defaults to the host-owned persistent
   `$CODEX_HOME/superluna/account-browser-gate.json`, rather than OS temporary
   storage. Repo-retest restart recovery discovers that gate after a missing
@@ -206,6 +212,11 @@ intervention.
   and Beta evidence validators passed. Persistent-gate discovery is locally
   verified; real App evidence remains blocked on the missing same-task
   rate-limit record and startup authorization.
+- Alpha 101 repository regression passed 444/444 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Administrative generation sealing and a
+  clean generation-6 startup/binding are locally verified; the original NPC
+  ordinary continuation remains a real-App gate.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

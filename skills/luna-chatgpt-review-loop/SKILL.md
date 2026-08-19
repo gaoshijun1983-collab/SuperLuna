@@ -272,6 +272,11 @@ Chat 已达到安全轮数上限，控制器必须在同一次 `begin-new-goal` 
    新账户门必须默认写入宿主持久 `$CODEX_HOME/superluna/account-browser-gate.json`，不得再把 OS
    临时目录作为 authoritative storage。旧临时 gate 只作兼容读取；发现持久 gate 后仍须逐项返回
    evidence matrix，不能把“文件存在”升级为退休、限流或授权已证明。
+   若旧版临时 gate 已永久遗失，且 repo-retest 旧 generation 只缺固定的 rollover/rate-limit/
+   authorization 三项、同时具备可信 task/run binding、repository/generation、旧限流 lineage、
+   replacement binding 时间链、当前零消息回执、零 wait 与零 slot，guard 可行政封存该 generation，
+   记录缺失证据并生成唯一 clean replacement startup。封存不得写 rate-limit 或 retirement fact；
+   新 Chat 绑定后才递增 generation 并重新核验 repository access receipt。generic 项目不得使用。
    无项目任务也必须使用自己已经分配的可写输出目录，不得硬编码 `/var/tmp`、桌面或另一个
    未授权路径，也不得为了通过预检自行创建替代目录：
 

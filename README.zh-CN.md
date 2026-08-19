@@ -20,8 +20,13 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.100`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 156 / Skill revision `2026-08-19.113` 把共享 account-browser gate
+当前源码候选版本是 `0.2.0-alpha.101`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 157 / Skill revision `2026-08-19.114` 可对旧临时 account gate 证据永久
+遗失的单个 repo-retest reviewer generation 做行政封存。封存不是 rate-limit retirement：它记录精确
+缺失证据、永久禁止旧 Chat 访问、不创建退休事实，并只为同一实施任务授权一个干净 replacement startup。
+必须同时核对 task/run binding、repository identity、generation、旧限流 lineage、replacement binding
+时间链、当前零消息回执、零 wait 与账户门零 slot；generic 项目或任何不确定证据继续失败关闭。
+Controller 156 / Skill revision `2026-08-19.113` 把共享 account-browser gate
 从系统临时目录迁到宿主持久 `$CODEX_HOME/superluna/account-browser-gate.json`，使后续 authorization、
 slot、cooldown 与 retirement evidence 能跨宿主重启保留。旧 repo-retest diagnostic 会发现该持久 gate，
 并输出真实缺项而不是继续笼统报告 registry unavailable；现有 gate 若证据不完整或属于不同任务，仍

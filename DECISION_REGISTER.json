@@ -174,13 +174,13 @@
       "id": "repo-retest-retirement-registry-recovery",
       "scope_key": "workflow.rate_limit_retirement_registry",
       "status": "user_approved",
-      "decision": "共享 account-browser gate 的 authoritative storage 必须是宿主持久 `$CODEX_HOME/superluna/account-browser-gate.json`，不得再以 OS 临时目录承担跨重启证据。repo_retest state 持久化的旧临时路径遗失时，只能发现并读取该持久 gate，并要求其同时证明同一 implementation task、state scope、repository identity、reviewer generation、唯一 startup authorization、真实 rate-limit history 与全局零 active slot。不得从文件存在或 rollover_blocked 单项创建退休事实；gate 缺失或任一身份/证据漂移必须失败关闭。",
+      "decision": "共享 account-browser gate 的 authoritative storage 必须是宿主持久 `$CODEX_HOME/superluna/account-browser-gate.json`，不得再以 OS 临时目录承担跨重启证据。repo_retest state 持久化的旧临时路径遗失时，只能发现并读取该持久 gate，不得从文件存在或 rollover_blocked 单项创建退休事实。若旧 generation 的 rollover/rate-limit/startup authorization 三项历史证据已永久遗失，只有同一 task/run binding、repository identity/generation、旧限流 lineage、replacement binding 时间链、当前零消息回执、零 wait 与全局零 active slot 全部一致时，才可行政封存该 generation 并授权唯一 clean replacement startup；封存不是 rate-limit retirement，不得写入伪造退休事实。gate 缺失或任一身份/证据漂移必须失败关闭。",
       "scope": "适用于 turn-entry guard、只读 retirement diagnostic、旧限流 Chat 正式退休与 orphan provisioning continuation。",
       "recorded_on": "2026-08-19",
       "authority_sources": [
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/binding_registry.md"},
-        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.100.md"}
+        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.101.md"}
       ],
       "change_rule": "不得以恢复 registry 为由绕过退休证据、访问旧 Chat、创建第二个 replacement Chat 或把技术故障转成用户选择。"
     }

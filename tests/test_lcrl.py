@@ -2832,6 +2832,23 @@ class ControllerTests(unittest.TestCase):
                 )
                 repository_identity = "c" * 64
                 state["reviewer_chat"]["generation"] = 5
+                state["reviewer_chat"]["retired"] = [
+                    {
+                        "reviewer_thread_id": "11111111-1111-4111-8111-111111111111",
+                        "reason": "rate_limited", "formal_rounds": 0,
+                        "retired_at": "2026-08-17T10:33:54Z",
+                    },
+                    {
+                        "reviewer_thread_id": "22222222-2222-4222-8222-222222222222",
+                        "reason": "round_budget", "formal_rounds": 2,
+                        "retired_at": "2026-08-19T08:22:20Z",
+                    },
+                ]
+                state["review"].update({
+                    "status": "external_blocked",
+                    "recovery_action": "rate_limited",
+                    "run_binding": lcrl.new_review_run_binding(task_id, reviewer_id),
+                })
                 state["automation"].update({
                     "reviewer_repository_root": str(checkout.resolve()),
                     "reviewer_repository_remote_url": "https://github.com/example/project",
@@ -2888,6 +2905,142 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(result["user_choice_required"])
             self.assertEqual(state_path.read_bytes(), state_before)
             self.assertEqual(persistent_gate.read_bytes(), gate_before)
+
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                negative_state = lcrl.load_state(state_path)
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": task_id,
+                    "CODEX_SESSION_ID": task_id,
+                    "CODEX_HOME": str(codex_root),
+                }),
+            ):
+                negative_state["review"]["request_message_id"] = "existing-request"
+                negative_state["review"]["request_turn_id"] = "existing-turn"
+                negative_state["review"]["request_persisted_at"] = "2026-08-19T08:23:00Z"
+                negative_plan = lcrl.legacy_lost_account_gate_generation_plan(
+                    state_path, negative_state, gate, persistent_gate.resolve(),
+                )
+                occupied_gate = json.loads(json.dumps(gate))
+                occupied_gate["slots"] = [{"lease_id": "uncertain-active-slot"}]
+                occupied_plan = lcrl.legacy_lost_account_gate_generation_plan(
+                    state_path, state, occupied_gate, persistent_gate.resolve(),
+                )
+            self.assertFalse(negative_plan["ready"])
+            self.assertFalse(negative_plan["checks"]["no_message_receipts"])
+            self.assertFalse(occupied_plan["ready"])
+            self.assertFalse(occupied_plan["checks"]["slots_clear"])
+            self.assertEqual(state_path.read_bytes(), state_before)
+            self.assertEqual(persistent_gate.read_bytes(), gate_before)
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": task_id,
+                    "CODEX_SESSION_ID": task_id,
+                    "CODEX_HOME": str(codex_root),
+                }),
+            ):
+                guard = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry", minutes=10,
+                    implementation_thread_id=task_id, replace=False,
+                ))
+
+            self.assertEqual(
+                guard["action"], "legacy_generation_replacement_startup_required",
+                guard,
+            )
+            self.assertEqual(
+                guard["reason_code"], "legacy_account_gate_evidence_lost",
+            )
+            self.assertFalse(guard["browser_access_allowed"])
+            self.assertFalse(guard["old_chat_access_allowed"])
+            self.assertFalse(guard["user_choice_required"])
+            self.assertEqual(
+                guard["mandatory_next_controller_command"],
+                "acquire-account-browser-slot",
+            )
+            with mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            ):
+                sealed = lcrl.load_state(state_path)
+            self.assertEqual(sealed["reviewer_chat"]["generation"], 5)
+            self.assertEqual(sealed["reviewer_chat"]["status"], "rollover_pending")
+            self.assertEqual(
+                sealed["reviewer_chat"]["rollover_reason"],
+                "legacy_account_gate_evidence_lost",
+            )
+            evidence = [
+                item for item in sealed["review_history"]
+                if item.get("event") == "legacy_generation_sealed_for_account_gate_loss"
+            ]
+            self.assertEqual(len(evidence), 1)
+            self.assertEqual(
+                evidence[0]["missing_reason_codes"],
+                [
+                    "retirement_evidence_rollover_unconfirmed",
+                    "retirement_evidence_rate_limit_unconfirmed",
+                    "retirement_evidence_authorization_unconfirmed",
+                ],
+            )
+            self.assertEqual(persistent_gate.read_bytes(), gate_before)
+
+            with (
+                mock.patch.object(lcrl, "source_checkout_root", return_value=checkout.resolve()),
+                mock.patch.dict(os.environ, {
+                    "CODEX_THREAD_ID": task_id,
+                    "CODEX_SESSION_ID": task_id,
+                    "CODEX_HOME": str(codex_root),
+                }),
+            ):
+                startup = lcrl.acquire_account_browser_slot_command(Namespace(
+                    implementation_thread_id=task_id,
+                    reviewer_thread_id="none",
+                    new_chat_authorization_id=guard["new_chat_authorization_id"],
+                    new_chat_local_work_status="completed_and_verified",
+                    operation="startup", state=str(state_path),
+                    registry=str(persistent_gate), at="2026-08-19T08:24:00Z",
+                ))
+                self.assertTrue(startup["slot_acquired"])
+                replacement_id = "33333333-3333-4333-8333-333333333333"
+                completed = lcrl.complete_reviewer_chat_rollover_command(Namespace(
+                    state=str(state_path),
+                    authorization_id=guard["new_chat_authorization_id"],
+                    new_reviewer_thread_id=replacement_id,
+                    browser_id="browser-clean-generation",
+                    provider_tab_id="tab-clean-generation",
+                    url=f"https://chatgpt.com/c/{replacement_id}",
+                    observed_title="Clean replacement",
+                    account_slot_lease_id=startup["lease_id"],
+                    registry=str(persistent_gate), at="2026-08-19T08:24:01Z",
+                ))
+                lcrl.release_account_browser_slot_command(Namespace(
+                    implementation_thread_id=task_id,
+                    lease_id=startup["lease_id"], outcome="completed",
+                    registry=str(persistent_gate), at="2026-08-19T08:24:02Z",
+                    health_proof=None,
+                ))
+                replaced = lcrl.load_state(state_path)
+            self.assertEqual(completed["reviewer_chat_generation"], 6)
+            self.assertEqual(replaced["reviewer_chat"]["generation"], 6)
+            self.assertEqual(
+                replaced["reviewer_chat"]["retired"][-1]["reason"],
+                "legacy_account_gate_evidence_lost",
+            )
+            self.assertEqual(
+                replaced["confirmation"]["reviewer_thread_id"], replacement_id,
+            )
+            self.assertEqual(
+                replaced["project_context"]["status"],
+                "repository_access_receipt_required",
+            )
+            self.assertEqual(replaced["project_context"]["generation"], 6)
+            self.assertEqual(
+                replaced["project_context"]["repository_access_receipt"], "none",
+            )
 
     def test_round_budget_requires_rollover_before_third_submission(self):
         with tempfile.TemporaryDirectory() as directory:

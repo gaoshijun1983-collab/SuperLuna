@@ -81,6 +81,15 @@ but persistent-gate discovery only changes the diagnostic source. Every normal
 identity, scope, generation, authorization, rate-limit, and zero-slot check still
 applies before any retirement or continuation write.
 
+When those three historical facts are permanently unrecoverable for one legacy
+repo-retest generation, the controller may seal the generation instead of
+claiming retirement. The seal requires the exact task/run binding, repository
+identity and generation, prior rate-limit lineage, replacement binding timestamp
+chain, zero current message receipts, zero waits, and zero active slots. It
+records hashes and the missing-evidence matrix, authorizes one clean replacement
+startup, and never adds a rate-limit retirement record. Generic projects cannot
+use this recovery.
+
 If a user manually renames a surface, keep the binding because its stable ID is unchanged. Regenerate and apply the expected title at the next explicit naming event. If an ID changes, invalidate the confirmation lease and require the user to select the replacement Chat.
 
 If registry and state diverge, stop formal submission, run `doctor-registry` and `doctor`, then re-register the existing stable IDs. Never infer identity from a similar title.

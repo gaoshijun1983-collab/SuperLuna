@@ -24,8 +24,17 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.100`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 156 / Skill revision
+The current source candidate is `0.2.0-alpha.101`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 157 / Skill revision
+`2026-08-19.114` can administratively seal one repo-retest reviewer generation
+whose legacy temporary account-gate evidence is permanently lost. The seal is
+not a rate-limit retirement: it records the exact missing-evidence diagnostic,
+keeps the old Chat unreadable, creates no retirement fact, and authorizes one
+clean replacement startup for the same implementation task. It requires the
+exact task/run binding, repository identity and generation, a prior legacy
+rate-limit lineage, the replacement binding timestamp chain, zero current
+message receipts, zero waits, and zero account slots. Generic projects and any
+uncertain evidence remain fail-closed. Controller 156 / Skill revision
 `2026-08-19.113` moves the shared account-browser gate from OS temporary storage
 to the host-owned `$CODEX_HOME/superluna/account-browser-gate.json`, so future
 authorization, slot, cooldown, and retirement evidence survives a host restart.

@@ -35,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 156
-SKILL_REVISION = "2026-08-19.113"
+CONTROLLER_VERSION = 157
+SKILL_REVISION = "2026-08-19.114"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -131,7 +131,9 @@ VALID_ACCOUNT_BROWSER_HEALTH_PROOFS = {
 VALID_ACCOUNT_BROWSER_HEALTH_CONTINUATIONS = {
     "startup", "submission", "waiting_read",
 }
-VALID_REVIEWER_CHAT_ROLLOVER_REASONS = {"round_budget", "rate_limited"}
+VALID_REVIEWER_CHAT_ROLLOVER_REASONS = {
+    "round_budget", "rate_limited", "legacy_account_gate_evidence_lost",
+}
 VALID_ATTACHMENT_VERIFICATION = {"not_required", "unverified", "verified", "manual_confirmed", "unavailable"}
 VALID_PRO_STATUSES = {"tracking", "eligible", "confirmation_required", "in_review"}
 VALID_TERRA_STATUSES = {"idle", "requested", "approved"}
@@ -7503,6 +7505,152 @@ def diagnose_rate_limit_retirement_command(args: argparse.Namespace) -> dict[str
     }
 
 
+def legacy_lost_account_gate_generation_plan(
+    state_path: Path, state: dict[str, Any], gate: dict[str, Any], gate_path: Path,
+) -> dict[str, Any]:
+    """Prove one old repo-retest generation can be sealed without retirement."""
+    automation = state.get("automation", {})
+    reviewer_chat = state.get("reviewer_chat", {})
+    review = state.get("review", {})
+    binding = state.get("browser_binding", {})
+    confirmation = state.get("confirmation", {})
+    current_reviewer = str(confirmation.get("reviewer_thread_id", "none"))
+    diagnostic = _legacy_rate_limit_retirement_evidence_plan_from_gate(
+        state_path, state, gate,
+    )
+    expected_missing = [
+        "retirement_evidence_rollover_unconfirmed",
+        "retirement_evidence_rate_limit_unconfirmed",
+        "retirement_evidence_authorization_unconfirmed",
+    ]
+    no_message_receipts = all(
+        review.get(key) in {None, "", "none"}
+        for key in (
+            "request_turn_id", "request_message_id", "request_persisted_at",
+            "response_turn_id", "response_message_id", "response_completed_at",
+        )
+    )
+    retired = reviewer_chat.get("retired", [])
+    has_legacy_rate_limit_lineage = any(
+        item.get("reason") == "rate_limited" for item in retired
+    )
+    last_retired = retired[-1] if retired else {}
+    replacement_binding_chain = bool(
+        last_retired.get("reviewer_thread_id") not in {None, "", "none", current_reviewer}
+        and last_retired.get("retired_at") == binding.get("bound_at")
+        and confirmation.get("confirmed_at") == binding.get("bound_at")
+    )
+    task_binding = state.get("binding", {})
+    run_binding = review.get("run_binding", {})
+    task_recovery_plan = legacy_task_binding_recovery_plan(
+        state_path, state, automation.get("implementation_thread_id"),
+    )
+    task_binding_confirmed = bool(
+        (
+            task_binding.get("status") == "bound"
+            or task_recovery_plan.get("ready") is True
+        )
+        and run_binding.get("implementation_thread_id")
+        == automation.get("implementation_thread_id")
+        and run_binding.get("reviewer_thread_id") == current_reviewer
+    )
+    checks = {
+        "repo_retest_profile": automation.get("profile") == SUPERLUNA_REPO_RETEST_PROFILE,
+        "persistent_gate": gate_path == persistent_account_browser_gate_path(state),
+        "task_binding_confirmed": task_binding_confirmed,
+        "active_old_generation": bool(
+            reviewer_chat.get("status") == "active"
+            and int(reviewer_chat.get("generation", 0)) >= 2
+            and reviewer_chat.get("pending_replacement", "none") == "none"
+        ),
+        "technical_rate_limit_block": bool(
+            review.get("status") == "external_blocked"
+            and review.get("recovery_action") == "rate_limited"
+        ),
+        "diagnostic_shape_exact": diagnostic["missing_reason_codes"] == expected_missing,
+        "identity_confirmed": diagnostic["checks"].get("identity_confirmed") is True,
+        "repository_confirmed": diagnostic["checks"].get("repository_confirmed") is True,
+        "binding_receipt_confirmed": diagnostic["checks"].get("binding_receipt_confirmed") is True,
+        "slots_clear": diagnostic["checks"].get("slots_clear") is True,
+        "legacy_rate_limit_lineage": has_legacy_rate_limit_lineage,
+        "replacement_binding_chain": replacement_binding_chain,
+        "no_message_receipts": no_message_receipts,
+        "no_waiting_task": automation.get("waiting_check_active") is not True,
+        "current_chat_not_retired_in_gate": not any(
+            item.get("reviewer_thread_id") == current_reviewer
+            for item in gate.get("retired_reviewer_chats", [])
+        ),
+    }
+    ready = all(checks.values())
+    return {
+        "applicable": checks["repo_retest_profile"] and checks["technical_rate_limit_block"],
+        "ready": ready,
+        "reason_code": (
+            "legacy_account_gate_evidence_lost" if ready
+            else "legacy_generation_seal_evidence_incomplete"
+        ),
+        "checks": checks,
+        "missing_reason_codes": expected_missing,
+        "retirement_recovery_diagnostic": diagnostic,
+    }
+
+
+def seal_legacy_lost_account_gate_generation(
+    state_path: Path, state: dict[str, Any], gate: dict[str, Any], gate_path: Path,
+) -> dict[str, Any]:
+    """Archive one unreadable old generation and authorize one clean replacement."""
+    plan = legacy_lost_account_gate_generation_plan(
+        state_path, state, gate, gate_path,
+    )
+    if not plan["ready"]:
+        return {"sealed": False, "plan": plan}
+    revision = state["revision"]
+    old_generation = int(state["reviewer_chat"]["generation"])
+    reviewer_id = str(state["confirmation"]["reviewer_thread_id"])
+    repository_identity = str(
+        state["automation"].get("reviewer_repository_identity", "none")
+    )
+    archive_review_cycle(state, "legacy_account_gate_evidence_lost")
+    authorization_id = mark_reviewer_chat_rollover_required(
+        state, "legacy_account_gate_evidence_lost",
+    )
+    state["review"].update({
+        "status": "local_work",
+        "recovery_action": "legacy_generation_sealed_for_account_gate_loss",
+        "last_progress_at": utc_now(),
+    })
+    state["recovery"].update({
+        "network_state": "healthy",
+        "next_retry_not_before": "none",
+    })
+    state.setdefault("review_history", []).append({
+        "event": "legacy_generation_sealed_for_account_gate_loss",
+        "old_generation": old_generation,
+        "old_reviewer_thread_id_sha256": hashlib.sha256(
+            reviewer_id.encode("utf-8")
+        ).hexdigest(),
+        "repository_identity_sha256": hashlib.sha256(
+            repository_identity.encode("utf-8")
+        ).hexdigest(),
+        "account_gate_revision": gate.get("revision"),
+        "account_gate_sha256": hashlib.sha256(
+            read_shared_registry_text(gate_path).encode("utf-8")
+        ).hexdigest(),
+        "missing_reason_codes": plan["missing_reason_codes"],
+        "retirement_facts_created": False,
+        "old_chat_access_allowed": False,
+        "recorded_at": utc_now(),
+    })
+    state["review_history"] = state["review_history"][-20:]
+    save_state(state_path, state, expected_revision=revision)
+    return {
+        "sealed": True,
+        "authorization_id": authorization_id,
+        "old_generation": old_generation,
+        "plan": plan,
+    }
+
+
 def _reconcile_legacy_none_startup_rate_limit_retirement(
     state_path: Path, state: dict[str, Any], gate_path: Path,
 ) -> bool:
@@ -11716,6 +11864,117 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         # the remainder of this guard without rewriting the historical scope.
         implementation_thread_id = str(expected_implementation_thread_id)
     status = state["review"]["status"]
+    legacy_gate_rollover = bool(
+        state.get("reviewer_chat", {}).get("status") in {
+            "rollover_pending", "rollover_blocked",
+        }
+        and state.get("reviewer_chat", {}).get("rollover_reason")
+        == "legacy_account_gate_evidence_lost"
+    )
+    if legacy_gate_rollover:
+        return {
+            "ok": True,
+            "action": "legacy_generation_replacement_startup_required",
+            "status": state["reviewer_chat"]["status"],
+            "reason_code": "legacy_account_gate_evidence_lost",
+            "rollover_authorization_id": state["reviewer_chat"][
+                "rollover_authorization_id"
+            ],
+            "new_chat_authorization_id": state["reviewer_chat"][
+                "rollover_authorization_id"
+            ],
+            "reviewer_generation": state["reviewer_chat"]["generation"],
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "browser_runtime_initialization_allowed": False,
+            "chat_read_allowed": False,
+            "old_chat_access_allowed": False,
+            "retirement_facts_created": False,
+            "mandatory_next_controller_command": "acquire-account-browser-slot",
+            "system_next_action": "acquire_clean_replacement_startup_once",
+            "continuation_required": True,
+            "turn_completion_allowed": False,
+            "user_choice_required": False,
+            "revision": state["revision"],
+            "legacy_task_binding_rebuilt": binding_rebuilt,
+        }
+    legacy_gate_candidate = bool(
+        state.get("automation", {}).get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
+        and state.get("reviewer_chat", {}).get("status") == "active"
+        and state.get("review", {}).get("status") == "external_blocked"
+        and state.get("review", {}).get("recovery_action") == "rate_limited"
+    )
+    if legacy_gate_candidate:
+        gate_path = persistent_account_browser_gate_path(state)
+        try:
+            gate = load_account_browser_gate(gate_path)
+            generation_plan = legacy_lost_account_gate_generation_plan(
+                path, state, gate, gate_path,
+            )
+        except LCRLError:
+            generation_plan = {
+                "applicable": True,
+                "ready": False,
+                "reason_code": "legacy_generation_seal_registry_unavailable",
+                "checks": {},
+                "missing_reason_codes": [],
+            }
+        if generation_plan["ready"]:
+            sealed = seal_legacy_lost_account_gate_generation(
+                path, state, gate, gate_path,
+            )
+            if not sealed["sealed"]:
+                generation_plan = sealed["plan"]
+            else:
+                state = load_state(path)
+                return {
+                    "ok": True,
+                    "action": "legacy_generation_replacement_startup_required",
+                    "status": state["reviewer_chat"]["status"],
+                    "reason_code": "legacy_account_gate_evidence_lost",
+                    "rollover_authorization_id": sealed["authorization_id"],
+                    "new_chat_authorization_id": sealed["authorization_id"],
+                    "reviewer_generation": sealed["old_generation"],
+                    "legacy_generation_sealed": True,
+                    "generation_seal_diagnostic": sealed["plan"],
+                    "execution_allowed": False,
+                    "project_read_allowed": False,
+                    "project_write_allowed": False,
+                    "browser_access_allowed": False,
+                    "browser_runtime_initialization_allowed": False,
+                    "chat_read_allowed": False,
+                    "old_chat_access_allowed": False,
+                    "retirement_facts_created": False,
+                    "mandatory_next_controller_command": "acquire-account-browser-slot",
+                    "system_next_action": "acquire_clean_replacement_startup_once",
+                    "continuation_required": True,
+                    "turn_completion_allowed": False,
+                    "user_choice_required": False,
+                    "revision": state["revision"],
+                    "legacy_task_binding_rebuilt": binding_rebuilt,
+                }
+        return {
+            "ok": True,
+            "action": "legacy_generation_seal_blocked",
+            "status": state["reviewer_chat"]["status"],
+            "reason_code": generation_plan["reason_code"],
+            "generation_seal_diagnostic": generation_plan,
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "browser_runtime_initialization_allowed": False,
+            "chat_read_allowed": False,
+            "old_chat_access_allowed": False,
+            "retirement_facts_created": False,
+            "system_next_action": "verify_legacy_generation_seal_evidence",
+            "continuation_required": False,
+            "turn_completion_allowed": True,
+            "user_choice_required": False,
+            "revision": state["revision"],
+        }
     legacy_missing_wait_proof = next(
         (
             event for event in reversed(state.get("review_history", []))
