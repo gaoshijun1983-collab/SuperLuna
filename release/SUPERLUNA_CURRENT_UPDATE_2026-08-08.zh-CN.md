@@ -8,6 +8,7 @@
 - 状态 schema：7
 - 当前源码 Skill 修订：`2026-08-19.96`
 - 候选日期：2026-08-19
+- Alpha 83 implementation candidate：`9729d92f48bfd89f778808a41d0478621fdffe61`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证

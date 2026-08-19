@@ -63,11 +63,13 @@ intervention.
   browser permission. Exhaustion atomically enters `rollover_pending`; one
   provisioning failure becomes `rollover_blocked` with one recovery identity
   and never masquerades as `review_waiting`.
-- Frozen candidate commit: `dc0ed1c6f3ee94e64ce51bdb4c4eaac0ace14082`.
+- Frozen Alpha 83 implementation candidate commit: `9729d92f48bfd89f778808a41d0478621fdffe61`.
+  The following documentation-only binding commit does not add product code or
+  real-device evidence.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the
-  same verified 98-file source archive. This is local Alpha evidence only.
+  same verified 105-file source archive. This is local Alpha evidence only.
 - Alpha 76 makes the legacy missing-wait compatibility command converge on the
   automatic one-replacement binding barrier. It no longer changes a recoverable
   waiting review to `external_blocked` when an older running task calls it.

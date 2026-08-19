@@ -2,6 +2,8 @@
 
 Controller 139 / Skill `2026-08-19.96` fails closed when the current Codex host cannot provide a supported direct attachment upload.
 
+Frozen implementation candidate: `9729d92f48bfd89f778808a41d0478621fdffe61`. The later evidence-binding commit changes documentation only and does not count as real-device evidence.
+
 - Complete-source runs check an explicit `direct_file_upload` capability before acquiring an account slot, initializing a browser, or creating a first/replacement reviewer Chat.
 - Filechooser and direct-upload failures close after one browser action. They send no text, read no Chat, do not refresh or reopen a page, and preserve the original package identity.
 - One recovery identity permits one controlled retry of the same package. A second failure becomes terminal `attachment_upload_capability_missing` for that host.

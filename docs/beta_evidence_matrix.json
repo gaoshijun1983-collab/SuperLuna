@@ -1,7 +1,7 @@
 {
   "contract_version": "1",
   "candidate_version": "0.2.0-alpha.83",
-  "candidate_commit": "dc0ed1c6f3ee94e64ce51bdb4c4eaac0ace14082",
+  "candidate_commit": "9729d92f48bfd89f778808a41d0478621fdffe61",
   "required_consecutive_cycles": 10,
   "gates": {
     "codex_host_same_turn_continuation_enforcement": {

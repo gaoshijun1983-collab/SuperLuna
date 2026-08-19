@@ -1,6 +1,7 @@
 {
   "product_name": "SuperLuna",
   "package_version": "0.2.0-alpha.83",
+  "candidate_commit": "9729d92f48bfd89f778808a41d0478621fdffe61",
   "controller_version": 139,
   "schema_version": 7,
   "skill_revision": "2026-08-19.96",
@@ -9,7 +10,7 @@
   "release_validation_pending": false,
   "dist_archive": {
     "filename": "SuperLuna-0.2.0-alpha.83.zip",
-    "tracked_source_files": 98,
+    "tracked_source_files": 105,
     "tracked_source_files_pending_final_validation": false,
     "embedded_manifest_verified": true,
     "deterministic_rebuild_verified": true
