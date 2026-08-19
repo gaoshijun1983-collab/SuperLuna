@@ -35,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 159
-SKILL_REVISION = "2026-08-19.116"
+CONTROLLER_VERSION = 160
+SKILL_REVISION = "2026-08-19.117"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -9933,6 +9933,62 @@ def reviewer_repository_root_for_state(state: dict[str, Any]) -> Path:
     return reviewer_root
 
 
+def candidate_freeze_recovery_plan(
+    state_path: Path, state: dict[str, Any],
+) -> dict[str, Any]:
+    """Prove the locally frozen candidate before clearing a stale block."""
+    review = state.get("review", {})
+    applicable = bool(
+        state.get("automation", {}).get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
+        and review.get("status") == "external_blocked"
+        and review.get("recovery_action") == "candidate_freeze_requires_scoped_commit"
+    )
+    if not applicable:
+        return {"applicable": False, "ready": False, "reason_code": "not_applicable"}
+    checks: dict[str, Any] = {}
+    missing: list[str] = []
+    try:
+        root = reviewer_repository_root_for_state(state)
+        tracked, head, dirty = _git_project_inventory(root)
+        checks.update({"clean_worktree": not dirty, "head_commit": head, "tracked_files": len(tracked)})
+        if dirty:
+            missing.append("candidate_checkout_dirty")
+        report = json.loads((root / "release" / "alpha_release_report.json").read_text(encoding="utf-8"))
+        matrix = json.loads((root / "docs" / "beta_evidence_matrix.json").read_text(encoding="utf-8"))
+        candidate_commit = str(report.get("candidate_commit", "none"))
+        matrix_commit = str(matrix.get("candidate_commit", "none"))
+        lineage = subprocess.run(
+            ["git", "-C", str(root), "merge-base", "--is-ancestor", candidate_commit, head],
+            capture_output=True,
+        )
+        checks["candidate_commit_matches_head"] = (
+            candidate_commit == matrix_commit and lineage.returncode == 0
+        )
+        checks["tracked_count_matches_report"] = len(tracked) == int(
+            report.get("dist_archive", {}).get("tracked_source_files", -1)
+        )
+        checks["tracked_count_matches_matrix"] = len(tracked) == int(matrix.get("archive_source_files", -1))
+        if not checks["candidate_commit_matches_head"]:
+            missing.append("candidate_commit_lineage_mismatch")
+        if not checks["tracked_count_matches_report"]:
+            missing.append("release_report_tracked_count_mismatch")
+        if not checks["tracked_count_matches_matrix"]:
+            missing.append("evidence_matrix_tracked_count_mismatch")
+        archive = root / "dist" / "SuperLuna-0.2.0-alpha.103.zip"
+        verify = subprocess.run(
+            [sys.executable, "-B", "scripts/build_release.py", "verify", "--archive", str(archive)],
+            cwd=root, capture_output=True, text=True,
+        )
+        checks["archive_verify"] = verify.returncode == 0
+        if verify.returncode != 0:
+            missing.append("archive_verification_failed")
+    except (LCRLError, OSError, subprocess.SubprocessError, TypeError, ValueError):
+        missing.append("candidate_freeze_evidence_unavailable")
+    return {"applicable": True, "ready": not missing,
+            "reason_code": "candidate_freeze_verified" if not missing else missing[0],
+            "checks": checks, "missing_reason_codes": missing}
+
+
 def persist_reviewer_repository_identity(
     state: dict[str, Any], reviewer_root: Path, remote_url: str,
     commit_sha: str, tree_manifest_hash: str,
@@ -12863,6 +12919,19 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("guard belongs to a different implementation task")
     clear_action_lease(state)
     lease_id = claim_action_lease(state, args.reason, args.minutes)
+    freeze_plan = candidate_freeze_recovery_plan(path, state)
+    if freeze_plan.get("ready"):
+        state["review"].update({
+            "status": "local_work",
+            "recovery_action": "candidate_freeze_verified",
+            "last_progress_at": utc_now(),
+        })
+        state.setdefault("review_history", []).append({
+            "event": "candidate_freeze_reconciled",
+            "candidate_commit": freeze_plan.get("checks", {}).get("head_commit", "none"),
+            "recorded_at": utc_now(),
+        })
+        state["review_history"] = state["review_history"][-20:]
     save_state(path, state, expected_revision=revision)
     return {
         "ok": True,

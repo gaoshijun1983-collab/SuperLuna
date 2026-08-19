@@ -1,7 +1,7 @@
 {
-  "controller_version": 159,
+  "controller_version": 160,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-19.116",
+  "skill_revision": "2026-08-19.117",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",

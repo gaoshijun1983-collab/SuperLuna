@@ -4,7 +4,8 @@
   build input before creating the deterministic archive; the report, evidence
   matrix, and embedded manifest therefore share one count.
 
-Controller 159 / Skill `2026-08-19.116` repairs fixed-Chat submission
+Controller 160 / Skill `2026-08-19.117` reconciles a verified frozen candidate
+before fixed-Chat mode selection and repairs fixed-Chat submission
 recovery after a Codex/browser restart. A controlled exact-URL count is trusted
 only when it belongs to the current browser identity (or explicitly attests
 that identity). A stale single count is treated as absent, allowing one exact

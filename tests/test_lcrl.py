@@ -5644,6 +5644,45 @@ class ControllerTests(unittest.TestCase):
         self.assertLessEqual(len(decision["decision_options"]), 3)
         self.assertTrue(all(option["impact"] for option in decision["decision_options"]))
 
+    def test_verified_candidate_freeze_releases_bound_new_chat_for_mode_selection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            state = lcrl.new_state(
+                "none", "implementation", root, "reviewer-new",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["review"].update({
+                "status": "external_blocked",
+                "recovery_action": "candidate_freeze_requires_scoped_commit",
+            })
+            state["browser_binding"].update({
+                "status": "bound", "browser_id": "browser-new",
+                "provider_tab_id": "tab-new", "bound_at": lcrl.utc_now(),
+                "conversation_id": "reviewer-new",
+                "conversation_url": "https://chatgpt.com/c/reviewer-new",
+                "provisioned_chat": True,
+            })
+            state["confirmation"]["reviewer_thread_id"] = "reviewer-new"
+            lcrl.save_state(state_path, state)
+            with mock.patch.object(lcrl, "candidate_freeze_recovery_plan", return_value={
+                "applicable": True, "ready": True,
+                "checks": {"head_commit": "freeze-head"},
+            }):
+                guarded = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id="implementation", minutes=30,
+                ))
+            self.assertTrue(guarded["execution_allowed"])
+            self.assertEqual(lcrl.load_state(state_path)["review"]["status"], "local_work")
+            before = lcrl.load_state(state_path)["runtime"]["action_lease_id"]
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.authorize_browser_review_mode_selection_command(Namespace(
+                    state=str(state_path), target="extreme", browser_id="wrong-browser",
+                    account_slot_lease_id="missing", registry=str(root / "gate.json"), at=None,
+                ))
+            self.assertEqual(lcrl.load_state(state_path)["runtime"]["action_lease_id"], before)
+
     def test_cli_guard_task_mismatch_reports_stable_technical_reason(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))

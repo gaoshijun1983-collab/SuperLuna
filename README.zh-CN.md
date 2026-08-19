@@ -21,7 +21,7 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 ## 当前源码状态
 
 当前源码候选版本是 `0.2.0-alpha.103`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 159 / Skill revision `2026-08-19.116` 要求 controlled tab 计数必须属于
+Public Beta。Controller 160 / Skill revision `2026-08-19.117` 会先核对已验证冻结候选，再进入模式确认；controlled tab 计数必须属于
 当前 browser identity；重启后的 stale 单计数只能触发一次固定 canonical URL 重建，歧义仍失败关闭。
 Controller 158 / Skill revision `2026-08-19.115` 将协调恢复检查与实施执行权明确拆开：
 显式 coordinator 只能核对精确 repo-retest state、run binding 与目标实施任务，并请求平台单次唤醒
