@@ -695,3 +695,12 @@ each trusted source has presence, representation kind, length, and truncated
 raw/normalized SHA-256, plus exact mismatch pairs. Only strict representations
 of the same UUID may normalize. Different UUIDs, opaque values, delegation
 sources, or an unavailable host registry remain fail-closed.
+## Lost retirement registry recovery
+
+For `superluna_repo_retest_v1` only, a persisted temporary account-gate path
+that no longer exists may resolve to the canonical host account gate. The
+canonical gate must already prove the exact task, state scope, repository
+identity, reviewer generation, unique startup authorization, recorded rate
+limit, and zero active slots. The controller creates no evidence during
+selection. Generic profiles, missing gates, parse failures, or any mismatched
+identity remain blocked before project, browser, or Chat access.

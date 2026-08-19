@@ -67,6 +67,13 @@ or `thread_id:` wrappers. Opaque values and different UUIDs never become aliases
 An unavailable host task-registry API is reported as unavailable rather than
 replaced by a title or delegation-source guess.
 
+A missing persisted repo-retest retirement-registry path may resolve to the
+canonical host account gate only when that already-existing gate passes the
+complete task, state scope, repository, generation, startup authorization,
+rate-limit, and zero-slot evidence plan. This resolution does not synthesize a
+retirement record. Generic states, absent canonical gates, and identity drift
+remain fail-closed.
+
 If a user manually renames a surface, keep the binding because its stable ID is unchanged. Regenerate and apply the expected title at the next explicit naming event. If an ID changes, invalidate the confirmation lease and require the user to select the replacement Chat.
 
 If registry and state diverge, stop formal submission, run `doctor-registry` and `doctor`, then re-register the existing stable IDs. Never infer identity from a similar title.

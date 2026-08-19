@@ -40,7 +40,13 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.98`, Controller 154, Skill `2026-08-19.111`.
+- Source candidate: `0.2.0-alpha.99`, Controller 155, Skill `2026-08-19.112`.
+- A repo-retest state whose persisted temporary retirement-registry path was
+  lost may now select the canonical host account gate only when that existing
+  gate passes the full task/state scope/repository/generation/authorization/
+  rate-limit/zero-slot evidence matrix. No retirement fact is synthesized;
+  generic or mismatched evidence remains blocked with zero project/browser/Chat
+  access.
 - Task-binding recovery diagnostics now identify every trusted source without
   exposing IDs: existence, representation type, length, truncated raw and
   normalized hashes, and exact mismatch pairs. Only strict representations of
@@ -184,6 +190,10 @@ intervention.
   and Beta evidence validators passed. Two deterministic builds produced the
   same verified 122-file archive. Real App same-task identity normalization,
   binding reconstruction, and rollover continuation remain unverified.
+- Alpha 99 repository regression passed 443/443 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Real App canonical retirement-registry
+  recovery and the subsequent replacement continuation remain unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

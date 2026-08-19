@@ -1442,7 +1442,7 @@ class ControllerTests(unittest.TestCase):
             exact_commit = "413cc2e73e653e42c2aada86635615aeeb41d244"
             tree_hash = "b" * 64
             state["automation"].update({
-                "reviewer_repository_root": str(checkout),
+                "reviewer_repository_root": str(checkout.resolve()),
                 "reviewer_repository_remote_url": "https://github.com/example/project",
                 "reviewer_repository_commit_sha": exact_commit,
                 "reviewer_repository_tree_manifest_hash": tree_hash,
@@ -2473,19 +2473,36 @@ class ControllerTests(unittest.TestCase):
         """Alpha 94 real order: blocked rollover precedes orphan recovery."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            state_path = root / "state.json"
+            checkout = root / "SuperLuna"
+            checkout.mkdir()
+            codex_root = root / "codex-home"
+            task_id = "019fc5e7-6559-7a32-bc30-b8d26a7b6dd9"
+            _run_root, project, state_path = _repo_retest_paths(checkout, task_id)
             registry = root / "account-browser-gate.json"
-            task_id = "npc-state-owner-anonymous"
+            source_patch = mock.patch.object(
+                lcrl, "source_checkout_root", return_value=checkout.resolve(),
+            )
+            environment_patch = mock.patch.dict(os.environ, {
+                "CODEX_THREAD_ID": task_id,
+                "CODEX_SESSION_ID": task_id,
+                "CODEX_HOME": str(codex_root),
+            })
+            source_patch.start()
+            environment_patch.start()
+            self.addCleanup(source_patch.stop)
+            self.addCleanup(environment_patch.stop)
             lcrl.save_state(state_path, lcrl.new_state(
-                "none", task_id, root, "first-reviewer",
+                "none", task_id, project, "first-reviewer",
                 continuation_mode="automatic", review_transport="in_app_browser",
+                profile=lcrl.SUPERLUNA_REPO_RETEST_PROFILE,
+                codex_root=str(codex_root), state_path=str(state_path),
             ))
             state = lcrl.load_state(state_path)
             repository_identity = "c" * 64
             exact_commit = "413cc2e73e653e42c2aada86635615aeeb41d244"
             tree_hash = "b" * 64
             state["automation"].update({
-                "reviewer_repository_root": str(root),
+                "reviewer_repository_root": str(checkout.resolve()),
                 "reviewer_repository_remote_url": "https://github.com/example/project",
                 "reviewer_repository_commit_sha": exact_commit,
                 "reviewer_repository_tree_manifest_hash": tree_hash,
@@ -2545,7 +2562,7 @@ class ControllerTests(unittest.TestCase):
                 "authorization_id": hashlib.sha256(second_authorization.encode()).hexdigest(),
                 "implementation_thread_id": task_id,
                 "authorized_at": "2026-08-19T05:14:02Z",
-                "scope": lcrl._generic_account_browser_scope(),
+                "scope": lcrl.account_browser_scope_for_state(state, state_path),
                 "state_identity": lcrl._provisioning_state_identity(state_path),
                 "reviewer_generation": state["reviewer_chat"]["generation"],
                 "repository_identity": repository_identity,
@@ -2611,16 +2628,79 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(blocked_guard["skill_revision"], lcrl.SKILL_REVISION)
             registry.write_bytes(registry_bytes)
 
+            # Alpha 98 real sequence: the persisted temporary registry path was
+            # unavailable after host restart, while the canonical account gate
+            # still held the exact same-task authorization and rate-limit proof.
+            stale_registry = root / "lost-host-temp" / "account-browser-gate.json"
+            state = lcrl.load_state(state_path)
+            state["review"].update({
+                "status": "review_submit_pending",
+                "submission_fingerprint": "alpha98-registry-recovery",
+                "cycle_id": "cycle-alpha98-registry-recovery",
+            })
+            state["recovery"]["network_state"] = "rate_limited"
+            state["automation"].update({
+                "waiting_check_token": "wait-alpha98-registry-recovery",
+                "waiting_check_active": True,
+                "waiting_check_kind": "submission_retry",
+                "waiting_check_account_registry": str(stale_registry),
+                "waiting_check_automation_id": "none",
+                "waiting_check_claimed_id": "none",
+                "waiting_check_expected_rdate": "20260819T051500Z",
+                "waiting_check_recovery_armed_lease_id": "none",
+                "waiting_check_recovery_armed_rdate": "none",
+            })
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+
+            wrong_registry = root / "wrong-account-browser-gate.json"
+            wrong_gate = lcrl.load_account_browser_gate(registry)
+            wrong_gate["provisioning_authorizations"][0][
+                "repository_identity"
+            ] = "d" * 64
+            lcrl._save_account_browser_gate_locked(
+                wrong_registry, wrong_gate, expected_revision=wrong_gate["revision"],
+            )
+            state_before_wrong_identity = state_path.read_bytes()
+            with mock.patch.object(
+                lcrl, "default_account_browser_gate_path", return_value=wrong_registry,
+            ):
+                wrong_identity = lcrl.guard_action(Namespace(
+                    state=str(state_path), reason="turn_entry",
+                    implementation_thread_id=task_id, minutes=10, replace=False,
+                ))
+            self.assertEqual(
+                wrong_identity["reason_code"],
+                "retirement_evidence_registry_unavailable",
+            )
+            self.assertFalse(wrong_identity["retirement_registry_recovered"])
+            self.assertFalse(wrong_identity["browser_access_allowed"])
+            self.assertEqual(state_path.read_bytes(), state_before_wrong_identity)
+
             with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry):
+                diagnostic_only = lcrl.diagnose_rate_limit_retirement_command(
+                    Namespace(
+                        state=str(state_path), registry=str(stale_registry),
+                        expected_controller_version=lcrl.CONTROLLER_VERSION,
+                        expected_skill_revision=lcrl.SKILL_REVISION,
+                    )
+                )
                 guard = lcrl.guard_action(Namespace(
                     state=str(state_path), reason="turn_entry",
                     implementation_thread_id=task_id, minutes=10, replace=False,
                 ))
             self.assertEqual(
+                diagnostic_only["reason_code"], "retirement_evidence_complete",
+            )
+            self.assertTrue(diagnostic_only["retirement_registry_recovered"])
+            self.assertFalse(diagnostic_only["state_write_performed"])
+            self.assertFalse(diagnostic_only["registry_write_performed"])
+            self.assertEqual(
                 guard["action"],
                 "consumed_orphaned_provisioning_reconcile_required",
             )
             self.assertTrue(guard["legacy_rate_limit_retirement_reconciled"])
+            self.assertTrue(guard["retirement_registry_recovered"])
+            self.assertEqual(guard["registry"], str(registry.resolve()))
             self.assertFalse(guard["browser_access_allowed"])
             retired = lcrl.load_account_browser_gate(registry)["retired_reviewer_chats"]
             self.assertEqual(

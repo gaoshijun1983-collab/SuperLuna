@@ -35,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 154
-SKILL_REVISION = "2026-08-19.111"
+CONTROLLER_VERSION = 155
+SKILL_REVISION = "2026-08-19.112"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -7411,6 +7411,36 @@ def _legacy_rate_limit_retirement_evidence_plan_from_gate(
     }
 
 
+def _load_rate_limit_retirement_gate(
+    state_path: Path, state: dict[str, Any], requested_path: Path,
+) -> tuple[Path, dict[str, Any], bool]:
+    """Recover one lost repo-retest registry from the canonical host gate.
+
+    The fallback is evidence selection, not evidence creation: the canonical
+    gate must already contain the complete same-task authorization, repository,
+    generation, zero-slot, and rate-limit chain accepted by the normal plan.
+    Generic states and incomplete canonical gates remain fail-closed.
+    """
+    try:
+        return requested_path, load_account_browser_gate(requested_path), False
+    except LCRLError as requested_error:
+        if state.get("automation", {}).get("profile") != SUPERLUNA_REPO_RETEST_PROFILE:
+            raise requested_error
+        canonical_path = default_account_browser_gate_path().expanduser().resolve()
+        if canonical_path == requested_path:
+            raise requested_error
+        try:
+            canonical_gate = load_account_browser_gate(canonical_path)
+        except LCRLError:
+            raise requested_error
+        diagnostic = _legacy_rate_limit_retirement_evidence_plan_from_gate(
+            state_path, state, canonical_gate,
+        )
+        if not diagnostic["ready"]:
+            raise requested_error
+        return canonical_path, canonical_gate, True
+
+
 def diagnose_rate_limit_retirement_command(args: argparse.Namespace) -> dict[str, Any]:
     """Return a read-only, non-sensitive legacy-retirement evidence matrix."""
     state_path = Path(args.state).expanduser().resolve()
@@ -7421,7 +7451,9 @@ def diagnose_rate_limit_retirement_command(args: argparse.Namespace) -> dict[str
         else default_account_browser_gate_path()
     )
     try:
-        gate = load_account_browser_gate(gate_path)
+        gate_path, gate, registry_recovered = _load_rate_limit_retirement_gate(
+            state_path, state, gate_path,
+        )
         diagnostic = _legacy_rate_limit_retirement_evidence_plan_from_gate(
             state_path,
             state,
@@ -7430,6 +7462,7 @@ def diagnose_rate_limit_retirement_command(args: argparse.Namespace) -> dict[str
             expected_skill_revision=getattr(args, "expected_skill_revision", None),
         )
     except LCRLError:
+        registry_recovered = False
         diagnostic = {
             "ready": False,
             "reason_code": "retirement_evidence_registry_unavailable",
@@ -7443,6 +7476,8 @@ def diagnose_rate_limit_retirement_command(args: argparse.Namespace) -> dict[str
         "action": "rate_limit_retirement_diagnostic",
         "reason_code": diagnostic["reason_code"],
         "retirement_recovery_diagnostic": diagnostic,
+        "retirement_registry_recovered": registry_recovered,
+        "registry": str(gate_path),
         "browser_access_allowed": False,
         "browser_runtime_initialization_allowed": False,
         "chat_read_allowed": False,
@@ -11867,6 +11902,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
             else default_account_browser_gate_path()
         )
         retirement_diagnostic = None
+        retirement_registry_recovered = False
         legacy_rate_limit_retirement_reconciled = False
         rate_limit_rollover = (
             state["reviewer_chat"].get("rollover_reason") == "rate_limited"
@@ -11879,7 +11915,9 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                     "rate-limit retirement recovery belongs to a different implementation task"
                 )
             try:
-                retirement_gate = load_account_browser_gate(registry_path)
+                registry_path, retirement_gate, retirement_registry_recovered = (
+                    _load_rate_limit_retirement_gate(path, state, registry_path)
+                )
                 reviewer_id = str(
                     state.get("confirmation", {}).get("reviewer_thread_id", "none")
                 )
@@ -11928,6 +11966,8 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                         "status": state["reviewer_chat"]["status"],
                         "reason_code": retirement_diagnostic["reason_code"],
                         "retirement_recovery_diagnostic": retirement_diagnostic,
+                        "retirement_registry_recovered": retirement_registry_recovered,
+                        "registry": str(registry_path),
                         "execution_allowed": False,
                         "project_read_allowed": False,
                         "project_write_allowed": False,
@@ -12037,6 +12077,7 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
                     legacy_rate_limit_retirement_reconciled
                 ),
                 "retirement_recovery_diagnostic": retirement_diagnostic,
+                "retirement_registry_recovered": retirement_registry_recovered,
                 "controller_version": CONTROLLER_VERSION,
                 "skill_revision": SKILL_REVISION,
                 "revision": state["revision"],

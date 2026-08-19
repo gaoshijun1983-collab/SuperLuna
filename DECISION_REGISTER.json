@@ -169,6 +169,20 @@
         {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.98.md"}
       ],
       "change_rule": "不得从相似标题、generic project、外部路径、旧任务 ID 或不兼容版本推断绑定；不得以重建绑定为由创建第二个 Chat 或等待任务。"
+    },
+    {
+      "id": "repo-retest-retirement-registry-recovery",
+      "scope_key": "workflow.rate_limit_retirement_registry",
+      "status": "user_approved",
+      "decision": "repo_retest state 持久化的临时退休 account gate 路径遗失时，只能选择已经存在的 canonical host account gate，并要求该 gate 同时证明同一 implementation task、state scope、repository identity、reviewer generation、唯一 startup authorization、真实 rate-limit history 与全局零 active slot。不得从 rollover_blocked 单项创建退休事实；generic profile、canonical gate 缺失或任一身份漂移必须失败关闭。",
+      "scope": "适用于 turn-entry guard、只读 retirement diagnostic、旧限流 Chat 正式退休与 orphan provisioning continuation。",
+      "recorded_on": "2026-08-19",
+      "authority_sources": [
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
+        {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/binding_registry.md"},
+        {"type": "file", "path": "release/RELEASE_NOTES_0.2.0-alpha.99.md"}
+      ],
+      "change_rule": "不得以恢复 registry 为由绕过退休证据、访问旧 Chat、创建第二个 replacement Chat 或把技术故障转成用户选择。"
     }
   ]
 }

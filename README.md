@@ -24,8 +24,14 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.98`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 154 / Skill revision
+The current source candidate is `0.2.0-alpha.99`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 155 / Skill revision
+`2026-08-19.112` recovers a lost repo-retest retirement-registry path only from
+the canonical host account gate when that existing gate independently proves
+the exact task, state scope, repository, generation, zero-slot state, startup
+authorization, and rate-limit chain. It creates no retirement evidence; an
+unavailable or mismatched canonical gate remains fail-closed before project,
+browser, or Chat access. Controller 154 / Skill revision
 `2026-08-19.111` makes legacy task-binding identity diagnosis non-sensitive and
 source-specific. Doctor and guard report presence, representation kind, length,
 and truncated raw/normalized SHA-256 for the guard argument, host thread/session,

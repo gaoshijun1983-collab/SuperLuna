@@ -3,15 +3,21 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.98`（Python 元数据：`0.2.0a98`）
-- 当前源码控制器：154
+- 版本：`0.2.0-alpha.99`（Python 元数据：`0.2.0a99`）
+- 当前源码控制器：155
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.111`
+- 当前源码 Skill 修订：`2026-08-19.112`
 - 候选日期：2026-08-19
-- Alpha 98 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
+- Alpha 99 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
+
+Alpha 99 修复 repo-retest state 在宿主重启后仍指向已遗失临时 account gate 的恢复断点。
+只有 canonical host account gate 已经持有并通过同一 task、state scope、repository、generation、
+零 slot、startup authorization 与 rate-limit chain 全部核验时，guard 和只读 retirement diagnostic
+才选择该既有 registry。控制器不会从 `rollover_blocked` 单项创建退休事实；canonical gate 缺失、
+generic profile 或任一身份漂移仍返回稳定技术阻断，且零项目、浏览器、Chat 访问。
 
 Alpha 98 把 task binding 身份阻断拆成可核验、非敏感的来源诊断。doctor/guard
 分别报告 guard 参数、`CODEX_THREAD_ID`、辅助 `CODEX_SESSION_ID`、state、run binding

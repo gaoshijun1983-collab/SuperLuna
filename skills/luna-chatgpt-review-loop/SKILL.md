@@ -265,6 +265,10 @@ Chat 已达到安全轮数上限，控制器必须在同一次 `begin-new-goal` 
    并列出精确不一致来源对；不得输出原始 ID。只有严格可解析为同一 UUID 的大小写、花括号和明确
    `urn:uuid:`、`thread:`、`thread_id:` 表示可以归一。不同 UUID 或 opaque identity 不得迁移。
    若宿主没有可信 task registry API，必须明确标记 unavailable，禁止用标题或来源任务补证。
+   repo-retest state 保存的限流退休 account gate 路径若因宿主重启遗失，只能回到 canonical
+   host account gate，并要求该既有 gate 通过同 task、state scope、repository identity、generation、
+   startup authorization、rate-limit history 与全局零 slot 的完整证据矩阵。不得新造退休事实；
+   generic profile、canonical gate 缺失或任一身份不一致继续失败关闭。
    无项目任务也必须使用自己已经分配的可写输出目录，不得硬编码 `/var/tmp`、桌面或另一个
    未授权路径，也不得为了通过预检自行创建替代目录：
 

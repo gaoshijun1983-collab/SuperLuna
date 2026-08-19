@@ -20,8 +20,12 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.98`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 154 / Skill revision `2026-08-19.111` 会让 doctor/guard 按来源输出
+当前源码候选版本是 `0.2.0-alpha.99`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 155 / Skill revision `2026-08-19.112` 只在 repo-retest state
+持久化的退休 registry 路径遗失、且 canonical host account gate 已独立证明同一 task、state scope、
+repository、generation、零 slot、startup authorization 与 rate-limit chain 时恢复该既有 registry。
+它不会创建退休证据；canonical gate 不可用或身份漂移时，仍在项目、浏览器和 Chat 访问前失败关闭。
+Controller 154 / Skill revision `2026-08-19.111` 会让 doctor/guard 按来源输出
 guard 参数、宿主 thread/session、state、run binding 和 registry identity 的存在性、表示类型、
 长度与截断 raw/normalized SHA-256，并列出精确不一致来源对，不暴露原始 ID。只允许同一 UUID 的
 大小写、花括号和明确 `urn:uuid:`/`thread:` 包装归一；不同 UUID 与 opaque identity 漂移继续
