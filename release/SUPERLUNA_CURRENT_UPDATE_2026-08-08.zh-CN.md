@@ -3,28 +3,34 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.92`（Python 元数据：`0.2.0a92`）
-- 当前源码控制器：148
+- 版本：`0.2.0-alpha.93`（Python 元数据：`0.2.0a93`）
+- 当前源码控制器：149
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.105`
+- 当前源码 Skill 修订：`2026-08-19.106`
 - 候选日期：2026-08-19
-- Alpha 92 当前为本地验证候选；基线 HEAD：`c75a6bf9752377123df455eb15977987d439fafa`
+- Alpha 93 当前为本地验证候选；基线 HEAD：`8fd20966ddd453f9c76398c66c9fa1c00726d5e8`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：435/435 通过；控制器 selftest：15/15 通过。
+- 仓库测试：436/436 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 116 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.92.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 92 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 117 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.93.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 93 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 149 / Skill revision `2026-08-19.106` 修复 Alpha92 实机中 replacement Chat 已持久绑定、
+  但真实限流发生在临时 mode-selection lease 产生前，导致旧 `reviewer_thread_id=none` 退休记录无法迁移的
+  问题。兼容路径不凭 state 单方认定：必须同时匹配唯一 startup authorization、精确 task/scope/state/
+  repository identity、上一 generation、授权→绑定→替换时间链、canonical provisioned browser/provider
+  receipt、当前代零 request/response，以及账户门由同任务限流后全局零 slot。成功只生成一个确定性 rebuild
+  identity 与一个退休记录；缺少 binding receipt、存在任一 slot 或身份漂移均保持 registry 不变并失败关闭。
 - Controller 148 / Skill revision `2026-08-19.105` 修复 replacement Chat 已绑定但 startup slot 仍以
   `reviewer_thread_id=none` 释放的问题。`complete-reviewer-chat-rollover` 现在接收同一 account slot lease
   与 registry，在 state 完成前提升 slot 和唯一 provisioning authorization 的最终 Chat/generation/state/

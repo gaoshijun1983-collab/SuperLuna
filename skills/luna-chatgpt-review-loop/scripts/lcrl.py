@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 148
-SKILL_REVISION = "2026-08-19.105"
+CONTROLLER_VERSION = 149
+SKILL_REVISION = "2026-08-19.106"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -6885,11 +6885,6 @@ def _reconcile_legacy_none_startup_rate_limit_retirement(
         CHATGPT_UUID_PATTERN.fullmatch(reviewer_id)
         and reviewer_chat.get("status") in {"active", "rollover_pending"}
         and generation >= 2
-        and lease_id != "none"
-        and runtime.get("browser_review_mode_selection_authorized_reviewer_thread_id")
-        == reviewer_id
-        and runtime.get("browser_review_mode_selection_authorized_browser_id")
-        == binding.get("browser_id")
         and binding.get("status") == "bound"
         and binding.get("provisioned_chat") is True
         and binding.get("conversation_id") == reviewer_id
@@ -6914,11 +6909,7 @@ def _reconcile_legacy_none_startup_rate_limit_retirement(
             return False
         if int(gate.get("consecutive_rate_limits", 0)) < 1:
             return False
-        if any(
-            slot.get("implementation_thread_id") == task_id
-            or slot.get("reviewer_thread_id", "none") == reviewer_id
-            for slot in gate.get("slots", [])
-        ):
+        if gate.get("slots"):
             return False
         candidates = [
             record for record in gate.get("provisioning_authorizations", [])
@@ -6933,13 +6924,68 @@ def _reconcile_legacy_none_startup_rate_limit_retirement(
             return False
         candidate = candidates[0]
         recorded_lease = str(candidate.get("startup_lease_id", "none"))
-        if recorded_lease not in {"none", lease_id}:
-            return False
         recorded_final_reviewer = str(
             candidate.get("final_reviewer_thread_id", "none")
         )
         if recorded_final_reviewer not in {"none", reviewer_id}:
             return False
+        live_mode_lease_receipt = bool(
+            lease_id != "none"
+            and runtime.get(
+                "browser_review_mode_selection_authorized_reviewer_thread_id"
+            ) == reviewer_id
+            and runtime.get(
+                "browser_review_mode_selection_authorized_browser_id"
+            ) == binding.get("browser_id")
+            and recorded_lease in {"none", lease_id}
+        )
+        legacy_bound_startup_receipt = False
+        if not live_mode_lease_receipt:
+            authorized_at = parse_time(candidate.get("authorized_at"))
+            bound_at = parse_time(binding.get("bound_at"))
+            confirmed_at = parse_time(confirmation.get("confirmed_at"))
+            retired = reviewer_chat.get("retired", [])
+            last_replaced = retired[-1] if retired else {}
+            last_replaced_at = parse_time(last_replaced.get("retired_at"))
+            no_current_generation_message_receipt = all(
+                state.get("review", {}).get(key) in {None, "", "none"}
+                for key in (
+                    "request_turn_id", "request_message_id", "request_persisted_at",
+                    "response_turn_id", "response_message_id",
+                )
+            )
+            legacy_bound_startup_receipt = bool(
+                lease_id == "none"
+                and recorded_lease == "none"
+                and authorized_at is not None
+                and bound_at is not None
+                and confirmed_at == bound_at
+                and authorized_at <= bound_at
+                and last_replaced_at == bound_at
+                and last_replaced.get("reviewer_thread_id") not in {
+                    None, "", "none", reviewer_id,
+                }
+                and last_replaced.get("reason") in VALID_REVIEWER_CHAT_ROLLOVER_REASONS
+                and binding.get("browser_id") not in {None, "", "none"}
+                and binding.get("provider_tab_id") not in {None, "", "none"}
+                and confirmation.get("reviewer_reasoning_confirmed") is False
+                and confirmation.get("reviewer_reasoning_observed_thread_id") == "none"
+                and no_current_generation_message_receipt
+            )
+        if not live_mode_lease_receipt and not legacy_bound_startup_receipt:
+            return False
+        rebuild_id = "none"
+        if legacy_bound_startup_receipt:
+            rebuild_id = hashlib.sha256("\n".join((
+                task_id,
+                expected_state_identity,
+                repository_identity,
+                str(generation),
+                reviewer_id,
+                str(binding["browser_id"]),
+                str(binding["provider_tab_id"]),
+                str(candidate["authorization_id"]),
+            )).encode("utf-8")).hexdigest()
         gate.setdefault("retired_reviewer_chats", []).append({
             "reviewer_thread_id": reviewer_id,
             "reason": "rate_limited",
@@ -6948,6 +6994,8 @@ def _reconcile_legacy_none_startup_rate_limit_retirement(
             "startup_lease_id": lease_id,
             "reviewer_generation": generation,
             "repository_identity": repository_identity,
+            "legacy_bound_startup_rebuilt": legacy_bound_startup_receipt,
+            "legacy_bound_startup_rebuild_id": rebuild_id,
         })
         gate["retired_reviewer_chats"] = gate["retired_reviewer_chats"][-MAX_RETIRED_REVIEWER_CHATS:]
         candidate.update({
@@ -6956,6 +7004,8 @@ def _reconcile_legacy_none_startup_rate_limit_retirement(
             "final_reviewer_generation": generation,
             "final_repository_identity": repository_identity,
             "legacy_none_startup_reconciled": True,
+            "legacy_bound_startup_rebuilt": legacy_bound_startup_receipt,
+            "legacy_bound_startup_rebuild_id": rebuild_id,
         })
         _save_account_browser_gate_locked(
             gate_path, gate, expected_revision=revision,

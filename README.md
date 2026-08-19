@@ -24,9 +24,14 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.92`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 148 / Skill revision
-`2026-08-19.105` promotes a live replacement startup slot to the final reviewer
+The current source candidate is `0.2.0-alpha.93`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 149 / Skill revision
+`2026-08-19.106` repairs a legacy replacement Chat retirement when a real rate
+limit occurred before the ephemeral review-mode lease existed. It requires one
+exact startup authorization, task/state/repository identity, prior generation,
+the canonical provisioned browser binding and replacement timestamp chain, no
+current-generation message receipt, and zero account slots; otherwise it fails
+closed. Controller 148 / Skill revision `2026-08-19.105` promotes a live replacement startup slot to the final reviewer
 Chat, generation, state, and repository identity during rollover completion,
 before release can lose that identity. A legacy `none` release is reconciled
 once only from the same startup lease and durable binding receipts. Controller 147 / Skill revision

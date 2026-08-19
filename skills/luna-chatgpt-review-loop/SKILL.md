@@ -875,6 +875,11 @@ provisioning authorization 提升为最终 reviewer Chat、generation、state �
 返回 `account_browser_startup_identity_promoted=true` 才能释放。旧 `reviewer_thread_id=none` 的限流释放
 只能由 `require-reviewer-chat-rollover --reason rate_limited` 在同一 startup lease 的持久浏览器/Chat
 绑定回执、唯一 authorization、上一 generation/repository 和零 slot 冲突全部吻合时补写一次。
+若真实限流发生在临时 mode-selection lease 产生前，旧 state 只能走一次确定性安全重建：唯一 startup
+authorization 必须严格匹配 task/scope/state/repository 与上一 generation，当前唯一 provisioned Chat 的
+canonical URL、browser/provider identity、confirmation 和替换时间链必须一致，当前代必须没有 request/
+response receipt，账户门必须记录同任务限流且全局零 slot。成功只补一个带 rebuild identity 的退休记录；
+任一 binding receipt 缺失、身份漂移或活动/不确定 slot 均保持账户门不变并失败关闭，不访问旧 Chat。
 
 完整网页合同见 [browser_transport.md](references/browser_transport.md)，状态机细节见
 [protocol.md](references/protocol.md)。

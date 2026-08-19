@@ -1,7 +1,7 @@
 {
-  "controller_version": 148,
+  "controller_version": 149,
   "state_schema_version": 7,
-  "skill_revision": "2026-08-19.105",
+  "skill_revision": "2026-08-19.106",
   "model_policy_version": 5,
   "heartbeat_template": "references/heartbeat_v8_p0.txt",
   "cli": "scripts/lcrl.py",
@@ -47,6 +47,7 @@
   "pending_rollover_external_block_rate_limit_migration": true,
   "startup_slot_final_reviewer_identity_promotion": true,
   "legacy_none_startup_retirement_reconcile": true,
+  "legacy_bound_startup_retirement_rebuild": true,
   "account_browser_health_followup_reuses_visible_tab": true,
   "account_browser_health_followup_tail_only": true,
   "stale_platform_wait_auto_recovery": true,

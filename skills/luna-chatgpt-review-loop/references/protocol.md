@@ -542,6 +542,13 @@ release, rate-limit rollover may reconcile one retirement only from the same
 startup lease recorded in durable mode-selection/binding receipts, one matching
 prior-generation authorization, and zero Chat/slot conflict. Repeats are
 idempotent; ambiguity grants no retirement or browser access.
+If the real rate limit predates the ephemeral mode-selection lease, one legacy
+rebuild is allowed only when a unique prior-generation startup authorization,
+exact task/scope/state/repository identity, canonical provisioned browser and
+provider binding, consistent authorization/replacement timestamps, no current-
+generation message receipt, the same task's rate-limit release, and a globally
+empty slot set all agree. The rebuild writes one deterministic identity and one
+retirement. Any missing receipt or uncertain slot leaves the gate unchanged.
 Slot acquisition normally never re-labels an existing lease: same-task reuse
 requires the same operation. The only controller-owned exception is a one-time
 replacement-Chat provisioning `startup` that atomically continues to that new

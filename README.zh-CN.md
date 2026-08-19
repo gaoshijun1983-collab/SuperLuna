@@ -20,8 +20,11 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.92`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 148 / Skill revision `2026-08-19.105` 会在 rollover completion 阶段、slot
+当前源码候选版本是 `0.2.0-alpha.93`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 149 / Skill revision `2026-08-19.106` 修复真实限流早于临时 mode-selection
+lease 时的旧 replacement Chat 退休记录。迁移必须同时核对唯一 startup authorization、task/state/
+repository identity、上一 generation、canonical provisioned browser binding、替换时间链、当前代零消息
+回执与账户门零 slot；任一不确定即失败关闭。Controller 148 / Skill revision `2026-08-19.105` 会在 rollover completion 阶段、slot
 释放前，把 live startup slot 原子提升到最终 reviewer Chat、generation、state 与 repository identity。
 旧 `none` 释放只能凭同一 startup lease 和持久绑定回执严格补写一次。Controller 147 / Skill revision
 `2026-08-19.104` 还覆盖真实旧组合：reviewer rollover

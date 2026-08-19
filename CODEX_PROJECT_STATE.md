@@ -40,7 +40,13 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.92`, Controller 148, Skill `2026-08-19.105`.
+- Source candidate: `0.2.0-alpha.93`, Controller 149, Skill `2026-08-19.106`.
+- A legacy replacement Chat that rate-limited before an ephemeral mode-selection
+  lease existed can now rebuild exactly one retirement record from the unique
+  startup authorization, exact task/state/repository and prior-generation
+  identities, canonical provisioned browser binding and timestamp chain, zero
+  current-generation message receipts, and a globally empty slot set. Missing
+  or uncertain evidence leaves the account gate byte-identical.
 - Rollover completion can now promote the live startup slot and its unique
   provisioning authorization to the final reviewer Chat, generation, state,
   and repository identity before release. Legacy `none` releases reconcile
@@ -145,6 +151,11 @@ intervention.
   and Beta evidence validators passed. Its deterministic archive contains 116
   tracked source files. Real App replacement-identity retirement remains
   unverified.
+- Alpha 93 repository regression passed 436/436 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Its deterministic archive contains 117
+  tracked source files. Real App legacy bound-startup retirement rebuilding
+  remains unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

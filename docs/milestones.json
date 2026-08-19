@@ -2,7 +2,7 @@
   "contract_version": "1",
   "milestones": [
     {
-      "version": "0.2.0-alpha.92",
+      "version": "0.2.0-alpha.93",
       "title": "Separate implementation workspace from reviewer source checkout",
       "upgrade_prerequisites": [
         "Run the repository test suite, controller selftest, and release archive verifier.",
