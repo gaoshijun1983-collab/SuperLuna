@@ -1,5 +1,9 @@
 # SuperLuna 0.2.0-alpha.103
 
+- Release metadata now derives the tracked source count from the exact Git
+  build input before creating the deterministic archive; the report, evidence
+  matrix, and embedded manifest therefore share one count.
+
 Controller 159 / Skill `2026-08-19.116` repairs fixed-Chat submission
 recovery after a Codex/browser restart. A controlled exact-URL count is trusted
 only when it belongs to the current browser identity (or explicitly attests

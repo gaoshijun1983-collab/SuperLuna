@@ -10,7 +10,7 @@
   "release_validation_pending": true,
   "dist_archive": {
     "filename": "SuperLuna-0.2.0-alpha.103.zip",
-    "tracked_source_files": 126,
+    "tracked_source_files": 127,
     "tracked_source_files_pending_final_validation": false,
     "embedded_manifest_verified": true,
     "deterministic_rebuild_verified": true
@@ -299,7 +299,11 @@
     "provisioned_tab_missing_after_handoff_exact_url_reopen_authorized": true,
     "browser_wait_bound_same_tab_refresh": true,
     "browser_network_error_refresh_delay_seconds": 180,
-    "browser_rate_limit_backoff_seconds": [900, 1800, 3600],
+    "browser_rate_limit_backoff_seconds": [
+      900,
+      1800,
+      3600
+    ],
     "browser_rate_limit_never_requests_reload": true,
     "old_occurrence_token_expires_without_state_mutation": true,
     "manually_coordinated_three_round_repair_absorption_observed": true,
@@ -308,7 +312,9 @@
     "controller_closure_check": {
       "passed": true,
       "scope": "local_controller_only",
-      "executed_checks": ["controller_selftest"],
+      "executed_checks": [
+        "controller_selftest"
+      ],
       "repository_tests_run": false,
       "repository_tests_passed": null,
       "real_device_gate_passed": false,

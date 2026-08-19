@@ -100,6 +100,46 @@ def _package_version(root: Path) -> str:
     return version
 
 
+def synchronize_release_report(
+    root: Path, source_files: list[ReleaseFile], report_path: Path | None = None
+) -> None:
+    """Keep the report's package count derived from the exact build input set."""
+    report_path = report_path or (root / "release" / "alpha_release_report.json")
+    if not report_path.is_file():
+        return
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        archive = report["dist_archive"]
+        if not isinstance(archive, dict):
+            raise TypeError("dist_archive must be an object")
+        archive["tracked_source_files"] = len(source_files)
+        archive["tracked_source_files_pending_final_validation"] = False
+        report_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    except (OSError, KeyError, TypeError, ValueError) as exc:
+        raise ReleaseError(f"cannot synchronize release report: {exc}") from exc
+
+
+def synchronize_beta_matrix(root: Path, source_files: list[ReleaseFile]) -> None:
+    """Keep evidence metadata aligned with the exact release build input."""
+    matrix_path = root / "docs" / "beta_evidence_matrix.json"
+    if not matrix_path.is_file():
+        return
+    try:
+        matrix = json.loads(matrix_path.read_text(encoding="utf-8"))
+        matrix["archive_source_files"] = len(source_files)
+        matrix_path.write_text(
+            json.dumps(matrix, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        raise ReleaseError(f"cannot synchronize beta evidence matrix: {exc}") from exc
+
+
 def verify_archive(root: Path, archive_path: Path) -> dict[str, object]:
     files = collect_tracked_files(root)
     prefix = f"SuperLuna-{_package_version(root)}"
@@ -127,6 +167,11 @@ def verify_archive(root: Path, archive_path: Path) -> dict[str, object]:
 
 
 def build_archive(root: Path, output_dir: Path) -> dict[str, object]:
+    files = collect_tracked_files(root)
+    synchronize_release_report(root, files)
+    synchronize_beta_matrix(root, files)
+    # Report synchronization changes a tracked input; rebuild the exact set
+    # before writing so the archive and its verifier see identical bytes.
     files = collect_tracked_files(root)
     version = _package_version(root)
     prefix = f"SuperLuna-{version}"

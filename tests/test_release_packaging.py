@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 import tempfile
 import sys
 import unittest
@@ -19,6 +20,46 @@ SPEC.loader.exec_module(release)
 
 
 class ReleasePackagingTests(unittest.TestCase):
+    def test_release_report_count_matches_exact_tracked_build_input(self):
+        report = json.loads(
+            (ROOT / "release" / "alpha_release_report.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            report["dist_archive"]["tracked_source_files"],
+            len(release.collect_tracked_files(ROOT)),
+        )
+
+    def test_beta_matrix_count_matches_exact_tracked_build_input(self):
+        matrix = json.loads(
+            (ROOT / "docs" / "beta_evidence_matrix.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            matrix["archive_source_files"],
+            len(release.collect_tracked_files(ROOT)),
+        )
+
+    def test_report_sync_derives_count_without_changing_candidate_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            report_path = Path(temporary) / "alpha_release_report.json"
+            original = ROOT / "release" / "alpha_release_report.json"
+            report_path.write_bytes(original.read_bytes())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report["dist_archive"]["tracked_source_files"] = 126
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+
+            release.synchronize_release_report(
+                ROOT, release.collect_tracked_files(ROOT), report_path
+            )
+            synced = json.loads(report_path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                synced["dist_archive"]["tracked_source_files"],
+                len(release.collect_tracked_files(ROOT)),
+            )
+            self.assertEqual(
+                synced["candidate_commit"],
+                json.loads(original.read_text(encoding="utf-8"))["candidate_commit"],
+            )
+
     def test_current_source_archive_is_deterministic_and_verifiable(self):
         with tempfile.TemporaryDirectory() as temporary:
             output = Path(temporary)
