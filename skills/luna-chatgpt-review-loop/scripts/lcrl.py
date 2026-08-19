@@ -3356,6 +3356,11 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
     # This is a controller-owned safety policy, not user state.  Always adopt
     # the current cap so older states cannot retain a more permissive limit.
     reviewer_chat["max_formal_rounds"] = REVIEWER_CHAT_MAX_FORMAL_ROUNDS
+    reviewer_chat.setdefault("formal_rounds", 0)
+    reviewer_chat.setdefault(
+        "formal_rounds_reviewer_thread_id",
+        state.get("confirmation", {}).get("reviewer_thread_id", "none"),
+    )
     reviewer_chat.setdefault("status", "active")
     reviewer_chat.setdefault("rollover_reason", "none")
     reviewer_chat.setdefault("rollover_authorization_id", "none")
@@ -3757,6 +3762,8 @@ def new_state(
             "mode": "bounded_series_v1",
             "generation": 1,
             "max_formal_rounds": REVIEWER_CHAT_MAX_FORMAL_ROUNDS,
+            "formal_rounds": 0,
+            "formal_rounds_reviewer_thread_id": reviewer_thread_id,
             "status": "active",
             "rollover_reason": "none",
             "rollover_authorization_id": "none",
@@ -7409,6 +7416,35 @@ def current_state_review_round_number(state: dict[str, Any]) -> int:
     return archived + current
 
 
+def reconcile_reviewer_chat_round_counter(state: dict[str, Any]) -> bool:
+    """Persist the derived count without mixing retired generations."""
+    reviewer_id = str(state.get("confirmation", {}).get("reviewer_thread_id", "none"))
+    if reviewer_id in {"", "none"}:
+        return False
+    derived = 0
+    for item in state.get("review_history", []):
+        binding = item.get("run_binding", {})
+        if (
+            item.get("request_message_id") not in (None, "", "none")
+            and binding.get("reviewer_thread_id") == reviewer_id
+        ):
+            derived += 1
+    current = state.get("review", {})
+    if (
+        current.get("request_message_id") not in (None, "", "none")
+        and current.get("run_binding", {}).get("reviewer_thread_id") == reviewer_id
+    ):
+        derived += 1
+    chat = state["reviewer_chat"]
+    changed = (
+        chat.get("formal_rounds") != derived
+        or chat.get("formal_rounds_reviewer_thread_id") != reviewer_id
+    )
+    chat["formal_rounds"] = derived
+    chat["formal_rounds_reviewer_thread_id"] = reviewer_id
+    return changed
+
+
 def reviewer_chat_round_budget_exhausted(state: dict[str, Any]) -> bool:
     """Return whether the active Chat has reached its safe formal-review cap."""
     reviewer_chat = state.get("reviewer_chat", {})
@@ -7442,6 +7478,14 @@ def current_reviewer_chat_formal_rounds(state: dict[str, Any]) -> int:
         not in (None, "", "none")
         and current_binding.get("reviewer_thread_id") == reviewer_id
     )
+    persisted = state.get("reviewer_chat", {})
+    persisted_rounds = persisted.get("formal_rounds", 0)
+    if (
+        persisted.get("formal_rounds_reviewer_thread_id") == reviewer_id
+        and isinstance(persisted_rounds, int)
+        and persisted_rounds >= 0
+    ):
+        return max(archived + current, persisted_rounds)
     return archived + current
 
 
@@ -12278,6 +12322,14 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         # the remainder of this guard without rewriting the historical scope.
         implementation_thread_id = str(expected_implementation_thread_id)
     status = state["review"]["status"]
+    if (
+        status not in MONITOR_STATUSES
+        and not active_action_lease(state)
+        and reconcile_reviewer_chat_round_counter(state)
+    ):
+        save_state(path, state, expected_revision=revision)
+        state = load_state(path)
+        revision = state["revision"]
     binding_upgrade = run_binding_version_upgrade_plan(path, state)
     if binding_upgrade.get("applicable") and not binding_upgrade.get("ready"):
         return {

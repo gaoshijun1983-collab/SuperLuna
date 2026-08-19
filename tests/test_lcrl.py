@@ -5714,6 +5714,33 @@ class ControllerTests(unittest.TestCase):
             self.assertFalse(backwards["ready"])
             self.assertEqual(backwards["reason_code"], "run_binding_upgrade_controller_not_monotonic")
 
+    def test_reviewer_round_counter_rebuilds_current_generation_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state_path = self.make_state(Path(directory))
+            state = lcrl.load_state(state_path)
+            state["confirmation"]["reviewer_thread_id"] = "current-chat"
+            state["review"]["run_binding"]["reviewer_thread_id"] = "current-chat"
+            state["reviewer_chat"]["formal_rounds"] = 0
+            state["reviewer_chat"]["formal_rounds_reviewer_thread_id"] = "current-chat"
+            binding_current = dict(state["review"]["run_binding"], reviewer_thread_id="current-chat")
+            binding_retired = dict(binding_current, reviewer_thread_id="retired-chat")
+            state["review_history"] = [
+                {"request_message_id": "current-1", "run_binding": binding_current},
+                {"request_message_id": "current-2", "run_binding": binding_current},
+                {"request_message_id": "retired-1", "run_binding": binding_retired},
+            ]
+            changed = lcrl.reconcile_reviewer_chat_round_counter(state)
+            self.assertTrue(changed)
+            self.assertEqual(state["reviewer_chat"]["formal_rounds"], 2)
+            self.assertTrue(lcrl.reviewer_chat_round_budget_exhausted(state))
+            state["confirmation"]["reviewer_thread_id"] = "retired-chat"
+            state["review"]["run_binding"]["reviewer_thread_id"] = "retired-chat"
+            state["reviewer_chat"]["formal_rounds"] = 0
+            state["reviewer_chat"]["formal_rounds_reviewer_thread_id"] = "retired-chat"
+            lcrl.reconcile_reviewer_chat_round_counter(state)
+            self.assertEqual(state["reviewer_chat"]["formal_rounds"], 1)
+            self.assertFalse(lcrl.reviewer_chat_round_budget_exhausted(state))
+
     def test_cli_guard_task_mismatch_reports_stable_technical_reason(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))
