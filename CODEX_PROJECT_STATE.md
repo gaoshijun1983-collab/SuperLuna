@@ -241,7 +241,7 @@ intervention.
   `candidate_freeze_requires_scoped_commit` reason instead of degrading it to
   generic `controller_error`; the current worktree still requires a scoped
   freeze before any Beta-candidate claim.
-- Local freeze commit for Alpha 103: `084b272c3cbca69be6bd55c088a5f34befa1614e`.
+- Local freeze commit for Alpha 103: `084b272e552cb0b1ea29369ba8013f59328991f8`.
   The release report and Beta matrix now point to this exact reviewed local
   candidate; metadata calibration is recorded separately from the source
   freeze commit.
