@@ -24,8 +24,12 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.91`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 147 / Skill revision
+The current source candidate is `0.2.0-alpha.92`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 148 / Skill revision
+`2026-08-19.105` promotes a live replacement startup slot to the final reviewer
+Chat, generation, state, and repository identity during rollover completion,
+before release can lose that identity. A legacy `none` release is reconciled
+once only from the same startup lease and durable binding receipts. Controller 147 / Skill revision
 `2026-08-19.104` also migrates the real legacy combination where the reviewer
 rollover remained pending while the review was externally blocked by a generic
 controller error. It cannot return ordinary turn-entry during a matching live

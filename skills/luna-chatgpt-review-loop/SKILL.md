@@ -869,6 +869,12 @@ task、state identity、reviewer generation、repository identity、有效 coold
 兼容判断同时覆盖 reviewer rollover 仍为 `rollover_pending`、`rollover_failure_code=none`，但 review 已为
 `external_blocked/controller_error` 的旧状态。匹配冷却时不得返回 `turn_entry_allowed`；必须原子补全
 `rollover_blocked/account_rate_limited` 与唯一恢复身份，并在平台 automation 真正绑定前保持同回合继续。
+完成 replacement Chat 绑定时，`complete-reviewer-chat-rollover` 必须传入当前
+`--account-slot-lease-id` 与 `--registry`。Controller 在 slot 释放前把同一 live startup slot 和唯一
+provisioning authorization 提升为最终 reviewer Chat、generation、state 与 repository identity；只有
+返回 `account_browser_startup_identity_promoted=true` 才能释放。旧 `reviewer_thread_id=none` 的限流释放
+只能由 `require-reviewer-chat-rollover --reason rate_limited` 在同一 startup lease 的持久浏览器/Chat
+绑定回执、唯一 authorization、上一 generation/repository 和零 slot 冲突全部吻合时补写一次。
 
 完整网页合同见 [browser_transport.md](references/browser_transport.md)，状态机细节见
 [protocol.md](references/protocol.md)。

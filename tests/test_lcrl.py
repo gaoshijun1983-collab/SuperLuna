@@ -2088,6 +2088,138 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(replacement["rate_limit_recovery_rollover"])
             self.assertTrue(replacement["provisioning_home_navigation_allowed"])
 
+    def test_rollover_completion_promotes_startup_slot_before_rate_limit_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            lcrl.save_state(state_path, lcrl.new_state(
+                "none", "implementation", root, "old-reviewer",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            ))
+            registry = root / "account-browser-gate.json"
+            state = lcrl.load_state(state_path)
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": "a" * 40,
+                "reviewer_repository_tree_manifest_hash": "b" * 64,
+                "reviewer_repository_identity": "c" * 64,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": "c" * 64,
+                "commit_sha": "a" * 40,
+                "tree_manifest_hash": "b" * 64,
+                "repository_access_receipt": "none",
+                "generation": state["reviewer_chat"]["generation"],
+            })
+            authorization = lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", reviewer_thread_id="none",
+                new_chat_authorization_id=authorization,
+                new_chat_local_work_status="completed_and_verified",
+                operation="startup", state=str(state_path), registry=str(registry),
+                at="2026-08-19T09:00:00Z",
+            ))
+            new_id = "6a856748-7f94-83ea-befd-2727e1b4e7ba"
+            completed = lcrl.complete_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), authorization_id=authorization,
+                new_reviewer_thread_id=new_id,
+                browser_id="browser-final-identity", provider_tab_id="provider-final-identity",
+                url=f"https://chatgpt.com/c/{new_id}", observed_title="Replacement",
+                account_slot_lease_id=slot["lease_id"], registry=str(registry),
+                at="2026-08-19T09:00:30Z",
+            ))
+            self.assertTrue(completed["account_browser_startup_identity_promoted"])
+            gate = lcrl.load_account_browser_gate(registry)
+            self.assertEqual(gate["slots"][0]["reviewer_thread_id"], new_id)
+            self.assertEqual(gate["slots"][0]["reviewer_generation"], 2)
+            self.assertEqual(gate["slots"][0]["repository_identity"], "c" * 64)
+            limited = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", lease_id=slot["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-19T09:01:00Z", health_proof=None,
+            ))
+            self.assertTrue(limited["reviewer_chat_retired"])
+            retired = lcrl.load_account_browser_gate(registry)["retired_reviewer_chats"]
+            self.assertEqual([item["reviewer_thread_id"] for item in retired], [new_id])
+            required = lcrl.require_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), reason="rate_limited", registry=str(registry),
+            ))
+            self.assertEqual(required["action"], "reviewer_chat_rollover_required")
+
+    def test_legacy_none_reviewer_rate_limit_retirement_reconciles_once_from_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            lcrl.save_state(state_path, lcrl.new_state(
+                "none", "implementation", root, "old-reviewer",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            ))
+            registry = root / "account-browser-gate.json"
+            state = lcrl.load_state(state_path)
+            state["automation"].update({
+                "reviewer_repository_root": str(root),
+                "reviewer_repository_remote_url": "https://github.com/example/project",
+                "reviewer_repository_commit_sha": "a" * 40,
+                "reviewer_repository_tree_manifest_hash": "b" * 64,
+                "reviewer_repository_identity": "c" * 64,
+            })
+            state["project_context"].update({
+                "scope": "repository_commit_review",
+                "status": "repository_access_receipt_required",
+                "repository_url": "https://github.com/example/project",
+                "repository_identity": "c" * 64,
+                "commit_sha": "a" * 40,
+                "tree_manifest_hash": "b" * 64,
+                "repository_access_receipt": "none",
+                "generation": state["reviewer_chat"]["generation"],
+            })
+            authorization = lcrl.mark_reviewer_chat_rollover_required(state, "round_budget")
+            lcrl.save_state(state_path, state, expected_revision=state["revision"])
+            slot = lcrl.acquire_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", reviewer_thread_id="none",
+                new_chat_authorization_id=authorization,
+                new_chat_local_work_status="completed_and_verified",
+                operation="startup", state=str(state_path), registry=str(registry),
+                at="2026-08-19T09:00:00Z",
+            ))
+            new_id = "6a856748-7f94-83ea-befd-2727e1b4e7ba"
+            lcrl.complete_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), authorization_id=authorization,
+                new_reviewer_thread_id=new_id,
+                browser_id="browser-legacy-none", provider_tab_id="provider-legacy-none",
+                url=f"https://chatgpt.com/c/{new_id}", observed_title="Replacement",
+                at="2026-08-19T09:00:30Z",
+            ))
+            legacy = lcrl.load_state(state_path)
+            legacy["runtime"].update({
+                "browser_review_mode_selection_authorized_account_slot_lease_id": slot["lease_id"],
+                "browser_review_mode_selection_authorized_browser_id": "browser-legacy-none",
+                "browser_review_mode_selection_authorized_reviewer_thread_id": new_id,
+            })
+            lcrl.save_state(state_path, legacy, expected_revision=legacy["revision"])
+            limited = lcrl.release_account_browser_slot_command(Namespace(
+                implementation_thread_id="implementation", lease_id=slot["lease_id"],
+                outcome="rate_limited", registry=str(registry),
+                at="2026-08-19T09:01:00Z", health_proof=None,
+            ))
+            self.assertFalse(limited["reviewer_chat_retired"])
+            self.assertEqual(lcrl.load_account_browser_gate(registry)["retired_reviewer_chats"], [])
+            repaired = lcrl.require_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), reason="rate_limited", registry=str(registry),
+            ))
+            duplicate = lcrl.require_reviewer_chat_rollover_command(Namespace(
+                state=str(state_path), reason="rate_limited", registry=str(registry),
+            ))
+            self.assertTrue(repaired["legacy_retirement_reconciled"])
+            self.assertFalse(duplicate["legacy_retirement_reconciled"])
+            retired = lcrl.load_account_browser_gate(registry)["retired_reviewer_chats"]
+            self.assertEqual([item["reviewer_thread_id"] for item in retired], [new_id])
+
     def test_round_budget_requires_rollover_before_third_submission(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

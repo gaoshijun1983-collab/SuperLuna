@@ -533,6 +533,15 @@ rollover failure code when the review itself is `external_blocked` by a generic
 controller error. A matching live cooldown atomically completes the blocked
 rate-limit identity and cannot fall through to ordinary turn entry. The host
 must bind the one returned RDATE before that turn may complete.
+Non-waiting rollover completion receives the live startup account-slot lease
+and registry. Before that slot is released, the controller promotes both the
+slot and its unique provisioning authorization to the final reviewer Chat,
+generation, state, and repository identity. Release may record a rate-limit
+retirement only after this promotion. For an old `reviewer_thread_id=none`
+release, rate-limit rollover may reconcile one retirement only from the same
+startup lease recorded in durable mode-selection/binding receipts, one matching
+prior-generation authorization, and zero Chat/slot conflict. Repeats are
+idempotent; ambiguity grants no retirement or browser access.
 Slot acquisition normally never re-labels an existing lease: same-task reuse
 requires the same operation. The only controller-owned exception is a one-time
 replacement-Chat provisioning `startup` that atomically continues to that new

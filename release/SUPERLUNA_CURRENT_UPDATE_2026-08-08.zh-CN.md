@@ -3,28 +3,34 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.91`（Python 元数据：`0.2.0a91`）
-- 当前源码控制器：147
+- 版本：`0.2.0-alpha.92`（Python 元数据：`0.2.0a92`）
+- 当前源码控制器：148
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.104`
+- 当前源码 Skill 修订：`2026-08-19.105`
 - 候选日期：2026-08-19
-- Alpha 91 当前为本地验证候选；基线 HEAD：`3e451acf7809931583683b6878d70d9a628ce4fc`
+- Alpha 92 当前为本地验证候选；基线 HEAD：`c75a6bf9752377123df455eb15977987d439fafa`
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
 ## 当前候选验证
 
-- 仓库测试：433/433 通过；控制器 selftest：15/15 通过。
+- 仓库测试：435/435 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence
   validator 均通过。
-- 确定性 115 文件源码包已 build/verify；最终 SHA-256 记录于
-  `dist/SuperLuna-0.2.0-alpha.91.zip.sha256.txt`。
-- 上述结果只证明本地 Alpha 91 候选，不代表真实 App 闭环或公开 Beta
+- 确定性 116 文件源码包已 build/verify；最终 SHA-256 记录于
+  `dist/SuperLuna-0.2.0-alpha.92.zip.sha256.txt`。
+- 上述结果只证明本地 Alpha 92 候选，不代表真实 App 闭环或公开 Beta
   已通过；六项真实设备与连续闭环门槛仍保持阻断。
 
 ## 本阶段主要更新
 
 ### 0. waiting occurrence 换卷保持唯一未来动作
 
+- Controller 148 / Skill revision `2026-08-19.105` 修复 replacement Chat 已绑定但 startup slot 仍以
+  `reviewer_thread_id=none` 释放的问题。`complete-reviewer-chat-rollover` 现在接收同一 account slot lease
+  与 registry，在 state 完成前提升 slot 和唯一 provisioning authorization 的最终 Chat/generation/state/
+  repository identity；之后真实限流释放会登记正确 Chat。旧 `none` 释放只有在同一 startup lease 的
+  mode-selection/binding receipt、唯一 authorization、上一 generation/repository、零冲突 slot 全部吻合时
+  才补写一次退休记录；重复调用幂等，任何不确定性失败关闭。
 - Controller 147 / Skill revision `2026-08-19.104` 修复 Alpha90 实机仍返回普通 guard 通过的问题。
   真实旧 state 是 `rollover_pending + external_blocked/controller_error + rollover_failure_code=none`，此前
   不满足迁移候选条件。现在严格身份与有效冷却匹配后会原子进入 `rollover_blocked/account_rate_limited`、

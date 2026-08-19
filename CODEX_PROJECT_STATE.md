@@ -40,7 +40,12 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.91`, Controller 147, Skill `2026-08-19.104`.
+- Source candidate: `0.2.0-alpha.92`, Controller 148, Skill `2026-08-19.105`.
+- Rollover completion can now promote the live startup slot and its unique
+  provisioning authorization to the final reviewer Chat, generation, state,
+  and repository identity before release. Legacy `none` releases reconcile
+  once only from the same startup lease and durable binding receipts; ambiguous
+  identities or slots remain fail-closed.
 - The real legacy combination `rollover_pending + external_blocked +
   controller_error` now enters the same strict account-rate-limit migration.
   Guard cannot grant ordinary turn entry during the matching cooldown and must
@@ -135,6 +140,11 @@ intervention.
   passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
   and Beta evidence validators passed. Its deterministic archive contains 115
   tracked source files. Real App one-shot binding remains unverified.
+- Alpha 92 repository regression passed 435/435 locally. Controller selftest
+  passed 15/15; closure-check, Skill, plugin, decision-register, milestone,
+  and Beta evidence validators passed. Its deterministic archive contains 116
+  tracked source files. Real App replacement-identity retirement remains
+  unverified.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

@@ -34,8 +34,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 147
-SKILL_REVISION = "2026-08-19.104"
+CONTROLLER_VERSION = 148
+SKILL_REVISION = "2026-08-19.105"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -1744,9 +1744,32 @@ def _promote_provisioning_startup_slot_reviewer_identity(
             if current_reviewer_id != "none":
                 return False
             slot["reviewer_thread_id"] = reviewer_id
+            slot["reviewer_generation"] = reviewer_chat["generation"]
+            slot["repository_identity"] = automation.get(
+                "reviewer_repository_identity", "none",
+            )
+            slot["state_identity"] = _provisioning_state_identity(
+                Path(state_path).expanduser().resolve(),
+            )
             slot["reuse_visible_tab_required"] = True
             slot["history_tail_only_required"] = True
             slot["provisioning_identity_promoted"] = True
+            authorization_id = slot.get("new_chat_authorization_id", "none")
+            matching_authorizations = [
+                record for record in gate.get("provisioning_authorizations", [])
+                if record.get("authorization_id") == authorization_id
+                and record.get("implementation_thread_id") == task_id
+            ]
+            if len(matching_authorizations) != 1:
+                return False
+            matching_authorizations[0].update({
+                "startup_lease_id": lease_id,
+                "final_reviewer_thread_id": reviewer_id,
+                "final_reviewer_generation": reviewer_chat["generation"],
+                "final_repository_identity": automation.get(
+                    "reviewer_repository_identity", "none",
+                ),
+            })
             _save_account_browser_gate_locked(
                 gate_path, gate, expected_revision=revision,
             )
@@ -6842,6 +6865,104 @@ def reviewer_chat_browser_access_allowed(state: dict[str, Any]) -> bool:
     )
 
 
+def _reconcile_legacy_none_startup_rate_limit_retirement(
+    state_path: Path, state: dict[str, Any], gate_path: Path,
+) -> bool:
+    """Repair one old `reviewer_thread_id=none` release from durable receipts."""
+    automation = state.get("automation", {})
+    confirmation = state.get("confirmation", {})
+    binding = state.get("browser_binding", {})
+    runtime = state.get("runtime", {})
+    reviewer_chat = state.get("reviewer_chat", {})
+    task_id = str(automation.get("implementation_thread_id", "none"))
+    reviewer_id = str(confirmation.get("reviewer_thread_id", "none"))
+    lease_id = str(
+        runtime.get("browser_review_mode_selection_authorized_account_slot_lease_id", "none")
+    )
+    repository_identity = str(automation.get("reviewer_repository_identity", "none"))
+    generation = int(reviewer_chat.get("generation", 0))
+    if not (
+        CHATGPT_UUID_PATTERN.fullmatch(reviewer_id)
+        and reviewer_chat.get("status") in {"active", "rollover_pending"}
+        and generation >= 2
+        and lease_id != "none"
+        and runtime.get("browser_review_mode_selection_authorized_reviewer_thread_id")
+        == reviewer_id
+        and runtime.get("browser_review_mode_selection_authorized_browser_id")
+        == binding.get("browser_id")
+        and binding.get("status") == "bound"
+        and binding.get("provisioned_chat") is True
+        and binding.get("conversation_id") == reviewer_id
+        and binding.get("conversation_url") == f"https://chatgpt.com/c/{reviewer_id}"
+        and repository_identity not in {"", "none"}
+    ):
+        return False
+    expected_scope = account_browser_scope_for_state(state, state_path)
+    expected_state_identity = _provisioning_state_identity(state_path)
+    with acquire_state_lock(
+        gate_path, timeout=ACCOUNT_BROWSER_GATE_LOCK_TIMEOUT_SECONDS,
+    ):
+        gate = load_account_browser_gate(gate_path)
+        revision = gate["revision"]
+        existing = [
+            item for item in gate.get("retired_reviewer_chats", [])
+            if item.get("reviewer_thread_id") == reviewer_id
+        ]
+        if len(existing) == 1 and existing[0].get("reason") == "rate_limited":
+            return True
+        if existing or gate.get("last_released_task_id") != task_id:
+            return False
+        if int(gate.get("consecutive_rate_limits", 0)) < 1:
+            return False
+        if any(
+            slot.get("implementation_thread_id") == task_id
+            or slot.get("reviewer_thread_id", "none") == reviewer_id
+            for slot in gate.get("slots", [])
+        ):
+            return False
+        candidates = [
+            record for record in gate.get("provisioning_authorizations", [])
+            if record.get("implementation_thread_id") == task_id
+            and record.get("scope") == expected_scope
+            and record.get("state_identity") == expected_state_identity
+            and record.get("repository_identity") == repository_identity
+            and record.get("reviewer_generation") == generation - 1
+            and record.get("reclaim_status") in {"unreconciled", "consumed_after_reclaim"}
+        ]
+        if len(candidates) != 1:
+            return False
+        candidate = candidates[0]
+        recorded_lease = str(candidate.get("startup_lease_id", "none"))
+        if recorded_lease not in {"none", lease_id}:
+            return False
+        recorded_final_reviewer = str(
+            candidate.get("final_reviewer_thread_id", "none")
+        )
+        if recorded_final_reviewer not in {"none", reviewer_id}:
+            return False
+        gate.setdefault("retired_reviewer_chats", []).append({
+            "reviewer_thread_id": reviewer_id,
+            "reason": "rate_limited",
+            "retired_at": utc_now(),
+            "legacy_none_startup_reconciled": True,
+            "startup_lease_id": lease_id,
+            "reviewer_generation": generation,
+            "repository_identity": repository_identity,
+        })
+        gate["retired_reviewer_chats"] = gate["retired_reviewer_chats"][-MAX_RETIRED_REVIEWER_CHATS:]
+        candidate.update({
+            "startup_lease_id": lease_id,
+            "final_reviewer_thread_id": reviewer_id,
+            "final_reviewer_generation": generation,
+            "final_repository_identity": repository_identity,
+            "legacy_none_startup_reconciled": True,
+        })
+        _save_account_browser_gate_locked(
+            gate_path, gate, expected_revision=revision,
+        )
+        return True
+
+
 def require_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[str, Any]:
     """Persist a fail-closed rollover after a round cap or observed rate limit."""
     path = Path(args.state).expanduser().resolve()
@@ -6857,11 +6978,22 @@ def require_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[str
         )
         gate = load_account_browser_gate(gate_path)
         reviewer_id = state["confirmation"]["reviewer_thread_id"]
-        if not any(
+        retired = any(
             item.get("reviewer_thread_id") == reviewer_id
             for item in gate.get("retired_reviewer_chats", [])
-        ):
+        )
+        legacy_retirement_reconciled = False
+        if not retired:
+            legacy_retirement_reconciled = (
+                _reconcile_legacy_none_startup_rate_limit_retirement(
+                    path, state, gate_path,
+                )
+            )
+            retired = legacy_retirement_reconciled
+        if not retired:
             raise LCRLError("the account gate has not retired this reviewer Chat")
+    else:
+        legacy_retirement_reconciled = False
     revision = state["revision"]
     authorization_id = mark_reviewer_chat_rollover_required(state, reason)
     save_state(path, state, expected_revision=revision)
@@ -6875,6 +7007,7 @@ def require_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[str
         "old_chat_access_allowed": False,
         "browser_runtime_initialization_allowed": False,
         "next_action": "wait_for_cooldown_then_provision_one_replacement_chat",
+        "legacy_retirement_reconciled": legacy_retirement_reconciled,
         "revision": state["revision"],
     }
 
@@ -7170,6 +7303,21 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
         "browser_submission_send_authorized_revision": 0,
     }.items():
         runtime[key] = value
+    account_slot_lease_id = str(
+        getattr(args, "account_slot_lease_id", None) or "none"
+    )
+    account_browser_startup_identity_promoted = False
+    if account_slot_lease_id != "none":
+        account_browser_startup_identity_promoted = (
+            _promote_provisioning_startup_slot_reviewer_identity(
+                state, path, account_slot_lease_id, browser_id,
+                getattr(args, "registry", None), getattr(args, "at", None),
+            )
+        )
+        if not account_browser_startup_identity_promoted:
+            raise LCRLError(
+                "replacement reviewer Chat binding could not promote its startup slot"
+            )
     save_state(path, state, expected_revision=revision)
     return {
         "ok": True,
@@ -7178,6 +7326,9 @@ def complete_reviewer_chat_rollover_command(args: argparse.Namespace) -> dict[st
         "retired_reviewer_thread_id": old_reviewer_id,
         "reviewer_thread_id": new_reviewer_id,
         "reviewer_reasoning_reconfirmation_required": True,
+        "account_browser_startup_identity_promoted": (
+            account_browser_startup_identity_promoted
+        ),
         "old_chat_access_allowed": False,
         "next_action": "attach_complete_project_context_and_rollover_handoff",
         "revision": state["revision"],
@@ -13760,6 +13911,8 @@ def build_parser() -> argparse.ArgumentParser:
     complete_rollover.add_argument("--provider-tab-id", required=True)
     complete_rollover.add_argument("--url", required=True)
     complete_rollover.add_argument("--observed-title", default="none")
+    complete_rollover.add_argument("--account-slot-lease-id")
+    complete_rollover.add_argument("--registry")
     complete_rollover.add_argument("--at")
 
     finalize_rollover = sub.add_parser(
