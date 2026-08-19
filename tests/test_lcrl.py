@@ -1504,6 +1504,25 @@ class ControllerTests(unittest.TestCase):
                 )["reason_code"],
                 "consumed_orphaned_provisioning_repository_evidence_unconfirmed",
             )
+            finalized_gate = json.loads(json.dumps(gate))
+            finalized_gate["provisioning_authorizations"][0].update({
+                "startup_lease_id": "browser-slot-finalized",
+                "final_reviewer_thread_id": "replacement-chat",
+            })
+            self.assertEqual(
+                lcrl._orphaned_provisioning_plan_from_gate(
+                    state_path, state, finalized_gate,
+                )["reason_code"],
+                "consumed_orphaned_provisioning_chat_side_effect_uncertain",
+            )
+            sent_state = json.loads(json.dumps(state))
+            sent_state["review"]["request_message_id"] = "request-already-sent"
+            self.assertEqual(
+                lcrl._orphaned_provisioning_plan_from_gate(
+                    state_path, sent_state, gate,
+                )["reason_code"],
+                "consumed_orphaned_provisioning_chat_side_effect_uncertain",
+            )
 
             with mock.patch.object(lcrl, "default_account_browser_gate_path", return_value=registry):
                 guard = lcrl.guard_action(Namespace(

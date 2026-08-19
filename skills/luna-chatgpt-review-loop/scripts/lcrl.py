@@ -1359,6 +1359,19 @@ def _orphaned_provisioning_plan_from_gate(
         return {"ready": False, "reason_code": "provisioning_repository_identity_mismatch"}
     status = str(record.get("reclaim_status", "unreconciled"))
     if status == "consumed_after_reclaim":
+        review = state.get("review", {})
+        if (
+            str(record.get("startup_lease_id", "none")) not in {"", "none"}
+            or str(record.get("final_reviewer_thread_id", "none")) not in {"", "none"}
+            or any(
+                str(review.get(field, "none")) not in {"", "none"}
+                for field in (
+                    "request_turn_id", "request_message_id", "request_persisted_at",
+                    "response_turn_id", "response_message_id", "response_completed_at",
+                )
+            )
+        ):
+            return {"ready": False, "applicable": True, "reason_code": "consumed_orphaned_provisioning_chat_side_effect_uncertain"}
         if gate.get("slots"):
             return {"ready": False, "applicable": True, "reason_code": "consumed_orphaned_provisioning_slot_uncertain"}
         retired_matches = [
