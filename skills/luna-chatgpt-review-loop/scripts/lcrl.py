@@ -35,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 158
-SKILL_REVISION = "2026-08-19.115"
+CONTROLLER_VERSION = 159
+SKILL_REVISION = "2026-08-19.116"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -3270,6 +3270,7 @@ def apply_state_defaults(state: dict[str, Any]) -> None:
         "waiting_check_expected_rdate",
         waiting_check_rdate() if legacy_waiting else "none",
     )
+    automation.setdefault("waiting_check_local_continuation", False)
     automation.setdefault(
         "waiting_check_token",
         "wait-legacy-" + fingerprint({
@@ -3680,6 +3681,7 @@ def new_state(
             "waiting_check_expected_rdate": "none",
             "waiting_check_recovery_armed_lease_id": "none",
             "waiting_check_recovery_armed_rdate": "none",
+            "waiting_check_local_continuation": False,
         },
         "policy": {
             "implementation_role": implementation_role,
@@ -4598,10 +4600,16 @@ def validate_state(state: dict[str, Any]) -> None:
                 and status == "review_submit_pending"
                 and state.get("recovery", {}).get("network_state") == "rate_limited"
             )
+            or (
+                waiting_check_kind == "local_continuation"
+                and status == "local_work"
+                and state.get("review", {}).get("goal_mode") == "continuous"
+            )
         )
     )
     if waiting_check_kind not in {
         "none", "review_reply", "submission_retry", "rollover_continuation",
+        "local_continuation",
     }:
         errors.append("waiting check kind is invalid")
     if bool(waiting_check_active) != (waiting_check_kind != "none"):
@@ -4792,6 +4800,14 @@ def _waiting_check_prompt(
             f"{command}\n"
             "先执行以上检查；禁止读取旧 Chat、禁止重新排成回复等待。按控制器返回的 startup 请求创建并绑定唯一替代 Chat；绑定成功后才删除本任务并 finalize。\n"
             "Run this check first. Never read the retired Chat or rearm a reply poll. Use the controller startup request to create and bind exactly one replacement Chat; delete this task and finalize only after binding succeeds."
+        )
+    if state.get("automation", {}).get("waiting_check_kind") == "local_continuation":
+        return (
+            "SuperLuna 本地阶段续接 occurrence；无需操作 Chat。\n"
+            "SuperLuna local-stage continuation occurrence; do not access Chat.\n\n"
+            "内部单次续接检查 / Internal one-shot continuation check:\n"
+            f"{command}\n"
+            "只核对同一 state、实施任务身份、单次 occurrence 与旧 lease；核对通过后唤醒同一实施任务继续 local_work。不得读取 Chat、不得重建 occurrence、不得循环改期。"
         )
     return (
         "SuperLuna 正在等待评审回复。\n"
@@ -5176,16 +5192,34 @@ def workflow_status_label(state: dict[str, Any]) -> str:
         "review_receipt_pending", "review_waiting",
     }:
         return "等待回复"
+    if state.get("review", {}).get("status") == "external_blocked":
+        return "技术阻断"
     return user_status_label(str(state.get("review", {}).get("status", "external_blocked")))
 
 
 def rollover_future_action(state: dict[str, Any]) -> tuple[bool, str]:
     """Project the one legal continuation for a non-active reviewer Chat."""
+    automation = state.get("automation", {})
+    if state.get("review", {}).get("status") == "local_work":
+        if (
+            reviewer_chat := state.get("reviewer_chat", {})
+        ).get("status", "active") == "active" and (
+            automation.get("waiting_check_active") is True
+            and automation.get("waiting_check_kind") == "local_continuation"
+            and automation.get("waiting_check_token", "none") != "none"
+            and automation.get("waiting_check_expected_rdate", "none") != "none"
+        ):
+            return True, "bound_local_continuation_occurrence"
+        if (
+            state.get("review", {}).get("goal_mode") == "continuous"
+            and not active_action_lease(state)
+            and reviewer_chat.get("status", "active") == "active"
+        ):
+            return False, "schedule_one_local_continuation_occurrence"
     reviewer_chat = state.get("reviewer_chat", {})
     status = reviewer_chat.get("status", "active")
     if status == "active":
         return True, "normal_workflow"
-    automation = state.get("automation", {})
     pending_replacement = reviewer_chat.get("pending_replacement", "none")
     if isinstance(pending_replacement, dict):
         valid = bool(
@@ -5253,6 +5287,12 @@ TECHNICAL_REASON_PROFILES: dict[str, tuple[str, str, str, str]] = {
         "The controller encountered a technical failure and safely stopped the current action.",
         "由原实施任务按错误代码恢复；不改变产品方向。",
         "Recover in the original implementation task using the reason code; do not change product direction.",
+    ),
+    "candidate_freeze_requires_scoped_commit": (
+        "当前候选包含未冻结改动，无法安全宣称为 Beta 候选。",
+        "The current candidate contains unfrozen changes and cannot safely be called a Beta candidate.",
+        "先确定并冻结本轮提交范围，再重新执行 release 验证。",
+        "Define and freeze the scoped changes, then rerun release validation.",
     ),
 }
 
@@ -5363,6 +5403,7 @@ def waiting_check_binding_pending(state: dict[str, Any]) -> bool:
         and automation.get("waiting_check_active") is True
         and automation.get("waiting_check_kind", "none") in {
             "review_reply", "submission_retry", "rollover_continuation",
+            "local_continuation",
         }
         and automation.get("waiting_check_token", "none") != "none"
         and automation.get("waiting_check_automation_id", "none") == "none"
@@ -5390,6 +5431,11 @@ def _waiting_check_contract_active(state: dict[str, Any]) -> bool:
             and state.get("reviewer_chat", {}).get("status") in {
                 "rollover_pending", "rollover_blocked",
             }
+        )
+    if kind == "local_continuation":
+        return bool(
+            status == "local_work"
+            and state.get("review", {}).get("goal_mode") == "continuous"
         )
     return False
 
@@ -7023,6 +7069,32 @@ def waiting_check_command(args: argparse.Namespace) -> dict[str, Any]:
     """
     path = Path(args.state).expanduser().resolve()
     state = load_state(path)
+    if state["automation"].get("waiting_check_kind") == "local_continuation":
+        state, _expired = _recover_expired_waiting_claim(
+            path, state, args.token, args.automation_id,
+        )
+        blocked = _waiting_check_preconditions(state, args.token, args.automation_id)
+        if blocked is not None:
+            return _waiting_check_blocked_result(path, state, blocked)
+        revision = state["revision"]
+        state["automation"]["waiting_check_claimed_id"] = args.automation_id
+        lease_id = claim_action_lease(state, "local_continuation", minutes=4)
+        save_state(path, state, expected_revision=revision)
+        return add_user_status_exit({
+            "ok": True,
+            "action": "local_continuation_wake",
+            "status": state["review"]["status"],
+            "lease_id": lease_id,
+            "waiting_check_action": "consume_once",
+            "waiting_check_token": args.token,
+            "waiting_check_automation_id": args.automation_id,
+            "chat_read_allowed": False,
+            "chat_send_allowed": False,
+            "continuation_required": True,
+            "turn_completion_allowed": False,
+            "next_action": "continue_local_work",
+            "future_action_valid": False,
+        })
     if (
         state["reviewer_chat"].get("status") in {
             "rollover_pending", "rollover_blocked",
@@ -8695,6 +8767,21 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
     controlled_exact_url_count = int(
         getattr(args, "controlled_exact_url_count", 0) or 0
     )
+    controlled_browser_id = str(
+        getattr(args, "controlled_browser_id", "") or ""
+    ).strip()
+    # A controlled-tab count is an occurrence-local browser observation.  A
+    # restart invalidates the old controlled listing even when the durable
+    # Chat binding is still valid.  Never let a cached count strand recovery
+    # on ``reuse_controlled_exact_url``; the new browser must explicitly
+    # identify the listing before that count can be trusted.
+    raw_controlled_exact_url_count = controlled_exact_url_count
+    controlled_listing_matches_current_browser = (
+        browser_id == binding.get("browser_id")
+        or controlled_browser_id == browser_id
+    )
+    if not controlled_listing_matches_current_browser and controlled_exact_url_count == 1:
+        controlled_exact_url_count = 0
     try:
         if user_exact_url_count > 1:
             tab_plan = {
@@ -8810,6 +8897,10 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
         "required_tab_source": tab_plan.get("required_source", "none"),
         "user_exact_url_count": user_exact_url_count,
         "controlled_exact_url_count": controlled_exact_url_count,
+        "raw_controlled_exact_url_count": raw_controlled_exact_url_count,
+        "controlled_listing_matches_current_browser": (
+            controlled_listing_matches_current_browser
+        ),
         "reason_code": "none",
         "lease_id": lease_id,
         "account_slot_lease_id": account_slot_lease_id,
@@ -9923,10 +10014,15 @@ REPOSITORY_REVIEW_CANARY_PATHS = (
 
 def _repository_review_canaries(
     project_root: Path, head_commit: str, tracked: Iterable[str],
+    *, profile: str | None = None,
 ) -> list[dict[str, str]]:
     """Select two committed regular blobs; dedicated canaries are atomic."""
     tracked_set = set(tracked)
     dedicated_present = [path in tracked_set for path in REPOSITORY_REVIEW_CANARY_PATHS]
+    if profile == SUPERLUNA_REPO_RETEST_PROFILE and not all(dedicated_present):
+        # The isolated retest profile has a fixed root+nested identity pair.
+        # Never let a missing pair silently downgrade to generic canaries.
+        return []
     if any(dedicated_present):
         if not all(dedicated_present):
             return []
@@ -9984,7 +10080,10 @@ def repository_rollover_recovery_plan(
         return {"ready": False, "reason_code": "repository_commit_not_remote_tracked",
                 "system_next_action": "fetch or publish the exact commit before rollover"}
     tracked, _commit, _dirty = _git_project_inventory(project_root)
-    canaries = _repository_review_canaries(project_root, head_commit, tracked)
+    canaries = _repository_review_canaries(
+        project_root, head_commit, tracked,
+        profile=state["automation"].get("profile"),
+    )
     if not canaries:
         return {"ready": False, "reason_code": "repository_tree_canaries_unavailable",
                 "system_next_action": "restore one root and one nested tracked canary"}
@@ -10195,7 +10294,10 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
         return _prepare_full_source_fallback(args, "private_repository_access_unverified", project_root)
     tree_lines = _git_output(project_root, "ls-tree", "-r", "--full-tree", head_commit).splitlines()
     tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
-    canaries = _repository_review_canaries(project_root, head_commit, tracked)
+    canaries = _repository_review_canaries(
+        project_root, head_commit, tracked,
+        profile=state["automation"].get("profile"),
+    )
     if not canaries:
         return _prepare_full_source_fallback(args, "tree_canaries_unavailable", project_root)
     repository_identity = persist_reviewer_repository_identity(
@@ -13052,13 +13154,157 @@ def release_action(args: argparse.Namespace) -> dict[str, Any]:
         return {"ok": True, "released": False, "reason": "already_clear", "revision": revision}
     if args.lease_id != current and not args.force:
         raise LCRLError("lease id does not match the active action lease")
+    auto_continued = False
+    auto_next_action = "none"
+    continuation_occurrence = {}
+    if (
+        state["runtime"].get("action_lease_reason") == "local_work"
+        and state["review"].get("status") == "local_work"
+        and state["review"].get("goal_mode") == "continuous"
+        and state["automation"].get("waiting_check_active") is not True
+        and state.get("reviewer_chat", {}).get("status", "active") == "active"
+    ):
+        # A local-work turn must leave a durable one-shot continuation before
+        # its lease is released.  Without this boundary, the task can become
+        # idle while the continuous goal is still incomplete.
+        automation = state["automation"]
+        continuation_token = "continue-" + secrets.token_hex(8)
+        automation.update({
+            "heartbeat_mode": "waiting_only",
+            "waiting_check_token": continuation_token,
+            "waiting_check_active": True,
+            "waiting_check_kind": "local_continuation",
+            "waiting_check_account_registry": "none",
+            "waiting_check_automation_id": "none",
+            "waiting_check_claimed_id": "none",
+            "waiting_check_expected_rdate": waiting_check_rdate(),
+            "waiting_check_recovery_armed_lease_id": "none",
+            "waiting_check_recovery_armed_rdate": "none",
+            "waiting_check_local_continuation": True,
+        })
+        continuation_occurrence = platform_wait_binding_barrier_contract(path, state)
+        auto_continued = True
+        auto_next_action = "continue_local_work"
+    if (
+        state["runtime"].get("action_lease_reason") == "apply_result"
+        and state["review"].get("status") == "result_received"
+    ):
+        operation = state.get("next_operation", {})
+        if (
+            operation.get("status") == "validated"
+            and operation.get("source_response_message_id")
+            == state["review"].get("response_message_id")
+        ):
+            # Releasing the apply lease is the durable implementation boundary:
+            # the reviewed change has finished locally. Advance the continuous
+            # task immediately so it cannot strand result_received behind an
+            # ended turn waiting for another "continue" message.
+            operation["status"] = "applied"
+            operation["applied_at"] = utc_now()
+            archive_review_cycle(state, "automatic_apply_result_continuation")
+            state["review"]["status"] = "local_work"
+            state["review"]["recovery_action"] = "automatic_next_stage_continuation"
+            state["review"]["last_progress_at"] = utc_now()
+            record_resume_checkpoint(state, "local_work")
+            if state["review"].get("goal_mode") == "continuous":
+                automation = state["automation"]
+                if automation.get("waiting_check_active") is True:
+                    raise LCRLError(
+                        "cannot schedule local continuation while another occurrence is active"
+                    )
+                continuation_token = "continue-" + secrets.token_hex(8)
+                automation.update({
+                    "heartbeat_mode": "waiting_only",
+                    "waiting_check_token": continuation_token,
+                    "waiting_check_active": True,
+                    "waiting_check_kind": "local_continuation",
+                    "waiting_check_account_registry": "none",
+                    "waiting_check_automation_id": "none",
+                    "waiting_check_claimed_id": "none",
+                    "waiting_check_expected_rdate": waiting_check_rdate(),
+                    "waiting_check_recovery_armed_lease_id": "none",
+                    "waiting_check_recovery_armed_rdate": "none",
+                    "waiting_check_local_continuation": True,
+                })
+                continuation_occurrence = platform_wait_binding_barrier_contract(path, state)
+            auto_continued = True
+            auto_next_action = "continue_local_work"
     automation = state.get("automation", {})
+    if state["runtime"].get("action_lease_reason") == "local_continuation":
+        if automation.get("waiting_check_claimed_id") != automation.get("waiting_check_automation_id"):
+            raise LCRLError("local continuation lease must own the bound occurrence")
+        deactivate_waiting_check(state)
     if automation.get("waiting_check_recovery_armed_lease_id") == current:
         automation["waiting_check_recovery_armed_lease_id"] = "none"
         automation["waiting_check_recovery_armed_rdate"] = "none"
     clear_action_lease(state)
     save_state(path, state, expected_revision=revision)
-    return {"ok": True, "released": True, "revision": state["revision"]}
+    result = {
+        "ok": True,
+        "released": True,
+        "revision": state["revision"],
+        "auto_continued": auto_continued,
+        "status": state["review"]["status"],
+        "next_action": auto_next_action,
+        "continuation_required": auto_continued,
+        "turn_completion_allowed": not auto_continued,
+    }
+    if continuation_occurrence:
+        result.update(continuation_occurrence)
+        result.update({
+            "next_action": "create_and_bind_local_continuation_occurrence",
+            "continuation_occurrence_required": True,
+            "chat_read_allowed": False,
+            "chat_send_allowed": False,
+        })
+    return result
+
+
+def schedule_local_continuation_command(args: argparse.Namespace) -> dict[str, Any]:
+    """Reserve one platform occurrence to wake the same task after local work."""
+    path = Path(args.state).resolve()
+    state = load_state(path)
+    runtime = state["runtime"]
+    automation = state["automation"]
+    if args.implementation_thread_id != automation.get("implementation_thread_id"):
+        raise LCRLError("local continuation belongs to a different implementation task")
+    if not (
+        state["review"].get("status") == "local_work"
+        and state["review"].get("goal_mode") == "continuous"
+        and runtime.get("action_lease_id") == args.lease_id
+        and runtime.get("action_lease_reason") == "local_work"
+        and automation.get("waiting_check_active") is not True
+    ):
+        raise LCRLError("local continuation requires the active local_work lease and an idle wait boundary")
+    revision = state["revision"]
+    automation.update({
+        "heartbeat_mode": "waiting_only",
+        "waiting_check_token": "continue-" + secrets.token_hex(8),
+        "waiting_check_active": True,
+        "waiting_check_kind": "local_continuation",
+        "waiting_check_account_registry": "none",
+        "waiting_check_automation_id": "none",
+        "waiting_check_claimed_id": "none",
+        "waiting_check_expected_rdate": waiting_check_rdate(),
+        "waiting_check_recovery_armed_lease_id": "none",
+        "waiting_check_recovery_armed_rdate": "none",
+        "waiting_check_local_continuation": True,
+    })
+    clear_action_lease(state)
+    save_state(path, state, expected_revision=revision)
+    result = {
+        "ok": True,
+        "action": "local_continuation_scheduled",
+        "status": state["review"]["status"],
+        "continuation_required": True,
+        "turn_completion_allowed": False,
+        "next_action": "create_and_bind_local_continuation_occurrence",
+        "chat_read_allowed": False,
+        "chat_send_allowed": False,
+        "revision": state["revision"],
+    }
+    result.update(platform_wait_binding_barrier_contract(path, state))
+    return result
 
 
 def authorize_browser_review_mode_selection_command(args: argparse.Namespace) -> dict[str, Any]:
@@ -13619,6 +13865,13 @@ def transition(args: argparse.Namespace) -> dict[str, Any]:
             and deleted_id != waiting_check_previous_automation_id
         ):
             raise LCRLError("phase change requires deletion of the current waiting check")
+        deactivate_waiting_check(state)
+
+    if (
+        old_status == "local_work"
+        and args.status != "local_work"
+        and state["automation"].get("waiting_check_kind") == "local_continuation"
+    ):
         deactivate_waiting_check(state)
 
     if new_monitored and (not old_monitored or phase_changed):
@@ -14914,6 +15167,10 @@ def build_parser() -> argparse.ArgumentParser:
     authorize_submission_reopen.add_argument(
         "--controlled-exact-url-count", required=True, type=int,
     )
+    authorize_submission_reopen.add_argument(
+        "--controlled-browser-id",
+        help="本次 controlled tabs.list() 观测所属的当前 browser identity；重启后缺失则不可信",
+    )
     authorize_submission_reopen.add_argument("--account-slot-lease-id", required=True)
     authorize_submission_reopen.add_argument("--account-browser-registry")
     authorize_submission_reopen.add_argument("--at")
@@ -15398,6 +15655,11 @@ def build_parser() -> argparse.ArgumentParser:
     release.add_argument("--lease-id", required=True)
     release.add_argument("--force", action="store_true")
 
+    local_continuation = sub.add_parser("schedule-local-continuation")
+    local_continuation.add_argument("--state", required=True)
+    local_continuation.add_argument("--lease-id", required=True)
+    local_continuation.add_argument("--implementation-thread-id", required=True)
+
     review_mode = sub.add_parser("confirm-review-mode")
     review_mode.add_argument("--state", required=True)
     review_mode.add_argument("--mode", required=True, choices=("extreme",))
@@ -15807,6 +16069,8 @@ def main(argv: list[str] | None = None) -> int:
             result = reset_for_retest_command(args)
         elif args.command == "release":
             result = release_action(args)
+        elif args.command == "schedule-local-continuation":
+            result = schedule_local_continuation_command(args)
         elif args.command == "confirm-review-mode":
             result = confirm_review_mode(args)
         elif args.command == "authorize-browser-review-mode-selection":

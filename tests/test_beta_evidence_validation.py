@@ -77,6 +77,15 @@ class BetaEvidenceValidationTests(unittest.TestCase):
         self.assertIn("release report public_beta_ready must match computed readiness", errors)
         self.assertIn("release report beta_gate_status.ready must match computed readiness", errors)
 
+    def test_release_report_cannot_reference_a_different_frozen_candidate(self):
+        report = copy.deepcopy(self.report)
+        report["candidate_commit"] = "f" * 40
+        errors = validator.validate_contract(self.matrix, report)
+        self.assertIn(
+            "release report candidate_commit must match candidate_commit",
+            errors,
+        )
+
     def test_cycle_with_outside_wakeup_cannot_count(self):
         matrix = copy.deepcopy(self.matrix)
         gate = matrix["gates"]["ten_consecutive_real_project_cycles_on_frozen_candidate"]

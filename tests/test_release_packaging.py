@@ -57,6 +57,16 @@ class ReleasePackagingTests(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, "archive tree mismatch"):
                 release.verify_archive(ROOT, archive_path)
 
+    def test_verifier_rejects_mutated_tracked_file_content(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = release.build_archive(ROOT, Path(temporary))
+            archive_path = Path(result["archive"])
+            tracked_name = f"SuperLuna-{release._package_version(ROOT)}/README.md"
+            with zipfile.ZipFile(archive_path, "a") as archive:
+                archive.writestr(tracked_name, b"stale tracked content")
+            with self.assertRaisesRegex(release.ReleaseError, "archive content mismatch"):
+                release.verify_archive(ROOT, archive_path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,7 +40,7 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.102`, Controller 158, Skill `2026-08-19.115`.
+- Source candidate: `0.2.0-alpha.103`, Controller 159, Skill `2026-08-19.116`.
 - Coordinator recovery inspection is now distinct from implementation
   authority. A coordinator whose guard identity matches its host may validate
   the exact original task in state/trusted run binding and request one platform
@@ -227,6 +227,20 @@ intervention.
   and Beta evidence validators passed. Coordinator read-only handoff and
   original-task-only execution are locally verified. The original NPC wakeup
   and rollover continuation remain a real-App gate.
+- Current local candidate-parity repair: Beta evidence validation now rejects a
+  release report whose `candidate_commit` differs from the frozen evidence
+  matrix. The report was synchronized to the matrix candidate; 452 repository
+  tests, Controller selftest 15/15, and the Beta validator pass structurally.
+  `ready=false` remains truthful because all six required real-device gates are
+  still incomplete.
+- The stale Alpha 103 archive was independently detected as mismatching the
+  current tracked source, covered by a verifier regression, then rebuilt and
+  verified deterministically: 126 tracked files, archive SHA-256
+  `7feb4dd767eae11372b3c6761c6642311381a3b6693b3696a9ec2f46a1a5074c`.
+- Technical blocker reporting now preserves the stable
+  `candidate_freeze_requires_scoped_commit` reason instead of degrading it to
+  generic `controller_error`; the current worktree still requires a scoped
+  freeze before any Beta-candidate claim.
 - Alpha 83 repository regression passed 419/419. Controller selftest passed
   15/15; closure-check, Skill, plugin, decision-register, milestone, and
   Beta-evidence validators also passed. Two independent builds produced the

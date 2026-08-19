@@ -166,6 +166,8 @@ def validate_contract(document: Any, release_report: Any | None = None) -> list[
             expected_blockers = [name for name in REQUIRED_GATES if not computed_pass.get(name, False)]
             if release_report.get("package_version") != version:
                 errors.append("release report package_version must match candidate_version")
+            if release_report.get("candidate_commit") != commit:
+                errors.append("release report candidate_commit must match candidate_commit")
             if release_report.get("public_beta_ready") is not computed_ready:
                 errors.append("release report public_beta_ready must match computed readiness")
             if not isinstance(beta, dict) or beta.get("ready") is not computed_ready:

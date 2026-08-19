@@ -24,9 +24,12 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.102`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 158 / Skill revision
-`2026-08-19.115` separates coordinator recovery inspection from implementation
+The current source candidate is `0.2.0-alpha.103`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 159 / Skill revision
+`2026-08-19.116` binds controlled-tab counts to the current browser identity;
+after a restart, a stale single count becomes one exact canonical reopen rather
+than a false tab reuse. Ambiguity remains fail-closed. Controller 158 / Skill
+revision `2026-08-19.115` separates coordinator recovery inspection from implementation
 authority. An explicitly identified coordinator may validate the exact
 repo-retest state/run-binding/task identity and request one platform wakeup of
 the original implementation task, but receives zero project, state, browser,
