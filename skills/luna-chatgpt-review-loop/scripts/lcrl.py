@@ -9934,15 +9934,17 @@ def reviewer_repository_root_for_state(state: dict[str, Any]) -> Path:
 
 
 def candidate_freeze_recovery_plan(
-    state_path: Path, state: dict[str, Any],
+    state_path: Path, state: dict[str, Any], *, require_blocked: bool = True,
 ) -> dict[str, Any]:
     """Prove the locally frozen candidate before clearing a stale block."""
     review = state.get("review", {})
-    applicable = bool(
-        state.get("automation", {}).get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
-        and review.get("status") == "external_blocked"
-        and review.get("recovery_action") == "candidate_freeze_requires_scoped_commit"
-    )
+    applicable = state.get("automation", {}).get("profile") == SUPERLUNA_REPO_RETEST_PROFILE
+    if require_blocked:
+        applicable = bool(
+            applicable
+            and review.get("status") == "external_blocked"
+            and review.get("recovery_action") == "candidate_freeze_requires_scoped_commit"
+        )
     if not applicable:
         return {"applicable": False, "ready": False, "reason_code": "not_applicable"}
     checks: dict[str, Any] = {}
@@ -9987,6 +9989,108 @@ def candidate_freeze_recovery_plan(
     return {"applicable": True, "ready": not missing,
             "reason_code": "candidate_freeze_verified" if not missing else missing[0],
             "checks": checks, "missing_reason_codes": missing}
+
+
+def _version_key(value: Any) -> tuple[int, int, int, int] | None:
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})\.(\d+)", str(value))
+    return tuple(int(part) for part in match.groups()) if match else None
+
+
+def run_binding_version_upgrade_plan(
+    state_path: Path, state: dict[str, Any],
+) -> dict[str, Any]:
+    """Plan one monotonic in-place upgrade for a trusted same-run binding."""
+    binding = state.get("review", {}).get("run_binding", {})
+    automation = state.get("automation", {})
+    confirmation = state.get("confirmation", {})
+    if automation.get("profile") != SUPERLUNA_REPO_RETEST_PROFILE:
+        return {"applicable": False, "ready": False, "reason_code": "not_applicable"}
+    old_controller = binding.get("controller_version")
+    old_skill = binding.get("skill_revision")
+    old_skill_key = _version_key(old_skill)
+    current_skill_key = _version_key(SKILL_REVISION)
+    rollback_detected = bool(
+        isinstance(old_controller, int) and old_controller > CONTROLLER_VERSION
+    ) or bool(
+        old_skill_key is not None
+        and current_skill_key is not None
+        and old_skill_key > current_skill_key
+    )
+    upgrade_needed = bool(
+        isinstance(old_controller, int) and old_controller < CONTROLLER_VERSION
+    ) or bool(
+        old_skill_key is not None
+        and current_skill_key is not None
+        and old_skill_key < current_skill_key
+    )
+    if not upgrade_needed and not rollback_detected:
+        return {"applicable": False, "ready": False, "reason_code": "not_applicable"}
+    evidence = candidate_freeze_recovery_plan(state_path, state, require_blocked=False)
+    if not evidence.get("ready") and not rollback_detected:
+        return {"applicable": False, "ready": False, "reason_code": "candidate_evidence_not_ready"}
+    checks = {
+        "trusted_binding": binding.get("status") == "trusted",
+        "same_state_schema": binding.get("state_schema_version") == SCHEMA_VERSION,
+        "same_task": binding.get("implementation_thread_id") == automation.get("implementation_thread_id"),
+        "same_reviewer": binding.get("reviewer_thread_id") == confirmation.get("reviewer_thread_id"),
+        "controller_monotonic": isinstance(old_controller, int) and old_controller < CONTROLLER_VERSION,
+        "skill_monotonic": (
+            _version_key(old_skill) is not None
+            and _version_key(old_skill) < _version_key(SKILL_REVISION)
+        ),
+        "no_waiting_lease": automation.get("waiting_check_active") is not True,
+        "no_action_lease": not active_action_lease(state),
+        "no_browser_lease": not any(
+            key.endswith("lease_id") and value not in {None, "", "none"}
+            for key, value in state.get("runtime", {}).items()
+            if key != "action_lease_id"
+        ),
+    }
+    checks["candidate_evidence_consistent"] = evidence.get("ready") is True
+    checks["trusted_installed_plugin_identity"] = bool(source_checkout_root(state_path.parent).is_dir())
+    reason_order = (
+        ("trusted_binding", "run_binding_upgrade_untrusted"),
+        ("same_state_schema", "run_binding_upgrade_schema_mismatch"),
+        ("same_task", "run_binding_upgrade_task_mismatch"),
+        ("same_reviewer", "run_binding_upgrade_reviewer_mismatch"),
+        ("controller_monotonic", "run_binding_upgrade_controller_not_monotonic"),
+        ("skill_monotonic", "run_binding_upgrade_skill_not_monotonic"),
+        ("no_waiting_lease", "run_binding_upgrade_waiting_lease_active"),
+        ("no_action_lease", "run_binding_upgrade_action_lease_active"),
+        ("no_browser_lease", "run_binding_upgrade_browser_lease_active"),
+        ("trusted_installed_plugin_identity", "run_binding_upgrade_plugin_identity_untrusted"),
+        ("candidate_evidence_consistent", "run_binding_upgrade_candidate_evidence_mismatch"),
+    )
+    missing = [reason for check, reason in reason_order if not checks.get(check)]
+    return {
+        "applicable": True, "ready": not missing,
+        "reason_code": "run_binding_upgrade_ready" if not missing else missing[0],
+        "checks": checks, "missing_reason_codes": missing,
+        "from_controller_version": old_controller, "from_skill_revision": old_skill,
+        "to_controller_version": CONTROLLER_VERSION, "to_skill_revision": SKILL_REVISION,
+    }
+
+
+def reconcile_run_binding_version_upgrade(
+    state_path: Path, state: dict[str, Any], plan: dict[str, Any],
+) -> None:
+    if not plan.get("ready"):
+        raise LCRLError(plan.get("reason_code", "run_binding_upgrade_blocked"))
+    revision = state["revision"]
+    state["review"]["run_binding"].update({
+        "controller_version": CONTROLLER_VERSION,
+        "skill_revision": SKILL_REVISION,
+    })
+    state.setdefault("review_history", []).append({
+        "event": "run_binding_version_upgraded",
+        "from_controller_version": plan.get("from_controller_version"),
+        "from_skill_revision": plan.get("from_skill_revision"),
+        "to_controller_version": CONTROLLER_VERSION,
+        "to_skill_revision": SKILL_REVISION,
+        "recorded_at": utc_now(),
+    })
+    state["review_history"] = state["review_history"][-20:]
+    save_state(state_path, state, expected_revision=revision)
 
 
 def persist_reviewer_repository_identity(
@@ -12174,6 +12278,28 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         # the remainder of this guard without rewriting the historical scope.
         implementation_thread_id = str(expected_implementation_thread_id)
     status = state["review"]["status"]
+    binding_upgrade = run_binding_version_upgrade_plan(path, state)
+    if binding_upgrade.get("applicable") and not binding_upgrade.get("ready"):
+        return {
+            "ok": True,
+            "action": "run_binding_version_upgrade_blocked",
+            "status": status,
+            "reason_code": binding_upgrade["reason_code"],
+            "run_binding_upgrade_diagnostic": binding_upgrade,
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "chat_read_allowed": False,
+            "old_chat_access_allowed": False,
+            "user_choice_required": False,
+            "system_next_action": "verify_same_run_upgrade_evidence",
+            "revision": state["revision"],
+        }
+    if binding_upgrade.get("applicable") and binding_upgrade.get("ready"):
+        reconcile_run_binding_version_upgrade(path, state, binding_upgrade)
+        state = load_state(path)
+        revision = state["revision"]
     legacy_gate_rollover = bool(
         state.get("reviewer_chat", {}).get("status") in {
             "rollover_pending", "rollover_blocked",

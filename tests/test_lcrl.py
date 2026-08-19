@@ -5683,6 +5683,37 @@ class ControllerTests(unittest.TestCase):
                 ))
             self.assertEqual(lcrl.load_state(state_path)["runtime"]["action_lease_id"], before)
 
+    def test_run_binding_upgrade_is_monotonic_and_lease_gated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = lcrl.new_state(
+                "none", "implementation", root, "reviewer-new",
+                continuation_mode="automatic", review_transport="in_app_browser",
+            )
+            state["automation"]["profile"] = lcrl.SUPERLUNA_REPO_RETEST_PROFILE
+            binding = state["review"]["run_binding"]
+            binding.update({
+                "controller_version": 158, "skill_revision": "2026-08-19.115",
+            })
+            with mock.patch.object(lcrl, "candidate_freeze_recovery_plan", return_value={"ready": True}), \
+                 mock.patch.object(lcrl, "source_checkout_root", return_value=root):
+                plan = lcrl.run_binding_version_upgrade_plan(root / "state.json", state)
+            self.assertTrue(plan["ready"], plan)
+            self.assertEqual(plan["reason_code"], "run_binding_upgrade_ready")
+            state["runtime"]["browser_submission_send_authorized_lease_id"] = "active-browser"
+            with mock.patch.object(lcrl, "candidate_freeze_recovery_plan", return_value={"ready": True}), \
+                 mock.patch.object(lcrl, "source_checkout_root", return_value=root):
+                blocked = lcrl.run_binding_version_upgrade_plan(root / "state.json", state)
+            self.assertFalse(blocked["ready"])
+            self.assertEqual(blocked["reason_code"], "run_binding_upgrade_browser_lease_active")
+            state["runtime"]["browser_submission_send_authorized_lease_id"] = "none"
+            state["review"]["run_binding"] = dict(binding, controller_version=161)
+            with mock.patch.object(lcrl, "candidate_freeze_recovery_plan", return_value={"ready": True}), \
+                 mock.patch.object(lcrl, "source_checkout_root", return_value=root):
+                backwards = lcrl.run_binding_version_upgrade_plan(root / "state.json", state)
+            self.assertFalse(backwards["ready"])
+            self.assertEqual(backwards["reason_code"], "run_binding_upgrade_controller_not_monotonic")
+
     def test_cli_guard_task_mismatch_reports_stable_technical_reason(self):
         with tempfile.TemporaryDirectory() as directory:
             state_path = self.make_state(Path(directory))

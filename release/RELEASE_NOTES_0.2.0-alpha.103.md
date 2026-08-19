@@ -6,6 +6,9 @@
 
 Controller 160 / Skill `2026-08-19.117` reconciles a verified frozen candidate
 before fixed-Chat mode selection and repairs fixed-Chat submission
+recovery. It now permits one same-task, monotonic run-binding upgrade after a
+trusted installation update, only when the frozen candidate evidence and all
+lease/identity checks are clean; rollback and identity drift remain fail-closed.
 recovery after a Codex/browser restart. A controlled exact-URL count is trusted
 only when it belongs to the current browser identity (or explicitly attests
 that identity). A stale single count is treated as absent, allowing one exact
