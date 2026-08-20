@@ -3,13 +3,14 @@
 ## 包信息
 
 - 产品：SuperLuna
-- 版本：`0.2.0-alpha.103`（Python 元数据：`0.2.0a103`）
-- 当前源码控制器：160
+- 版本：`0.2.0-alpha.104`（Python 元数据：`0.2.0a104`）
+- 当前源码控制器：161
 - 状态 schema：7
-- 当前源码 Skill 修订：`2026-08-19.117`
-- 本轮修复：同一任务的可信旧 run binding 只可在版本单调升级、冻结候选证据一致且无 lease 时原子迁移；版本倒退和身份漂移继续安全停止。
+- 当前源码 Skill 修订：`2026-08-20.118`
+- 本轮修复：已绑定但 RDATE 过期的 `local_continuation` 不再永久返回 `already_bound`。普通入口只返回精确平台查询动作；平台任务存在时轮换 token/RDATE 并原地更新同一个任务，不存在时只开放一次替代绑定。恢复必须匹配原实施任务与原 automation identity，不访问 Chat 或项目；旧 token 静默过期，新 token 只唤醒一次。
+- 上一轮修复：同一任务的可信旧 run binding 只可在版本单调升级、冻结候选证据一致且无 lease 时原子迁移；版本倒退和身份漂移继续安全停止。
 - 当前 Chat 的正式轮次按可信 request event 与 reviewer identity 持久重建；已退休 generation 不会串入或清零当前计数。
-- 候选日期：2026-08-19
+- 候选日期：2026-08-20
 - Alpha 102 当前为本地验证候选；尚未取得原 NPC 的真实 App 续跑证据。
 - 发布定位：技术测试 Alpha，尚未达到公开 Beta
 
@@ -22,7 +23,7 @@ Alpha 102 把协调恢复检查与实施执行权分离。协调任务必须显�
 false。错误目标、身份或路径继续失败关闭。原任务被唤醒后仍须使用自己的稳定 ID 执行普通 guard，
 协调任务不能接管。
 
-- 仓库测试：445/445 通过；控制器 selftest：15/15 通过。
+- 仓库测试：466/466 通过；控制器 selftest：15/15 通过。
 - closure-check、Skill、plugin、decision register、milestone 与 Beta evidence validator 通过。
 - 这些只证明本地控制器合同；原 NPC 的平台唤醒、真实 App rollover 与 reviewer Chat 闭环尚未验证。
 

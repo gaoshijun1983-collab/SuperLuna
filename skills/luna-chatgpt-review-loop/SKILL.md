@@ -192,6 +192,10 @@ python -B <skill-root>/scripts/lcrl.py guard \
 绑定、渲染并把同一等待项更新为完整控制器提示。完成后才进入“等待 Chat”；其他任务或缺失
 精确身份仍失败关闭。若尚未绑定的旧 RDATE 已经过期，同一门禁只对精确实施任务原子轮换
 token 并生成新的未来 180 秒 RDATE；已绑定平台等待永不走这条恢复路径。
+若已经绑定的是 `local_continuation` 且其 RDATE 已过期，普通门禁必须返回
+`local_continuation_platform_lookup_required`，而不是继续声称 `already_bound`。此动作不取得项目、
+浏览器或 Chat 权限；精确实施任务只能查询 state 中原 automation ID，再按下述
+`recover-stale-wait` 合同原地更新同一个任务或开放一次替代绑定。未来仍有效的本地续接保持原绑定。
 `--replace` 是兼容参数，不能绕过等待门，也不能抢占不同任务、等待读取或浏览器重开 lease。
 只有用户明确终止/重置当前闭环并由控制器完成状态迁移后，普通
 turn 才能重新取得执行权。
@@ -773,6 +777,10 @@ python -B <skill-root>/scripts/lcrl.py recover-stale-wait \
 `not_found` 会解除旧任务绑定，再按 `platform_wait_create`、`bind-waiting-check` 和
 `render-waiting-check` 只建立一个替代任务。两条路径都保持原等待状态，不访问 Chat 或项目，
 也不要求用户决定。ID、实施任务、等待状态或过期 claim 任一不匹配时 state 字节必须不变。
+同一命令也处理已经过期的 `local_continuation` RDATE：必须匹配原实施任务与原 automation ID；
+`found` 只轮换 token/RDATE 并更新同一个平台任务，`not_found` 只开放一次替代绑定。旧 token
+occurrence 必须静默过期且零副作用，新 token occurrence 只能唤醒 `local_work` 一次。该恢复期间
+禁止访问 Chat、浏览器或项目，且不得改变既有 `review_reply` 的过期 claim 恢复语义。
 以上普通恢复只适用于 reviewer Chat 仍可访问且未达到正式轮数上限。若 state 已满轮或
 `reviewer_chat.status` 已是 `rollover_pending` / `rollover_blocked`，精确 lookup 完成后必须优先
 进入 `rollover_continuation`：保持现有 token、RDATE 与 automation identity，不得返回

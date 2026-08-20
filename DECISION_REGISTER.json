@@ -104,15 +104,15 @@
       "id": "stale-platform-wait-auto-recovery",
       "scope_key": "workflow.wait_recovery",
       "status": "user_approved",
-      "decision": "等待检查取得读取权后异常中断且读取权已过期时，普通唤醒必须自动核对 state 中绑定的精确平台任务；任务存在则原地更新，不存在则只重建一个替代等待。该技术恢复不访问 Chat 或项目、不改变等待状态，也不得要求用户决定。",
-      "scope": "适用于已绑定 review_reply 单次等待、过期 waiting_review_poll claim、平台任务查询与替代任务重建。",
+      "decision": "等待检查取得读取权后异常中断且读取权已过期，或已绑定的 local_continuation RDATE 已过期时，普通唤醒必须自动核对 state 中绑定的精确平台任务；任务存在则原地更新，不存在则只重建一个替代等待。该技术恢复不访问 Chat 或项目、不改变等待或本地工作状态，也不得要求用户决定。",
+      "scope": "适用于已绑定 review_reply 单次等待的过期 waiting_review_poll claim，以及已绑定 local_continuation 的过期 RDATE、平台任务查询与替代任务重建。",
       "recorded_on": "2026-08-18",
       "authority_sources": [
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/SKILL.md"},
         {"type": "file", "path": "skills/luna-chatgpt-review-loop/references/protocol.md"},
         {"type": "file", "path": "release/SUPERLUNA_CURRENT_UPDATE_2026-08-08.zh-CN.md"}
       ],
-      "change_rule": "不得用自动恢复扩大到其他平台任务、浏览器或项目；只有精确任务身份与过期 claim 同时成立时允许执行。"
+      "change_rule": "不得用自动恢复扩大到其他平台任务、浏览器或项目；review_reply 只有精确任务身份与过期 claim 同时成立时允许执行，local_continuation 还必须匹配原 automation identity 与过期 RDATE。"
     },
     {
       "id": "truthful-reviewer-project-context",

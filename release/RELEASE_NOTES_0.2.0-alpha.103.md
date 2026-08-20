@@ -3,6 +3,10 @@
 - Release metadata now derives the tracked source count from the exact Git
   build input before creating the deterministic archive; the report, evidence
   matrix, and embedded manifest therefore share one count.
+- Submission recovery now validates the observed controlled tab URL itself;
+  a wrong visible Chat is treated as zero canonical matches and can receive
+  one foreground canonical reopen authorization, while stale, ambiguous, or
+  unverified identities remain fail-closed.
 
 Controller 160 / Skill `2026-08-19.117` reconciles a verified frozen candidate
 before fixed-Chat mode selection and repairs fixed-Chat submission

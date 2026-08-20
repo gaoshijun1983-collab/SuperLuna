@@ -200,6 +200,14 @@ class TruthfulProjectContextTests(unittest.TestCase):
 
 
 class RepositoryCommitReviewTests(TruthfulProjectContextTests):
+    def setUp(self):
+        super().setUp()
+        remote_probe = mock.patch.object(
+            lcrl, "_anonymous_remote_contains_commit", return_value=True,
+        )
+        remote_probe.start()
+        self.addCleanup(remote_probe.stop)
+
     def repository_args(self, root: Path, state_path: Path, **overrides):
         values = dict(
             state=str(state_path), project_path=str(root),
@@ -365,14 +373,34 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             self.assertEqual(prepared["action"], "repository_access_receipt_required")
             self.assertFalse(lcrl.project_context_ready(lcrl.load_state(state_path)))
 
-    def test_unreachable_commit_falls_back_to_full_source_package(self):
+    def test_unreachable_commit_fails_closed_without_attachment_disguise(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); state_path = self.make_repo_state(root)
+            prior_scope = lcrl.load_state(state_path)["project_context"]["scope"]
             result = lcrl.prepare_repository_commit_review_command(
                 self.repository_args(root, state_path, remote_commit_reachable=False)
             )
-            self.assertEqual(result["action"], "full_source_attachment_required")
-            self.assertEqual(lcrl.load_state(state_path)["project_context"]["scope"], "full_source")
+            self.assertEqual(result["action"], "repository_evidence_blocked")
+            self.assertEqual(result["reason_code"], "repository_exact_commit_not_remote_verified")
+            self.assertFalse(result["attachment_fallback_allowed"])
+            self.assertFalse(result["user_choice_required"])
+            self.assertEqual(lcrl.load_state(state_path)["project_context"]["scope"], prior_scope)
+
+    def test_remote_probe_must_confirm_exact_commit_before_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            prior_bytes = state_path.read_bytes()
+            with mock.patch.object(
+                lcrl, "_anonymous_remote_contains_commit", return_value=False,
+            ):
+                result = lcrl.prepare_repository_commit_review_command(
+                    self.repository_args(root, state_path)
+                )
+            self.assertEqual(result["action"], "repository_evidence_blocked")
+            self.assertEqual(result["reason_code"], "repository_exact_commit_not_remote_verified")
+            self.assertFalse(result["attachment_fallback_allowed"])
+            self.assertFalse(result["user_choice_required"])
+            self.assertEqual(state_path.read_bytes(), prior_bytes)
 
     def test_dirty_worktree_never_claims_remote_commit_review(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -384,13 +412,34 @@ class RepositoryCommitReviewTests(TruthfulProjectContextTests):
             self.assertEqual(result["action"], "full_source_attachment_required")
             self.assertFalse(result["repository_commit_review_allowed"])
 
-    def test_private_repository_without_verified_access_is_blocked_to_full_package(self):
+    def test_private_repository_without_verified_access_fails_closed(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); state_path = self.make_repo_state(root)
             result = lcrl.prepare_repository_commit_review_command(
                 self.repository_args(root, state_path, private_access_verified=False)
             )
-            self.assertEqual(result["action"], "full_source_attachment_required")
+            self.assertEqual(result["action"], "repository_evidence_blocked")
+            self.assertEqual(result["reason_code"], "repository_remote_access_unverified")
+            self.assertFalse(result["user_choice_required"])
+
+    def test_repository_packet_is_repository_first_and_contains_no_local_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); state_path = self.make_repo_state(root)
+            subprocess.run(["git", "remote", "set-head", "origin", "main"], cwd=root,
+                           check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            prepared = lcrl.prepare_repository_commit_review_command(self.repository_args(root, state_path))
+            evidence = prepared["reviewer_evidence"]
+            self.assertEqual(evidence["repository_url"], "https://github.com/example/project")
+            self.assertEqual(evidence["exact_commit_sha"], prepared["head_commit"])
+            self.assertIn("comparison_range", evidence)
+            self.assertIn("changed_paths", evidence)
+            self.assertIn("must_read_files", evidence)
+            self.assertFalse(evidence["local_absolute_path_is_reviewer_visible"])
+            self.assertNotIn(str(root.resolve()), json.dumps(prepared))
+            state = lcrl.load_state(state_path)
+            handoff = state["project_context"]["rollover_handoff"]["payload"]
+            self.assertEqual(handoff["repository_evidence"]["exact_commit_sha"], prepared["head_commit"])
+            self.assertIn("Inspect the real repository", handoff["review_instruction"])
 
     def test_replacement_chat_requires_fresh_repository_access_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -742,11 +791,12 @@ class AttachmentUploadCapabilityTests(TruthfulProjectContextTests):
     def test_repository_commit_mode_does_not_require_attachment_capability(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory); state_path = self.make_repo_state(root)
-            prepared = lcrl.prepare_repository_commit_review_command(Namespace(
-                state=str(state_path), project_path=str(root), remote_url="https://github.com/example/project.git",
-                branch="main", remote_commit_reachable=True, private_access_verified=True,
-                fallback_output_dir=str(root / "fallback"), max_volume_bytes=20 * 1024 * 1024,
-            ))
+            with mock.patch.object(lcrl, "_anonymous_remote_contains_commit", return_value=True):
+                prepared = lcrl.prepare_repository_commit_review_command(Namespace(
+                    state=str(state_path), project_path=str(root), remote_url="https://github.com/example/project.git",
+                    branch="main", remote_commit_reachable=True, private_access_verified=True,
+                    fallback_output_dir=str(root / "fallback"), max_volume_bytes=20 * 1024 * 1024,
+                ))
             result = lcrl.declare_attachment_upload_capability_command(Namespace(
                 state=str(state_path), status="missing", transport="none", platform_declared=True, at=None,
             ))
@@ -9348,8 +9398,228 @@ class ControllerTests(unittest.TestCase):
                 automation_id="local-continuation-once",
             ))
             self.assertEqual(woke["action"], "local_continuation_wake")
+            self.assertNotEqual(woke["lease_id"], "none")
             self.assertFalse(woke["chat_read_allowed"])
             self.assertFalse(woke["chat_send_allowed"])
+
+    def test_turn_entry_does_not_compete_with_bound_local_continuation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            state["review"]["status"] = "local_work"
+            state["review"]["goal_mode"] = "continuous"
+            state["automation"].update({
+                "heartbeat_mode": "waiting_only",
+                "waiting_check_active": True,
+                "waiting_check_kind": "local_continuation",
+                "waiting_check_token": "continue-bound-once",
+                "waiting_check_expected_rdate": "RDATE:20990101T000000Z",
+                "waiting_check_automation_id": "local-continuation-once",
+                "waiting_check_claimed_id": "none",
+            })
+            lcrl.save_state(state_path, state)
+            before = state_path.read_bytes()
+
+            result = lcrl.guard_action(Namespace(
+                state=str(state_path), reason="turn_entry", minutes=20,
+                implementation_thread_id="implementation",
+                caller_role="implementation", target_implementation_thread_id=None,
+            ))
+
+            self.assertEqual(result["action"], "local_continuation_already_bound")
+            self.assertFalse(result["execution_allowed"])
+            self.assertEqual(result["lease_id"], "none")
+            self.assertEqual(result["waiting_check_kind"], "local_continuation")
+            self.assertEqual(result["waiting_check_token"], "continue-bound-once")
+            self.assertEqual(
+                result["waiting_check_automation_id"],
+                "local-continuation-once",
+            )
+            self.assertTrue(result["future_action_valid"])
+            self.assertEqual(
+                result["system_next_action"],
+                "wait_for_bound_local_continuation_occurrence",
+            )
+            self.assertEqual(state_path.read_bytes(), before)
+            persisted = lcrl.load_state(state_path)
+            self.assertEqual(persisted["runtime"]["action_lease_id"], "none")
+
+    def test_expired_local_continuation_guard_requires_platform_lookup_without_mutation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            state["review"]["status"] = "local_work"
+            state["review"]["goal_mode"] = "continuous"
+            state["automation"].update({
+                "heartbeat_mode": "waiting_only",
+                "waiting_check_active": True,
+                "waiting_check_kind": "local_continuation",
+                "waiting_check_token": "continue-expired-old",
+                "waiting_check_expected_rdate": "RDATE:20200101T000000Z",
+                "waiting_check_automation_id": "local-continuation-existing",
+                "waiting_check_claimed_id": "none",
+            })
+            lcrl.save_state(state_path, state)
+            before = state_path.read_bytes()
+
+            result = lcrl.guard_action(Namespace(
+                state=str(state_path), reason="turn_entry", minutes=20,
+                implementation_thread_id="implementation",
+                caller_role="implementation", target_implementation_thread_id=None,
+            ))
+
+            self.assertEqual(
+                result["action"],
+                "local_continuation_platform_lookup_required",
+            )
+            self.assertEqual(
+                result["reason_code"],
+                "expired_local_continuation_requires_platform_lookup",
+            )
+            self.assertFalse(result["execution_allowed"])
+            self.assertFalse(result["project_read_allowed"])
+            self.assertFalse(result["project_write_allowed"])
+            self.assertFalse(result["browser_access_allowed"])
+            self.assertFalse(result["chat_read_allowed"])
+            self.assertFalse(result["chat_send_allowed"])
+            self.assertFalse(result["user_choice_required"])
+            self.assertEqual(
+                result["platform_wait_lookup"]["id"],
+                "local-continuation-existing",
+            )
+            self.assertEqual(state_path.read_bytes(), before)
+
+    def test_expired_local_continuation_recovery_reuses_existing_platform_wait_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            state["review"]["status"] = "local_work"
+            state["review"]["goal_mode"] = "continuous"
+            state["automation"].update({
+                "heartbeat_mode": "waiting_only",
+                "waiting_check_active": True,
+                "waiting_check_kind": "local_continuation",
+                "waiting_check_token": "continue-expired-old",
+                "waiting_check_expected_rdate": "RDATE:20200101T000000Z",
+                "waiting_check_automation_id": "local-continuation-existing",
+                "waiting_check_claimed_id": "none",
+            })
+            lcrl.save_state(state_path, state)
+
+            recovered = lcrl.recover_stale_wait_command(Namespace(
+                state=str(state_path),
+                automation_id="local-continuation-existing",
+                implementation_thread_id="implementation",
+                platform_lookup_result="found",
+            ))
+            self.assertEqual(recovered["action"], "local_continuation_recovered")
+            self.assertEqual(
+                recovered["reason_code"],
+                "expired_local_continuation_recovered",
+            )
+            self.assertEqual(recovered["waiting_check_action"], "update_once")
+            self.assertEqual(
+                recovered["platform_wait_update"]["id"],
+                "local-continuation-existing",
+            )
+            self.assertFalse(recovered["execution_allowed"])
+            self.assertFalse(recovered["project_read_allowed"])
+            self.assertFalse(recovered["project_write_allowed"])
+            self.assertFalse(recovered["browser_access_allowed"])
+            self.assertFalse(recovered["user_choice_required"])
+            self.assertNotEqual(
+                recovered["waiting_check_token"], "continue-expired-old"
+            )
+
+            after_recovery = state_path.read_bytes()
+            old = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token="continue-expired-old",
+                automation_id="local-continuation-existing",
+            ))
+            self.assertEqual(old["action"], "waiting_check_expired")
+            self.assertEqual(state_path.read_bytes(), after_recovery)
+
+            new_token = recovered["waiting_check_token"]
+            woke = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=new_token,
+                automation_id="local-continuation-existing",
+            ))
+            self.assertEqual(woke["action"], "local_continuation_wake")
+            self.assertFalse(woke["chat_read_allowed"])
+            self.assertFalse(woke["chat_send_allowed"])
+            after_wake = state_path.read_bytes()
+            duplicate = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=new_token,
+                automation_id="local-continuation-existing",
+            ))
+            self.assertEqual(duplicate["action"], "waiting_check_expired")
+            self.assertEqual(state_path.read_bytes(), after_wake)
+
+    def test_expired_local_continuation_recovery_rebinds_once_and_rejects_identity_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = self.make_state(root)
+            state = lcrl.load_state(state_path)
+            state["review"]["status"] = "local_work"
+            state["review"]["goal_mode"] = "continuous"
+            state["automation"].update({
+                "heartbeat_mode": "waiting_only",
+                "waiting_check_active": True,
+                "waiting_check_kind": "local_continuation",
+                "waiting_check_token": "continue-expired-old",
+                "waiting_check_expected_rdate": "RDATE:20200101T000000Z",
+                "waiting_check_automation_id": "local-continuation-missing",
+                "waiting_check_claimed_id": "none",
+            })
+            lcrl.save_state(state_path, state)
+            before = state_path.read_bytes()
+
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.recover_stale_wait_command(Namespace(
+                    state=str(state_path), automation_id="wrong-automation",
+                    implementation_thread_id="implementation",
+                    platform_lookup_result="not_found",
+                ))
+            self.assertEqual(state_path.read_bytes(), before)
+            with self.assertRaises(lcrl.LCRLError):
+                lcrl.recover_stale_wait_command(Namespace(
+                    state=str(state_path), automation_id="local-continuation-missing",
+                    implementation_thread_id="wrong-implementation",
+                    platform_lookup_result="not_found",
+                ))
+            self.assertEqual(state_path.read_bytes(), before)
+
+            recovered = lcrl.recover_stale_wait_command(Namespace(
+                state=str(state_path),
+                automation_id="local-continuation-missing",
+                implementation_thread_id="implementation",
+                platform_lookup_result="not_found",
+            ))
+            self.assertEqual(recovered["action"], "local_continuation_recovered")
+            self.assertEqual(recovered["waiting_check_action"], "schedule_once")
+            self.assertEqual(recovered["waiting_check_automation_id"], "none")
+            new_token = recovered["waiting_check_token"]
+            new_rdate = recovered["waiting_check_expected_rdate"]
+            lcrl.bind_waiting_check_command(Namespace(
+                state=str(state_path), token=new_token,
+                automation_id="local-continuation-replacement",
+                scheduled_rdate=new_rdate,
+            ))
+            before_old = state_path.read_bytes()
+            old = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token="continue-expired-old",
+                automation_id="local-continuation-missing",
+            ))
+            self.assertEqual(old["action"], "waiting_check_expired")
+            self.assertEqual(state_path.read_bytes(), before_old)
+            woke = lcrl.waiting_check_command(Namespace(
+                state=str(state_path), token=new_token,
+                automation_id="local-continuation-replacement",
+            ))
+            self.assertEqual(woke["action"], "local_continuation_wake")
 
     def test_resume_after_project_update_never_reapplies_the_operation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -11199,6 +11469,46 @@ class ControllerTests(unittest.TestCase):
             self.assertTrue(result["open_canonical_url_once"])
             self.assertFalse(result["reuse_existing_exact_url"])
             self.assertEqual(result["required_tab_source"], "authorized_exact_url_open")
+
+    def test_submission_reopen_recovers_from_wrong_visible_url_with_canonical_open(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state_path = root / "state.json"
+            reviewer_id = "wrong-visible-url-reviewer"
+            state = lcrl.new_state(
+                "none", "implementation", root, reviewer_id,
+                continuation_mode="foreground", review_transport="in_app_browser",
+            )
+            state["runtime"]["session_log"] = str(root / "session.jsonl")
+            lcrl.save_state(state_path, state)
+            self.bind_browser_tab(state_path, reviewer_id)
+            lcrl.confirm_review_mode(Namespace(
+                state=str(state_path), mode="extreme", source="in_app_browser",
+                reviewer_thread_id=reviewer_id, observed_label="极高",
+                native_app_instance_id=None, at=None,
+            ))
+            self.transition(
+                state_path, "review_submit_pending", stage="WRONG-VISIBLE-URL",
+                fingerprint="wrong-visible-url-packet",
+            )
+            registry = root / "account-browser-gate.json"
+            slot = self.acquire_submission_slot(state_path, registry)
+
+            result = lcrl.authorize_browser_submission_reopen_command(Namespace(
+                state=str(state_path), fingerprint="wrong-visible-url-packet",
+                browser_id="iab-session-1", controlled_browser_id="iab-session-1",
+                controlled_exact_url_count=1,
+                controlled_url="https://chatgpt.com/c/wrong-chat",
+                user_exact_url_count=0,
+                account_slot_lease_id=slot["lease_id"],
+                account_browser_registry=str(registry), at=None,
+            ))
+
+            self.assertEqual(result["action"], "browser_submission_reopen_authorized")
+            self.assertTrue(result["open_canonical_url_once"])
+            self.assertFalse(result["reuse_existing_exact_url"])
+            self.assertEqual(result["reason_code"], "reviewer_identity_mismatch_recovered")
+            self.assertTrue(result["identity_mismatch_observed"])
 
     def test_provisioned_chat_promotes_provider_identity_on_first_wait_handoff(self):
         with tempfile.TemporaryDirectory() as directory:

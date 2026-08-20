@@ -28,6 +28,10 @@ intervention.
 - Exact platform reconciliation for a stale claimed wait: reuse the same
   one-shot when present or rebuild exactly one when the platform reports it
   missing, without Chat or project access.
+- Expired local-continuation reconciliation uses the same exact-task rule:
+  update the bound platform occurrence in place when present or open one
+  replacement binding when absent; old tokens expire silently and the new
+  token can wake local work only once.
 - Exact-URL fixed-Chat recovery after browser restart: reuse one visible match
   without navigation or open once when absent; ambiguity fails closed.
 - Formal review-title validation plus complete post-request assistant pairing;
@@ -40,7 +44,7 @@ intervention.
 
 ## Completed and verified
 
-- Source candidate: `0.2.0-alpha.103`, Controller 159, Skill `2026-08-19.116`.
+- Source candidate: `0.2.0-alpha.104`, Controller 161, Skill `2026-08-20.118`.
 - Coordinator recovery inspection is now distinct from implementation
   authority. A coordinator whose guard identity matches its host may validate
   the exact original task in state/trusted run binding and request one platform
@@ -317,6 +321,10 @@ intervention.
 - SuperLuna never changes the Codex implementation model; it may automatically
   select Extreme only in the exact bound reviewer Chat under controller authorization.
 - Local validation never counts as real-device or Public Beta evidence.
+- For Git-backed reviews, the remote repository at the exact pushed commit is
+  the primary reviewer-visible source. Review packets carry its branch,
+  baseline/diff range, changed paths, locked decisions, and must-read files;
+  local absolute paths are never represented as reviewer-visible proof.
 
 ## Constraints and risks
 

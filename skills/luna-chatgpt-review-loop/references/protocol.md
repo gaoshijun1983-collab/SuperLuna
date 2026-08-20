@@ -238,6 +238,16 @@ implementation task then invokes `recover-stale-wait` with `found` or
 barrier. Both paths remain in the same waiting state, grant no Chat or project
 access, and keep `user_choice_required=false`.
 
+The same command handles an expired one-shot `local_continuation` RDATE. The
+ordinary guard first returns `local_continuation_platform_lookup_required`
+without mutating state or granting project, browser, or Chat authority. The
+lookup must use the saved automation id and the original implementation task.
+`found` rotates only the token/RDATE and updates that same platform task;
+`not_found` opens the existing one-replacement binding barrier. A mismatched
+task or automation identity leaves the state bytes unchanged. The old token
+expires silently, and the replacement token may wake `local_work` exactly once.
+A future, still-valid local continuation remains `already_bound`.
+
 `retire-missing-wait` remains a compatibility path for explicitly authorized
 terminal retirement of an orphan wait that is not in this recoverable expired
 claim state. A task assertion, id mismatch, wrong implementation identity, or

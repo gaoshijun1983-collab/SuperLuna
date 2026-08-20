@@ -20,8 +20,10 @@ Codex 开发 → 一个有轮次上限的活动 ChatGPT 网页 Chat 审阅 → �
 
 ## 当前源码状态
 
-当前源码候选版本是 `0.2.0-alpha.103`。它仍是供技术测试者使用的早期 Alpha，尚不是
-Public Beta。Controller 160 / Skill revision `2026-08-19.117` 会先核对已验证冻结候选，再进入模式确认；controlled tab 计数必须属于
+当前源码候选版本是 `0.2.0-alpha.104`。它仍是供技术测试者使用的早期 Alpha，尚不是
+Public Beta。Controller 161 / Skill revision `2026-08-20.118` 会安全恢复已经过期的单次本地续接：
+平台任务仍存在时原地更新同一个任务，不存在时只开放一次替代绑定；恢复过程不访问 Chat 或项目，
+仍有效的续接保持不变。Controller 160 会先核对已验证冻结候选，再进入模式确认；controlled tab 计数必须属于
 当前 browser identity；重启后的 stale 单计数只能触发一次固定 canonical URL 重建，歧义仍失败关闭。
 Controller 158 / Skill revision `2026-08-19.115` 将协调恢复检查与实施执行权明确拆开：
 显式 coordinator 只能核对精确 repo-retest state、run binding 与目标实施任务，并请求平台单次唤醒

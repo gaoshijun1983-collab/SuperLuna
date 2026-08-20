@@ -35,8 +35,8 @@ except ModuleNotFoundError:  # pragma: no cover - Python >= 3.11 is required
 
 
 SCHEMA_VERSION = 7
-CONTROLLER_VERSION = 160
-SKILL_REVISION = "2026-08-19.117"
+CONTROLLER_VERSION = 161
+SKILL_REVISION = "2026-08-20.118"
 MAX_HEARTBEAT_BYTES = 1200
 MAX_WAITING_AUTOMATION_ID_CHARS = 64
 MAX_PROJECT_CONTEXT_FILE_BYTES = 32 * 1024
@@ -488,6 +488,25 @@ def waiting_check_rdate(now: datetime | None = None) -> str:
         microsecond=0
     )
     return "RDATE:" + scheduled.strftime("%Y%m%dT%H%M%SZ")
+
+
+def parse_waiting_check_rdate(value: Any) -> datetime:
+    """Parse the exact platform occurrence identity used by one waiting check."""
+    try:
+        return datetime.strptime(
+            str(value), "RDATE:%Y%m%dT%H%M%SZ"
+        ).replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError) as exc:
+        raise LCRLError("waiting check has an invalid platform RDATE") from exc
+
+
+def waiting_check_rdate_expired(
+    state: dict[str, Any], *, now: datetime | None = None
+) -> bool:
+    expected_at = parse_waiting_check_rdate(
+        state.get("automation", {}).get("waiting_check_expected_rdate", "none")
+    )
+    return expected_at <= (now or datetime.now(timezone.utc))
 
 
 def exact_rdate(value: str, *, delay_seconds: int = 1) -> str:
@@ -6881,6 +6900,9 @@ def _waiting_check_preconditions(state: dict[str, Any], token: str, automation_i
             or automation.get("waiting_check_token") != token
             or automation.get("waiting_check_automation_id", "none") != automation_id):
         return "waiting_check_expired"
+    if (automation.get("waiting_check_kind") == "local_continuation"
+            and automation.get("waiting_check_claimed_id", "none") != "none"):
+        return "waiting_check_expired"
     if active_action_lease(state):
         return "waiting_check_busy"
     if automation.get("waiting_check_claimed_id", "none") != "none":
@@ -8814,6 +8836,19 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
     controlled_browser_id = str(
         getattr(args, "controlled_browser_id", "") or ""
     ).strip()
+    controlled_url = str(getattr(args, "controlled_url", "") or "").strip()
+    expected_url = (
+        f"https://chatgpt.com/c/{confirmation.get('reviewer_thread_id')}"
+    )
+    identity_mismatch_observed = False
+    if controlled_exact_url_count == 1 and controlled_url:
+        # A single visible tab is not evidence that it is the bound Chat.
+        # When the browser reports the actual URL, a different conversation
+        # is zero exact matches and can only recover through one canonical
+        # foreground open.
+        if controlled_url != expected_url:
+            controlled_exact_url_count = 0
+            identity_mismatch_observed = True
     # A controlled-tab count is an occurrence-local browser observation.  A
     # restart invalidates the old controlled listing even when the durable
     # Chat binding is still valid.  Never let a cached count strand recovery
@@ -8907,6 +8942,7 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
                 if tab_plan.get("ok") is not True
                 else "preconditions_not_met"
             ),
+            "identity_mismatch_observed": identity_mismatch_observed,
             "lease_id": "none",
         }
     if active_action_lease(state) and runtime.get("action_lease_reason") != "turn_entry":
@@ -8945,7 +8981,11 @@ def authorize_browser_submission_reopen_command(args: argparse.Namespace) -> dic
         "controlled_listing_matches_current_browser": (
             controlled_listing_matches_current_browser
         ),
-        "reason_code": "none",
+        "reason_code": (
+            "reviewer_identity_mismatch_recovered"
+            if identity_mismatch_observed else "none"
+        ),
+        "identity_mismatch_observed": identity_mismatch_observed,
         "lease_id": lease_id,
         "account_slot_lease_id": account_slot_lease_id,
         "submission_fingerprint": review["submission_fingerprint"],
@@ -10020,7 +10060,7 @@ def candidate_freeze_recovery_plan(
             missing.append("release_report_tracked_count_mismatch")
         if not checks["tracked_count_matches_matrix"]:
             missing.append("evidence_matrix_tracked_count_mismatch")
-        archive = root / "dist" / "SuperLuna-0.2.0-alpha.103.zip"
+        archive = root / "dist" / "SuperLuna-0.2.0-alpha.104.zip"
         verify = subprocess.run(
             [sys.executable, "-B", "scripts/build_release.py", "verify", "--archive", str(archive)],
             cwd=root, capture_output=True, text=True,
@@ -10402,10 +10442,61 @@ def _prepare_full_source_fallback(
     return result
 
 
+def _repository_evidence_blocked(reason: str, next_action: str, revision: int) -> dict[str, Any]:
+    """Fail closed when a Git repository cannot prove reviewer-visible remote evidence."""
+    return {
+        "ok": True,
+        "action": "repository_evidence_blocked",
+        "reason_code": reason,
+        "repository_commit_review_allowed": False,
+        "attachment_fallback_allowed": False,
+        "browser_access_allowed": False,
+        "user_choice_required": False,
+        "system_next_action": next_action,
+        "revision": revision,
+    }
+
+
+def _repository_evidence_manifest(project_root: Path, head_commit: str) -> dict[str, Any]:
+    """Build reviewer-visible repository facts without leaking a local absolute path."""
+    current_branch = _git_output(project_root, "branch", "--show-current") or "detached"
+    try:
+        default_ref = _git_output(project_root, "symbolic-ref", "refs/remotes/origin/HEAD")
+        default_branch = default_ref.rsplit("/", 1)[-1]
+    except LCRLError:
+        default_branch = current_branch
+    baseline = f"{head_commit}^"
+    try:
+        baseline_sha = _git_output(project_root, "rev-parse", baseline)
+        changed_paths = [
+            item for item in _git_output(
+                project_root, "diff", "--name-only", baseline_sha, head_commit,
+            ).splitlines() if item
+        ]
+    except LCRLError:
+        baseline_sha = head_commit
+        changed_paths = []
+    candidates = (
+        "AGENTS.md", "README.md", "CODEX_PROJECT_STATE.md", "DECISION_REGISTER.json",
+        "docs/ROADMAP.md", "release/alpha_release_report.json",
+    )
+    must_read_files = [item for item in candidates if (project_root / item).is_file()]
+    return {
+        "default_branch": default_branch,
+        "current_branch": current_branch,
+        "baseline_sha": baseline_sha,
+        "comparison_range": f"{baseline_sha}..{head_commit}",
+        "changed_paths": changed_paths,
+        "must_read_files": must_read_files,
+    }
+
+
 def _repository_rollover_handoff(
     state: dict[str, Any], project_root: Path, value: str | None,
+    repository_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Load one deterministic handoff without treating paths as reviewer evidence."""
+    generated_handoff = value in (None, "", "none")
     if value not in (None, "", "none"):
         handoff_input = Path(str(value)).expanduser()
         if handoff_input.is_symlink():
@@ -10441,6 +10532,12 @@ def _repository_rollover_handoff(
                 "head": _git_output(project_root, "rev-parse", "HEAD"),
             },
         }
+    if repository_evidence is not None and generated_handoff:
+        payload["repository_evidence"] = repository_evidence
+        payload["review_instruction"] = (
+            "Inspect the real repository at the exact commit SHA and cite repository files; "
+            "do not treat this summary or any local path as proof."
+        )
     required_lists = (
         "completed_formal_rounds", "locked_decisions", "unresolved_issues",
         "runtime_evidence_index", "machine_evidence_index",
@@ -10482,7 +10579,11 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
     except LCRLError:
         return _prepare_full_source_fallback(args, "remote_missing", project_root)
     if configured_remote != canonical_url:
-        return _prepare_full_source_fallback(args, "remote_identity_mismatch", project_root)
+        return _repository_evidence_blocked(
+            "repository_remote_identity_mismatch",
+            "restore the configured target remote identity, then rebuild the repository evidence packet",
+            revision,
+        )
     tracked, head_commit, _dirty = _git_project_inventory(project_root)
     transient_paths = [
         *state.get("project_context", {}).get("package_paths", []),
@@ -10493,9 +10594,23 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
     if dirty:
         return _prepare_full_source_fallback(args, "dirty_worktree", project_root)
     if getattr(args, "remote_commit_reachable", False) is not True:
-        return _prepare_full_source_fallback(args, "commit_not_verified_reachable", project_root)
+        return _repository_evidence_blocked(
+            "repository_exact_commit_not_remote_verified",
+            "push the exact commit to the target remote and verify it there before review submission",
+            revision,
+        )
+    if not _anonymous_remote_contains_commit(canonical_url, head_commit):
+        return _repository_evidence_blocked(
+            "repository_exact_commit_not_remote_verified",
+            "push the exact commit to the target remote and verify that the remote advertises it before review submission",
+            revision,
+        )
     if getattr(args, "private_access_verified", False) is not True:
-        return _prepare_full_source_fallback(args, "private_repository_access_unverified", project_root)
+        return _repository_evidence_blocked(
+            "repository_remote_access_unverified",
+            "restore reviewer access to the target repository before review submission",
+            revision,
+        )
     tree_lines = _git_output(project_root, "ls-tree", "-r", "--full-tree", head_commit).splitlines()
     tree_manifest_hash = hashlib.sha256(("\n".join(tree_lines) + "\n").encode()).hexdigest()
     canaries = _repository_review_canaries(
@@ -10507,8 +10622,19 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
     repository_identity = persist_reviewer_repository_identity(
         state, project_root, canonical_url, head_commit, tree_manifest_hash,
     )
+    evidence_manifest = _repository_evidence_manifest(project_root, head_commit)
+    reviewer_evidence = {
+        "repository_url": canonical_url,
+        "exact_commit_sha": head_commit,
+        **evidence_manifest,
+        "locked_decisions": ["DECISION_REGISTER.json"] if "DECISION_REGISTER.json" in evidence_manifest["must_read_files"] else [],
+        "current_issue": str(state.get("review", {}).get("recovery_action", "none")),
+        "local_absolute_path_is_reviewer_visible": False,
+        "attachments_role": "non_git_runtime_artifacts_only",
+    }
     rollover_handoff = _repository_rollover_handoff(
         state, implementation_root, getattr(args, "rollover_handoff_file", None),
+        reviewer_evidence,
     )
     context = empty_project_context()
     context.update({
@@ -10520,6 +10646,13 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
         "repository_identity": repository_identity,
         "commit_sha": head_commit,
         "branch": str(args.branch or "none"),
+        "default_branch": evidence_manifest["default_branch"],
+        "current_branch": evidence_manifest["current_branch"],
+        "baseline_sha": evidence_manifest["baseline_sha"],
+        "comparison_range": evidence_manifest["comparison_range"],
+        "changed_paths": evidence_manifest["changed_paths"],
+        "must_read_files": evidence_manifest["must_read_files"],
+        "reviewer_evidence": reviewer_evidence,
         "tree_manifest_hash": tree_manifest_hash,
         "canaries": canaries,
         "rollover_handoff": rollover_handoff,
@@ -10547,6 +10680,13 @@ def prepare_repository_commit_review_command(args: argparse.Namespace) -> dict[s
         "repository_commit_review_allowed": False,
         "repository_url": canonical_url, "repository_identity": repository_identity,
         "head_commit": head_commit, "branch": context["branch"],
+        "default_branch": context["default_branch"],
+        "current_branch": context["current_branch"],
+        "baseline_sha": context["baseline_sha"],
+        "comparison_range": context["comparison_range"],
+        "changed_paths": context["changed_paths"],
+        "must_read_files": context["must_read_files"],
+        "reviewer_evidence": reviewer_evidence,
         "tree_manifest_hash": tree_manifest_hash, "canaries": canaries,
         "rollover_handoff_sha256": rollover_handoff["sha256"],
         "attachment_upload_required": False,
@@ -11028,12 +11168,22 @@ def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
 
     if lookup_result not in {"found", "not_found"}:
         raise LCRLError("stale wait recovery requires an exact platform lookup result")
-    if review.get("status") not in MONITOR_STATUSES:
-        raise LCRLError("stale wait recovery requires an active waiting state")
     if automation.get("waiting_check_active") is not True:
         raise LCRLError("stale wait recovery requires an active local wait")
-    if automation.get("waiting_check_kind") != "review_reply":
-        raise LCRLError("stale wait recovery only applies to a reviewer reply wait")
+    waiting_kind = automation.get("waiting_check_kind")
+    review_reply_recovery = bool(
+        review.get("status") in MONITOR_STATUSES
+        and waiting_kind == "review_reply"
+    )
+    local_continuation_recovery = bool(
+        review.get("status") == "local_work"
+        and review.get("goal_mode") == "continuous"
+        and waiting_kind == "local_continuation"
+    )
+    if not (review_reply_recovery or local_continuation_recovery):
+        raise LCRLError(
+            "stale wait recovery requires a reviewer reply wait or local continuation"
+        )
     if automation_id in {"", "none"}:
         raise LCRLError("stale wait recovery requires the exact platform task identity")
     if automation.get("waiting_check_automation_id") != automation_id:
@@ -11042,15 +11192,23 @@ def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("stale wait recovery requires the exact implementation task identity")
     if implementation_thread_id != expected_implementation_thread_id:
         raise LCRLError("stale wait recovery belongs to a different implementation task")
-    if not waiting_claim_stale(state):
-        raise LCRLError("stale wait recovery requires an expired waiting read claim")
+    if review_reply_recovery:
+        if not waiting_claim_stale(state):
+            raise LCRLError("stale wait recovery requires an expired waiting read claim")
+    else:
+        if active_action_lease(state):
+            raise LCRLError("local continuation recovery requires no active action lease")
+        if automation.get("waiting_check_claimed_id", "none") != "none":
+            raise LCRLError("local continuation recovery requires an unclaimed occurrence")
+        if not waiting_check_rdate_expired(state):
+            raise LCRLError("local continuation recovery requires an expired platform RDATE")
 
-    rollover_required = bool(
+    rollover_required = bool(review_reply_recovery and (
         reviewer_chat_round_budget_exhausted(state)
         or state["reviewer_chat"].get("status") in {
             "rollover_pending", "rollover_blocked",
         }
-    )
+    ))
     if rollover_required:
         if state["reviewer_chat"].get("status") == "active":
             mark_reviewer_chat_rollover_required(state, "round_budget")
@@ -11088,7 +11246,11 @@ def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
     if lookup_result == "not_found":
         automation["waiting_check_automation_id"] = "none"
     state.setdefault("review_history", []).append({
-        "event": "stale_platform_wait_recovered",
+        "event": (
+            "expired_local_continuation_recovered"
+            if local_continuation_recovery
+            else "stale_platform_wait_recovered"
+        ),
         "automation_id": automation_id,
         "platform_lookup_result": lookup_result,
         "replacement_required": lookup_result == "not_found",
@@ -11100,9 +11262,17 @@ def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
 
     result = add_user_status_exit({
         "ok": True,
-        "action": "stale_wait_recovered",
+        "action": (
+            "local_continuation_recovered"
+            if local_continuation_recovery
+            else "stale_wait_recovered"
+        ),
         "status": state["review"]["status"],
-        "reason_code": "stale_platform_wait_recovered",
+        "reason_code": (
+            "expired_local_continuation_recovered"
+            if local_continuation_recovery
+            else "stale_platform_wait_recovered"
+        ),
         "platform_lookup_result": lookup_result,
         "execution_allowed": False,
         "project_read_allowed": False,
@@ -11145,7 +11315,11 @@ def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
     result.update({
         "user_status": "正在开发",
         "user_message": (
-            "旧等待任务仍在，正在更新同一个单次检查。"
+            "旧本地续接任务仍在，正在更新同一个单次检查。"
+            if local_continuation_recovery and lookup_result == "found"
+            else "旧本地续接任务已丢失，正在重建一个单次检查。"
+            if local_continuation_recovery
+            else "旧等待任务仍在，正在更新同一个单次检查。"
             if lookup_result == "found"
             else "旧等待任务已丢失，正在重建一个单次检查。"
         ),
@@ -11153,7 +11327,11 @@ def recover_stale_wait_command(args: argparse.Namespace) -> dict[str, Any]:
         "user_choice_required": False,
         "choice_output_allowed": False,
         "system_next_action": (
-            "update the same platform wait and continue waiting"
+            "update the same platform local continuation and resume local work once"
+            if local_continuation_recovery and lookup_result == "found"
+            else "create and bind one replacement local continuation"
+            if local_continuation_recovery
+            else "update the same platform wait and continue waiting"
             if lookup_result == "found"
             else "create and bind one replacement platform wait"
         ),
@@ -13095,6 +13273,91 @@ def guard_action(args: argparse.Namespace) -> dict[str, Any]:
         raise LCRLError("guard requires the exact implementation task identity")
     elif implementation_thread_id != expected_implementation_thread_id:
         raise LCRLError("guard belongs to a different implementation task")
+    if (
+        state["review"].get("status") == "local_work"
+        and state["review"].get("goal_mode") == "continuous"
+        and state["reviewer_chat"].get("status", "active") == "active"
+        and state["automation"].get("waiting_check_active") is True
+        and state["automation"].get("waiting_check_kind") == "local_continuation"
+        and state["automation"].get("waiting_check_token", "none") != "none"
+        and state["automation"].get("waiting_check_expected_rdate", "none") != "none"
+    ):
+        if waiting_check_rdate_expired(state):
+            automation_id = str(
+                state["automation"].get("waiting_check_automation_id", "none")
+            )
+            if automation_id == "none":
+                raise LCRLError(
+                    "expired local continuation requires the exact platform task identity"
+                )
+            result = add_user_status_exit({
+                "ok": True,
+                "action": "local_continuation_platform_lookup_required",
+                "status": "local_work",
+                "reason_code": "expired_local_continuation_requires_platform_lookup",
+                "execution_allowed": False,
+                "project_read_allowed": False,
+                "project_write_allowed": False,
+                "browser_access_allowed": False,
+                "chat_read_allowed": False,
+                "chat_send_allowed": False,
+                "platform_wait_lookup_allowed": True,
+                "platform_wait_lookup_required": True,
+                "platform_wait_update_allowed": True,
+                "platform_wait_create_allowed": True,
+                "waiting_check_only": True,
+                "lease_id": "none",
+                "revision": revision,
+                "platform_wait_lookup": {
+                    "id": automation_id,
+                    "mode": "view",
+                },
+                "mandatory_next_tool": "codex_app__automation_update",
+                "mandatory_next_tool_mode": "view",
+                "mandatory_next_action_sequence": [
+                    "view_exact_platform_wait",
+                    "run_recover_stale_wait_with_found_or_not_found",
+                    "update_or_create_exactly_one_platform_wait",
+                ],
+                "continuation_required": True,
+                "turn_completion_allowed": False,
+            })
+            result.update({
+                "user_status": "正在开发",
+                "user_message": "本地续接检查已过期，正在核对并自动恢复，无需操作。",
+                "user_next_choice": "无需操作。",
+                "user_choice_required": False,
+                "choice_output_allowed": False,
+                "system_next_action": (
+                    "look up the exact local continuation wait, then reuse it or rebuild one replacement"
+                ),
+            })
+            return result
+        return add_user_status_exit({
+            "ok": True,
+            "action": "local_continuation_already_bound",
+            "status": "local_work",
+            "execution_allowed": False,
+            "project_read_allowed": False,
+            "project_write_allowed": False,
+            "browser_access_allowed": False,
+            "chat_read_allowed": False,
+            "chat_send_allowed": False,
+            "lease_id": "none",
+            "waiting_check_kind": "local_continuation",
+            "waiting_check_token": state["automation"].get(
+                "waiting_check_token", "none"
+            ),
+            "waiting_check_automation_id": state["automation"].get(
+                "waiting_check_automation_id", "none"
+            ),
+            "continuation_required": True,
+            "future_action_valid": True,
+            "system_next_action": "wait_for_bound_local_continuation_occurrence",
+            "turn_completion_allowed": False,
+            "user_choice_required": False,
+            "revision": revision,
+        })
     clear_action_lease(state)
     lease_id = claim_action_lease(state, args.reason, args.minutes)
     freeze_plan = candidate_freeze_recovery_plan(path, state)
@@ -15417,6 +15680,10 @@ def build_parser() -> argparse.ArgumentParser:
     authorize_submission_reopen.add_argument(
         "--controlled-browser-id",
         help="本次 controlled tabs.list() 观测所属的当前 browser identity；重启后缺失则不可信",
+    )
+    authorize_submission_reopen.add_argument(
+        "--controlled-url",
+        help="本次 controlled tabs.list() 中唯一可见标签的实际 URL；提供后必须匹配绑定 Chat",
     )
     authorize_submission_reopen.add_argument("--account-slot-lease-id", required=True)
     authorize_submission_reopen.add_argument("--account-browser-registry")

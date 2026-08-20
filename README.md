@@ -24,10 +24,13 @@ cycle and therefore does not satisfy the Public Beta gate.
 
 ## Current source status
 
-The current source candidate is `0.2.0-alpha.103`. It is an early
-technical-testing Alpha, not a Public Beta. Controller 160 / Skill revision
-`2026-08-19.117` reconciles a verified frozen candidate before browser mode
-selection and binds controlled-tab counts to the current browser identity;
+The current source candidate is `0.2.0-alpha.104`. It is an early
+technical-testing Alpha, not a Public Beta. Controller 161 / Skill revision
+`2026-08-20.118` safely recovers an expired one-shot local continuation: it
+updates the same platform task when it still exists or opens exactly one
+replacement binding when it is gone, without Chat or project access. A still
+valid continuation remains untouched. Controller 160 reconciles a verified
+frozen candidate before browser mode selection and binds controlled-tab counts to the current browser identity;
 after a restart, a stale single count becomes one exact canonical reopen rather
 than a false tab reuse. Ambiguity remains fail-closed. Controller 158 / Skill
 revision `2026-08-19.115` separates coordinator recovery inspection from implementation
