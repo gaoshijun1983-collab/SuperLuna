@@ -10,7 +10,7 @@
   "release_validation_pending": true,
   "dist_archive": {
     "filename": "SuperLuna-0.2.0-alpha.104.zip",
-    "tracked_source_files": 127,
+    "tracked_source_files": 128,
     "tracked_source_files_pending_final_validation": false,
     "embedded_manifest_verified": true,
     "deterministic_rebuild_verified": true
